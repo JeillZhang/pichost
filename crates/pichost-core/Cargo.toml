@@ -1,0 +1,21 @@
+[package]
+name = "pichost-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lib]
+name = "pichost_core"
+path = "src/lib.rs"

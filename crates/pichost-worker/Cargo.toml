@@ -1,0 +1,12 @@
+[package]
+name = "pichost-worker"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pichost-core = { path = "../pichost-core" }
+tokio.workspace = true
+
+[[bin]]
+name = "pichost-worker"
+path = "src/main.rs"
