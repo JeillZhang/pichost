@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::app::AppState;
 use crate::middleware::auth::AuthUser;
+use crate::services::html_escape;
 
 #[derive(Debug, Serialize)]
 pub struct UploadResult {
@@ -161,7 +162,7 @@ pub async fn process_upload(
     let html = format!(
         "<img src=\"{}\" alt=\"{}\" />",
         url,
-        original_name.replace('"', "")
+        html_escape(&original_name)
     );
     let bbcode = format!("[img]{}[/img]", url);
     let file_size = bytes.len() as i64;

@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::app::AppState;
 use crate::middleware::auth::AuthUser;
+use crate::services::html_escape;
 use crate::services::upload::{self, UploadResult};
 
 /// POST /api/v1/images — upload an image (protected)
@@ -63,7 +64,7 @@ pub async fn get_image(
         html: format!(
             "<img src=\"{}\" alt=\"{}\" />",
             url,
-            original_name.replace('"', "")
+            html_escape(&original_name)
         ),
         bbcode: format!("[img]{}[/img]", url),
         sha256,
