@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { useAuthStore } from './stores/auth'
 import Login from './pages/Login'
+import Dashboard from './pages/Dashboard'
 import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
@@ -27,9 +28,7 @@ export default function App() {
           path="/dashboard"
           element={
             <ProtectedRoute>
-              <div className="p-8 text-center text-gray-400">
-                Dashboard — coming soon
-              </div>
+              <Dashboard />
             </ProtectedRoute>
           }
         />
