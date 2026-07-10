@@ -2,3 +2,4 @@
 .env
 storage-local/
 .omo/run-continuation
+.superpowers/
