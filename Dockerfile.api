@@ -1,0 +1,28 @@
+# =============================================================================
+# Stage 1 — Build the pichost-api binary
+# =============================================================================
+FROM rust:1.96-slim AS builder
+
+WORKDIR /app
+
+# Copy dependency manifests first for maximum layer caching
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates/ ./crates/
+COPY migrations/ ./migrations/
+
+# Build the API binary only
+RUN cargo build --release -p pichost-api
+
+# =============================================================================
+# Stage 2 — Minimal runtime image
+# =============================================================================
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/release/pichost-api /usr/local/bin/pichost-api
+
+EXPOSE 3000
+
+CMD ["pichost-api"]

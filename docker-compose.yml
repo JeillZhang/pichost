@@ -1,0 +1,71 @@
+# =============================================================================
+# PicHost — Docker Compose
+#
+# Start the full stack:
+#   docker compose up --build
+#
+# Stop and remove:
+#   docker compose down -v
+# =============================================================================
+
+services:
+  # -------------------------------------------------------------------------
+  # PostgreSQL 18 — primary database
+  # -------------------------------------------------------------------------
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: pichost
+      POSTGRES_PASSWORD: pichost
+      POSTGRES_DB: pichost
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pichost -d pichost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------------------
+  # Redis 8 — caching / rate-limiting
+  # -------------------------------------------------------------------------
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  # -------------------------------------------------------------------------
+  # PicHost API — Rust / Axum web service
+  # -------------------------------------------------------------------------
+  api:
+    build:
+      dockerfile: Dockerfile.api
+      context: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./storage-local:/app/storage-local
+    environment:
+      # sqlx CLI / compile-time helper (not consumed by figment)
+      DATABASE_URL: postgres://pichost:pichost@postgres/pichost
+
+      # Application config (figment prefix PICHOST_)
+      PICHOST_DATABASE_URL: postgres://pichost:pichost@postgres/pichost
+      PICHOST_REDIS_URL: redis://redis:6379
+      PICHOST_AUTH_JWT_SECRET: dev-secret-32-bytes-long-for-pichost-!!!
+      PICHOST_STORAGE_LOCAL_BASE_PATH: /app/storage-local
+      PICHOST_SERVER_PUBLIC_URL: http://localhost:3000
+
+volumes:
+  pgdata:
