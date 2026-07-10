@@ -7,7 +7,7 @@ use axum::{
     response::Response,
     Json,
 };
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -57,7 +57,9 @@ pub async fn require_auth(
 
     // Decode JWT
     let key = DecodingKey::from_secret(state.config.auth.jwt_secret.as_bytes());
-    let token_data = decode::<super::super::routes::auth::TokenClaims>(token, &key, &Validation::default())
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = true;
+    let token_data = decode::<super::super::routes::auth::TokenClaims>(token, &key, &validation)
         .map_err(|e| {
             tracing::warn!("JWT decode failed: {e}");
             (
@@ -68,13 +70,13 @@ pub async fn require_auth(
 
     let claims = token_data.claims;
 
-    // Check Redis blacklist
+    // Check Redis blacklist (fail closed if Redis is down)
     let blacklist_key = format!("bl:{}", claims.sub);
     let is_blacklisted = state
         .cache
         .exists(&blacklist_key)
         .await
-        .unwrap_or(false);
+        .unwrap_or(true);
 
     if is_blacklisted {
         return Err((

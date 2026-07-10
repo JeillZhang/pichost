@@ -12,6 +12,7 @@ use axum::{
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
+use tracing;
 use uuid::Uuid;
 
 use crate::app::AppState;
@@ -108,7 +109,8 @@ pub async fn register(
     let hash = Argon2::default()
         .hash_password(payload.password.as_bytes(), &salt)
         .map_err(|e| {
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, &format!("hashing error: {e}"))
+            tracing::warn!("Password hashing failed: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         })?
         .to_string();
 
@@ -132,11 +134,13 @@ pub async fn register(
                 }
             }
         }
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, &format!("database error: {e}"))
+        tracing::warn!("User registration db error: {e}");
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
     })?;
 
     let (access_token, refresh_token) = generate_tokens(user_id, false, &state.config).map_err(|e| {
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, &format!("token generation error: {e}"))
+        tracing::warn!("JWT generation failed: {e}");
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
     })?;
 
     let response = AuthResponse {
@@ -164,14 +168,18 @@ pub async fn login(
     .bind(&payload.username)
     .fetch_optional(&state.pool)
     .await
-    .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &format!("database error: {e}")))?
+    .map_err(|e| {
+        tracing::warn!("Login db query failed: {e}");
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+    })?
     .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "invalid username or password"))?;
 
     let (user_id, username, email, password_hash, is_admin) = row;
 
     // Verify password
     let parsed_hash = PasswordHash::new(&password_hash).map_err(|e| {
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, &format!("invalid hash format: {e}"))
+        tracing::warn!("Stored password hash parse failed: {e}");
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
     })?;
 
     Argon2::default()
@@ -179,7 +187,8 @@ pub async fn login(
         .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid username or password"))?;
 
     let (access_token, refresh_token) = generate_tokens(user_id, is_admin, &state.config).map_err(|e| {
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, &format!("token generation error: {e}"))
+        tracing::warn!("JWT generation failed: {e}");
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
     })?;
 
     let response = AuthResponse {
