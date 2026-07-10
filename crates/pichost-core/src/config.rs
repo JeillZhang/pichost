@@ -1,0 +1,82 @@
+use figment::{Figment, providers::{Env, Format, Serialized, Toml}};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AppConfig {
+    pub server: ServerConfig,
+    pub auth: AuthConfig,
+    pub storage: StorageConfig,
+    pub database: DatabaseConfig,
+    pub redis: RedisConfig,
+    pub upload: UploadConfig,
+    pub logging: LoggingConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ServerConfig {
+    pub host: String,
+    pub port: u16,
+    pub public_url: String,
+    pub cors_origins: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AuthConfig {
+    pub jwt_secret: String,
+    pub access_token_ttl: u64,
+    pub refresh_token_ttl: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct StorageConfig {
+    pub default_backend: String,
+    pub local_base_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DatabaseConfig {
+    pub url: String,
+    pub max_connections: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RedisConfig {
+    pub url: String,
+    pub pool_size: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UploadConfig {
+    pub max_file_size_admin: u64,
+    pub max_file_size_user: u64,
+    pub allowed_mimes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LoggingConfig {
+    pub level: String,
+    pub format: String,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            server: ServerConfig { host: "0.0.0.0".into(), port: 3000, public_url: "http://localhost:3000".into(), cors_origins: vec!["http://localhost:5173".into()] },
+            auth: AuthConfig { jwt_secret: String::new(), access_token_ttl: 900, refresh_token_ttl: 2_592_000 },
+            storage: StorageConfig { default_backend: "local".into(), local_base_path: PathBuf::from("./storage-local") },
+            database: DatabaseConfig { url: "postgres://pichost:pichost@localhost:5432/pichost".into(), max_connections: 10 },
+            redis: RedisConfig { url: "redis://localhost:6379".into(), pool_size: 20 },
+            upload: UploadConfig { max_file_size_admin: 52_428_800, max_file_size_user: 10_485_760, allowed_mimes: vec!["image/png".into(), "image/jpeg".into(), "image/gif".into(), "image/webp".into(), "image/svg+xml".into(), "image/avif".into(), "image/bmp".into()] },
+            logging: LoggingConfig { level: "info".into(), format: "json".into() },
+        }
+    }
+}
+
+pub fn load_config() -> Result<AppConfig, figment::Error> {
+    Figment::new()
+        .merge(Serialized::defaults(AppConfig::default()))
+        .merge(Toml::file("config.toml").nested())
+        .merge(Env::prefixed("PICHOST_").global())
+        .extract()
+}
