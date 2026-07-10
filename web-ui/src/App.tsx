@@ -4,6 +4,8 @@ import { Toaster } from 'sonner'
 import { useAuthStore } from './stores/auth'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import Gallery from './pages/Gallery'
+import ImageDetail from './pages/ImageDetail'
 import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
@@ -33,12 +35,18 @@ export default function App() {
           }
         />
         <Route
+          path="/gallery"
+          element={
+            <ProtectedRoute>
+              <Gallery />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/images/:id"
           element={
             <ProtectedRoute>
-              <div className="p-8 text-center text-gray-400">
-                Image Detail — coming soon
-              </div>
+              <ImageDetail />
             </ProtectedRoute>
           }
         />
