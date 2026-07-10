@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::{Router, routing::post};
+use axum::{extract::DefaultBodyLimit, middleware, routing::{get, post}, Router};
 use pichost_api::{app::AppState, cache, db, routes};
 use pichost_core::config::load_config;
 use tower_http::cors::CorsLayer;
@@ -22,6 +22,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config: Arc::new(config),
     });
 
+    let protected = middleware::from_fn(pichost_api::middleware::auth::require_auth);
+
+    let image_routes = Router::new()
+        .route("/", post(routes::images::upload_handler))
+        .route("/{id}", get(routes::images::get_image))
+        .route_layer(protected);
+
+    let public_routes = Router::new()
+        .route("/{public_key}", get(routes::images::public_get));
+
     let app = Router::new()
         .nest(
             "/api/v1/auth",
@@ -29,7 +39,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .route("/register", post(routes::auth::register))
                 .route("/login", post(routes::auth::login)),
         )
+        .nest("/api/v1/images", image_routes)
+        .nest("/u", public_routes)
         .layer(CorsLayer::permissive())
+        .layer(DefaultBodyLimit::max(52_428_800))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
