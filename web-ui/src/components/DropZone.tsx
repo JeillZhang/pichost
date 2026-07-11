@@ -1,6 +1,32 @@
-import { useCallback } from 'react'
-import { useDropzone } from 'react-dropzone'
+import { useCallback, type ChangeEvent } from 'react'
+import { useDropzone, type DropEvent } from 'react-dropzone'
 import { Upload, Loader2 } from 'lucide-react'
+
+/** Custom getFilesFromEvent to bypass file-selector's broken getAsFileSystemHandle()
+ *  path in secure contexts (localhost). getAsFileSystemHandle() returns null for
+ *  OS-dragged files, causing silent failures.
+ *  Also fixes React 19 SyntheticEvent wrapping: use dataTransfer property directly
+ *  instead of instanceof DragEvent (React wraps native events). */
+const getFilesFromEvent = async (
+  event: DropEvent,
+): Promise<(DataTransferItem | File)[]> => {
+  // React 19 wraps native events in SyntheticEvent, so instanceof DragEvent fails.
+  // Check dataTransfer property instead.
+  const dt = ('dataTransfer' in event ? event.dataTransfer : null) as DataTransfer | null
+  if (dt?.files?.length) {
+    const files: File[] = []
+    for (let i = 0; i < dt.files.length; i++) files.push(dt.files[i])
+    return files
+  }
+  // Handle input change events
+  const input = (event as ChangeEvent<HTMLElement>).target as HTMLInputElement | null
+  if (input?.files?.length) {
+    const files: File[] = []
+    for (let i = 0; i < input.files!.length; i++) files.push(input.files![i])
+    return files
+  }
+  return []
+}
 
 interface DropZoneProps {
   onUpload: (file: File) => void
@@ -17,6 +43,7 @@ export default function DropZone({ onUpload, isUploading }: DropZoneProps) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    getFilesFromEvent,
     accept: {
       'image/png': ['.png'],
       'image/jpeg': ['.jpg', '.jpeg'],
