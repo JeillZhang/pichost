@@ -13,7 +13,7 @@ services:
   # PostgreSQL 18 — primary database
   # -------------------------------------------------------------------------
   postgres:
-    image: postgres:18-alpine
+    image: bitnami/postgresql:latest
     restart: unless-stopped
     ports:
       - "5432:5432"
@@ -33,7 +33,7 @@ services:
   # Redis 8 — caching / rate-limiting
   # -------------------------------------------------------------------------
   redis:
-    image: redis:8-alpine
+    image: redislabs/redis:8.0.20-44.23
     restart: unless-stopped
     ports:
       - "6379:6379"
