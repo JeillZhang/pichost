@@ -25,6 +25,50 @@ pub async fn upload_handler(
     Ok((StatusCode::CREATED, Json(result)))
 }
 
+/// GET /api/v1/images — list user's images (protected)
+pub async fn list_images(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+) -> Result<Json<Vec<UploadResult>>, (StatusCode, Json<serde_json::Value>)> {
+    let rows = sqlx::query_as::<_, (Uuid, String, String, String, i64, String, String)>(
+        r#"SELECT id, public_key, original_name, url, file_size, sha256, mime_type
+           FROM images WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50"#,
+    )
+    .bind(user.id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("List images query failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "internal server error"})),
+        )
+    })?;
+
+    let images = rows
+        .into_iter()
+        .map(|(image_id, public_key, original_name, url, file_size, sha256, _mime_type)| {
+            UploadResult {
+                id: image_id,
+                public_key,
+                original_name: original_name.clone(),
+                url: url.clone(),
+                markdown: format!("![{}]({})", original_name, url),
+                html: format!(
+                    "<img src=\"{}\" alt=\"{}\" />",
+                    url,
+                    html_escape(&original_name)
+                ),
+                bbcode: format!("[img]{}[/img]", url),
+                sha256,
+                file_size,
+            }
+        })
+        .collect();
+
+    Ok(Json(images))
+}
+
 /// GET /api/v1/images/{id} — get image metadata (protected)
 pub async fn get_image(
     State(state): State<Arc<AppState>>,

@@ -99,10 +99,43 @@ pub async fn process_upload(
     })?;
 
     if exists {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({"error": "duplicate image"})),
-        ));
+        let row = sqlx::query_as::<_, (Uuid, String, String, String, String, i64, String, String)>(
+            r#"SELECT id, public_key, original_name, storage_key, mime_type, file_size, url, sha256
+               FROM images WHERE user_id = $1 AND sha256 = $2"#,
+        )
+        .bind(user.id)
+        .bind(&sha256)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Failed to fetch existing image: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal server error"})),
+            )
+        })?;
+
+        let (image_id, public_key, original_name, _storage_key, _mime_type, file_size, url, sha256) = row;
+
+        let markdown = format!("![{}]({})", original_name, url);
+        let html = format!(
+            "<img src=\"{}\" alt=\"{}\" />",
+            url,
+            html_escape(&original_name)
+        );
+        let bbcode = format!("[img]{}[/img]", url);
+
+        return Ok(UploadResult {
+            id: image_id,
+            public_key,
+            original_name,
+            url,
+            markdown,
+            html,
+            bbcode,
+            sha256,
+            file_size,
+        });
     }
 
     // ---- Generate unique public key ----

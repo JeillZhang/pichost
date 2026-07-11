@@ -22,10 +22,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config: Arc::new(config),
     });
 
-    let protected = middleware::from_fn(pichost_api::middleware::auth::require_auth);
+    let protected = middleware::from_fn_with_state(state.clone(), pichost_api::middleware::auth::require_auth);
 
     let image_routes = Router::new()
-        .route("/", post(routes::images::upload_handler))
+        .route("/", get(routes::images::list_images).post(routes::images::upload_handler))
         .route("/{id}", get(routes::images::get_image))
         .route_layer(protected);
 
