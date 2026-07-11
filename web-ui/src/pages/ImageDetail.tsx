@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
+import NavBar from '../components/NavBar'
 import { getImage } from '../api/client'
 import LinkCard from '../components/LinkCard'
 
@@ -31,7 +32,9 @@ export default function ImageDetail() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-4">
+    <>
+      <NavBar />
+      <div className="mx-auto max-w-2xl p-4">
       {/* Back button */}
       <button
         onClick={() => navigate(-1)}
@@ -75,6 +78,7 @@ export default function ImageDetail() {
         <LinkCard label="HTML" value={img.html} />
         <LinkCard label="BBCode" value={img.bbcode} />
       </div>
-    </div>
+      </div>
+    </>
   )
 }

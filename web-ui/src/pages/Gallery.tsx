@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import NavBar from '../components/NavBar'
 import { listImages } from '../api/client'
 
 export default function Gallery() {
@@ -26,7 +27,9 @@ export default function Gallery() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl p-4">
+    <>
+      <NavBar />
+      <div className="mx-auto max-w-5xl p-4">
       <h1 className="mb-4 text-lg font-bold text-white">Gallery</h1>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
         {images.map((img) => (
@@ -49,6 +52,7 @@ export default function Gallery() {
           </button>
         ))}
       </div>
-    </div>
+      </div>
+    </>
   )
 }

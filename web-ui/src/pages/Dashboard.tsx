@@ -1,17 +1,15 @@
 import { useState } from 'react'
-import { LogOut } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import DropZone from '../components/DropZone'
 import LinkCard from '../components/LinkCard'
+import NavBar from '../components/NavBar'
 import { uploadImage, listImages, type UploadResult } from '../api/client'
-import { useAuthStore } from '../stores/auth'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 export default function Dashboard() {
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
   const [isUploading, setIsUploading] = useState(false)
-  const { user, logout } = useAuthStore()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -36,31 +34,11 @@ export default function Dashboard() {
     }
   }
 
-  function handleLogout() {
-    logout()
-    navigate('/login', { replace: true })
-  }
-
   return (
-    <div className="mx-auto max-w-2xl p-4">
-      {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-white">PicHost</h1>
-          <p className="text-sm text-gray-500">
-            Logged in as <span className="text-gray-300">{user?.username}</span>
-          </p>
-        </div>
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-200"
-        >
-          <LogOut className="h-4 w-4" />
-          Logout
-        </button>
-      </div>
-
-      {/* DropZone */}
+    <>
+      <NavBar />
+      <div className="mx-auto max-w-2xl p-4">
+        {/* DropZone */}
       <DropZone onUpload={handleUpload} isUploading={isUploading} />
 
       {/* Upload result links */}
@@ -123,5 +101,6 @@ export default function Dashboard() {
         </div>
       )}
     </div>
+    </>
   )
 }
