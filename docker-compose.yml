@@ -33,7 +33,7 @@ services:
   # Redis 8 — caching / rate-limiting
   # -------------------------------------------------------------------------
   redis:
-    image: redislabs/redis:8.0.20-44.23
+    image: redis:8-alpine
     restart: unless-stopped
     ports:
       - "6379:6379"
