@@ -13,5 +13,5 @@ pub async fn create_pool(url: &str, max_connections: u32) -> Result<DbPool, sqlx
 }
 
 pub async fn run_migrations(pool: &DbPool) -> Result<(), sqlx::migrate::MigrateError> {
-    sqlx::migrate!("../../migrations").run(pool).await
+    sqlx::migrate!("../migrations").run(pool).await
 }

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/pichost-core", "crates/pichost-api", "crates/pichost-worker"]
+members = ["pichost-core", "pichost-api", "pichost-worker"]
 resolver = "2"
 
 [workspace.package]

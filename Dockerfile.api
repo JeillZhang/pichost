@@ -7,7 +7,9 @@ WORKDIR /app
 
 # Copy dependency manifests first for maximum layer caching
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
-COPY crates/ ./crates/
+COPY pichost-core/ ./pichost-core/
+COPY pichost-api/ ./pichost-api/
+COPY pichost-worker/ ./pichost-worker/
 COPY migrations/ ./migrations/
 
 # Build the API binary only
