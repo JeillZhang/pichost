@@ -14,10 +14,10 @@ export interface AuthResponse {
 }
 
 const api = ky.create({
-  prefixUrl: '/api/v1',
+  prefix: '/api/v1',
   hooks: {
     beforeRequest: [
-      (request) => {
+      ({ request }) => {
         const token = localStorage.getItem('access_token')
         if (token) {
           request.headers.set('Authorization', `Bearer ${token}`)
@@ -25,7 +25,7 @@ const api = ky.create({
       },
     ],
     afterResponse: [
-      async (_request, _options, response) => {
+      ({ response }) => {
         if (response.status === 401) {
           localStorage.removeItem('access_token')
           localStorage.removeItem('refresh_token')
