@@ -88,7 +88,7 @@ PicHost 是一个面向**个人/团队自用**的图床系统，支持**多用�
 pichost-rust/
 ├── Cargo.toml                        # workspace 根
 ├── Cargo.lock
-├── crates/
+├── 
 │   ├── pichost-core/                 # 共享核心 (lib, 所有 crate 共用)
 │   │   ├── src/
 │   │   │   ├── models/               # User, Image, UploadTask 领域模型
@@ -330,7 +330,7 @@ Response 201:
 ### 5.1 StorageBackend Trait
 
 ```rust
-// crates/pichost-core/src/storage/mod.rs
+// pichost-core/src/storage/mod.rs
 
 #[async_trait::async_trait]
 pub trait StorageBackend: Send + Sync {
@@ -370,7 +370,7 @@ pub enum StorageError {
 
 ### 5.2 两个实现
 
-**LocalStorage** (`crates/pichost-core/src/storage/local.rs`):
+**LocalStorage** (`pichost-core/src/storage/local.rs`):
 - 写入: `tokio::fs::write(base_path.join(key), data)`
 - 读取: `tokio::fs::read(base_path.join(key))`
 - 删除: `tokio::fs::remove_file(base_path.join(key))`
@@ -379,7 +379,7 @@ pub enum StorageError {
 - backend_name: `"local"`
 - 配置: `base_path` (存储目录), `base_url` (外部访问 URL)
 
-**RustfsStorage** (`crates/pichost-core/src/storage/rustfs.rs`):
+**RustfsStorage** (`pichost-core/src/storage/rustfs.rs`):
 - 通过 `aws-sdk-s3` crate 连接 RustFS (S3 兼容协议)
 - put/get/delete 使用 S3 PutObject/GetObject/DeleteObject API
 - exists 用 HeadObject 检查
@@ -390,7 +390,7 @@ pub enum StorageError {
 ### 5.3 StorageRouter
 
 ```rust
-// crates/pichost-core/src/storage/router.rs
+// pichost-core/src/storage/router.rs
 
 pub struct StorageRouter {
     backends: HashMap<String, Arc<dyn StorageBackend>>,
@@ -434,7 +434,7 @@ Magic bytes 校验: 使用 infer crate 读取前 512 字节判断真实类型,
 Worker 是 `pichost-worker` crate 编译出的独立二进制进程，通过 Redis 队列消费处理任务。
 
 ```
-crates/pichost-worker/src/
+pichost-worker/src/
 ├── main.rs          # 入口: 解析配置 → 初始化 pool → 启动 BRPOP 循环
 ├── queue/mod.rs     # Redis队列封装:
 │                    #   - enqueue(task): LPUSH tasks:pending
@@ -931,7 +931,7 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 ### 10.1 错误类型层次
 
 ```rust
-// crates/pichost-core/src/error.rs
+// pichost-core/src/error.rs
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -1073,7 +1073,7 @@ tower-http = { version = "0.6", features = ["trace"] }
 ### 11.2 完整配置结构
 
 ```rust
-// crates/pichost-core/src/config.rs
+// pichost-core/src/config.rs
 
 pub struct AppConfig {
     pub server: ServerConfig,
@@ -1262,7 +1262,7 @@ volumes:
 FROM rust:1.96-slim AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
-COPY crates/ crates/
+COPY  
 RUN cargo build --release -p pichost-api
 
 FROM debian:bookworm-slim
@@ -1275,7 +1275,7 @@ CMD ["pichost-api"]
 FROM rust:1.96-slim AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
-COPY crates/ crates/
+COPY  
 RUN cargo build --release -p pichost-worker
 
 FROM debian:bookworm-slim
@@ -1343,10 +1343,10 @@ server {
   docker compose up postgres redis rustfs -d
 
 后端开发:
-  cd crates/pichost-api && cargo watch -x run
+  cd pichost-api && cargo watch -x run
 
 Worker 开发:
-  cd crates/pichost-worker && cargo watch -x run
+  cd pichost-worker && cargo watch -x run
 
 前端开发:
   cd web-ui && npm run dev   (Vite dev server, HMR)
@@ -1420,7 +1420,7 @@ dev/test:
 ### 13.3 集成测试示例
 
 ```rust
-// crates/pichost-api/tests/auth_test.rs
+// pichost-api/tests/auth_test.rs
 
 #[tokio::test]
 async fn test_login_success() {

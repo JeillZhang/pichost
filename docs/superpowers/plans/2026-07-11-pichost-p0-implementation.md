@@ -34,14 +34,14 @@
 **Files:**
 - Create: `Cargo.toml` (workspace root)
 - Create: `rust-toolchain.toml`
-- Create: `crates/pichost-core/Cargo.toml`
-- Create: `crates/pichost-core/src/lib.rs`
-- Create: `crates/pichost-core/src/error.rs`
-- Create: `crates/pichost-core/src/models.rs`
-- Create: `crates/pichost-api/Cargo.toml`
-- Create: `crates/pichost-api/src/main.rs`
-- Create: `crates/pichost-worker/Cargo.toml`
-- Create: `crates/pichost-worker/src/main.rs`
+- Create: `pichost-core/Cargo.toml`
+- Create: `pichost-core/src/lib.rs`
+- Create: `pichost-core/src/error.rs`
+- Create: `pichost-core/src/models.rs`
+- Create: `pichost-api/Cargo.toml`
+- Create: `pichost-api/src/main.rs`
+- Create: `pichost-worker/Cargo.toml`
+- Create: `pichost-worker/src/main.rs`
 - Create: `.gitignore`
 
 **Interfaces Produced:**
@@ -52,7 +52,7 @@
 
 ```toml
 [workspace]
-members = ["crates/pichost-core", "crates/pichost-api", "crates/pichost-worker"]
+members = ["pichost-core", "pichost-api", "pichost-worker"]
 resolver = "2"
 
 [workspace.package]
@@ -309,9 +309,9 @@ git init && git add -A && git commit -m "chore: scaffold Rust workspace"
 ### Task 2: Configuration system
 
 **Files:**
-- Create: `crates/pichost-core/src/config.rs`
-- Modify: `crates/pichost-core/Cargo.toml` (add figment)
-- Modify: `crates/pichost-core/src/lib.rs`
+- Create: `pichost-core/src/config.rs`
+- Modify: `pichost-core/Cargo.toml` (add figment)
+- Modify: `pichost-core/src/lib.rs`
 
 **Interfaces Produced:**
 - `AppConfig` struct with fields: server, auth, storage, database, redis, upload, logging
@@ -429,7 +429,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/pichost-core/src/config.rs crates/pichost-core/src/lib.rs crates/pichost-core/Cargo.toml
+git add pichost-core/src/config.rs pichost-core/src/lib.rs pichost-core/Cargo.toml
 git commit -m "chore: add configuration system with figment"
 ```
 
@@ -438,11 +438,11 @@ git commit -m "chore: add configuration system with figment"
 ### Task 3: LocalStorage implementation
 
 **Files:**
-- Create: `crates/pichost-core/src/storage/mod.rs`
-- Create: `crates/pichost-core/src/storage/local.rs`
-- Create: `crates/pichost-core/tests/storage_test.rs`
-- Modify: `crates/pichost-core/src/lib.rs`
-- Modify: `crates/pichost-core/Cargo.toml`
+- Create: `pichost-core/src/storage/mod.rs`
+- Create: `pichost-core/src/storage/local.rs`
+- Create: `pichost-core/tests/storage_test.rs`
+- Modify: `pichost-core/src/lib.rs`
+- Modify: `pichost-core/Cargo.toml`
 
 **Interfaces Produced:**
 - `StorageBackend` trait (async: put, get, delete, exists, public_url, backend_name)
@@ -583,7 +583,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/pichost-core/src/storage/ crates/pichost-core/tests/ crates/pichost-core/src/lib.rs crates/pichost-core/Cargo.toml
+git add pichost-core/src/storage/ pichost-core/tests/ pichost-core/src/lib.rs pichost-core/Cargo.toml
 git commit -m "feat: LocalStorage backend with TDD"
 ```
 
@@ -594,9 +594,9 @@ git commit -m "feat: LocalStorage backend with TDD"
 **Files:**
 - Create: `migrations/0001_create_users.sql`
 - Create: `migrations/0002_create_images.sql`
-- Create: `crates/pichost-api/src/db/mod.rs`
-- Create: `crates/pichost-api/src/lib.rs`
-- Modify: `crates/pichost-api/Cargo.toml`
+- Create: `pichost-api/src/db/mod.rs`
+- Create: `pichost-api/src/lib.rs`
+- Modify: `pichost-api/Cargo.toml`
 
 - [ ] **Step 1: Add sqlx dep**
 
@@ -696,7 +696,7 @@ Expected: "migrations done" log
 - [ ] **Step 8: Commit**
 
 ```bash
-git add migrations/ crates/pichost-api/src/db/ crates/pichost-api/src/lib.rs crates/pichost-api/src/main.rs crates/pichost-api/Cargo.toml
+git add migrations/ pichost-api/src/db/ pichost-api/src/lib.rs pichost-api/src/main.rs pichost-api/Cargo.toml
 git commit -m "feat: database migrations and sqlx pool"
 ```
 
@@ -705,9 +705,9 @@ git commit -m "feat: database migrations and sqlx pool"
 ### Task 5: Redis cache module
 
 **Files:**
-- Create: `crates/pichost-api/src/cache/mod.rs`
-- Modify: `crates/pichost-api/src/lib.rs`
-- Modify: `crates/pichost-api/Cargo.toml`
+- Create: `pichost-api/src/cache/mod.rs`
+- Modify: `pichost-api/src/lib.rs`
+- Modify: `pichost-api/Cargo.toml`
 
 - [ ] **Step 1: Add deps**
 
@@ -773,7 +773,7 @@ docker stop pichost-r && docker rm pichost-r
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/pichost-api/src/cache/ crates/pichost-api/src/lib.rs crates/pichost-api/Cargo.toml
+git add pichost-api/src/cache/ pichost-api/src/lib.rs pichost-api/Cargo.toml
 git commit -m "feat: add Redis cache module"
 ```
 
@@ -782,14 +782,14 @@ git commit -m "feat: add Redis cache module"
 ### Task 6: Auth registration & login + JWT middleware
 
 **Files:**
-- Create: `crates/pichost-api/src/app.rs`
-- Create: `crates/pichost-api/src/routes/mod.rs`
-- Create: `crates/pichost-api/src/routes/auth.rs`
-- Create: `crates/pichost-api/src/middleware/mod.rs`
-- Create: `crates/pichost-api/src/middleware/auth.rs`
-- Modify: `crates/pichost-api/src/lib.rs`
-- Modify: `crates/pichost-api/src/main.rs`
-- Modify: `crates/pichost-api/Cargo.toml`
+- Create: `pichost-api/src/app.rs`
+- Create: `pichost-api/src/routes/mod.rs`
+- Create: `pichost-api/src/routes/auth.rs`
+- Create: `pichost-api/src/middleware/mod.rs`
+- Create: `pichost-api/src/middleware/auth.rs`
+- Modify: `pichost-api/src/lib.rs`
+- Modify: `pichost-api/src/main.rs`
+- Modify: `pichost-api/Cargo.toml`
 
 - [ ] **Step 1: Add deps**
 
@@ -905,7 +905,7 @@ kill %1; docker stop pg r; docker rm pg r
 - [ ] **Step 10: Commit**
 
 ```bash
-git add crates/pichost-api/src/app.rs crates/pichost-api/src/routes/ crates/pichost-api/src/middleware/ crates/pichost-api/src/lib.rs crates/pichost-api/src/main.rs crates/pichost-api/Cargo.toml
+git add pichost-api/src/app.rs pichost-api/src/routes/ pichost-api/src/middleware/ pichost-api/src/lib.rs pichost-api/src/main.rs pichost-api/Cargo.toml
 git commit -m "feat: auth register, login, JWT middleware"
 ```
 
@@ -914,12 +914,12 @@ git commit -m "feat: auth register, login, JWT middleware"
 ### Task 7: Image upload & public serve endpoints
 
 **Files:**
-- Create: `crates/pichost-api/src/services/mod.rs`
-- Create: `crates/pichost-api/src/services/upload.rs`
-- Create: `crates/pichost-api/src/routes/images.rs`
-- Modify: `crates/pichost-api/src/main.rs`
-- Modify: `crates/pichost-api/src/lib.rs`
-- Modify: `crates/pichost-api/Cargo.toml`
+- Create: `pichost-api/src/services/mod.rs`
+- Create: `pichost-api/src/services/upload.rs`
+- Create: `pichost-api/src/routes/images.rs`
+- Modify: `pichost-api/src/main.rs`
+- Modify: `pichost-api/src/lib.rs`
+- Modify: `pichost-api/Cargo.toml`
 
 - [ ] **Step 1: Create services/mod.rs** `pub mod upload;`
 
@@ -1003,7 +1003,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/u/$PK
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/pichost-api/src/services/ crates/pichost-api/src/routes/images.rs crates/pichost-api/src/lib.rs crates/pichost-api/src/main.rs crates/pichost-api/Cargo.toml
+git add pichost-api/src/services/ pichost-api/src/routes/images.rs pichost-api/src/lib.rs pichost-api/src/main.rs pichost-api/Cargo.toml
 git commit -m "feat: image upload and public serve"
 ```
 
@@ -1022,7 +1022,7 @@ git commit -m "feat: image upload and public serve"
 FROM rust:1.96-slim AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
-COPY crates/ crates/
+COPY  
 RUN cargo build --release -p pichost-api
 
 FROM debian:bookworm-slim

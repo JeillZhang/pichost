@@ -83,10 +83,9 @@ cd web-ui && npm run build
 ## Project Structure
 
 ```
-├── crates/
-│   ├── pichost-core/       # Domain models, config, storage trait
-│   ├── pichost-api/        # Axum web server (routes, middleware, services)
-│   └── pichost-worker/     # Async worker placeholder (P1)
+├── pichost-core/           # Domain models, config, storage trait
+├── pichost-api/            # Axum web server (routes, middleware, services)
+├── pichost-worker/         # Async worker placeholder (P1)
 ├── web-ui/                 # React SPA frontend
 ├── migrations/             # PostgreSQL migrations
 ├── Dockerfile.api          # Multi-stage Rust build
