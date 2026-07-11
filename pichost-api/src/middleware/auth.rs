@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     http::StatusCode,
     middleware::Next,
     response::Response,
@@ -20,19 +20,10 @@ pub struct AuthUser {
 }
 
 pub async fn require_auth(
+    State(state): State<Arc<AppState>>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    let state = req
-        .extensions()
-        .get::<Arc<AppState>>()
-        .cloned()
-        .ok_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal configuration error"})),
-            )
-        })?;
 
     // Extract Authorization header
     let auth_header = req
