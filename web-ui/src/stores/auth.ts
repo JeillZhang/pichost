@@ -7,6 +7,7 @@ interface AuthState {
   accessToken: string | null
   refreshToken: string | null
   isAuthenticated: boolean
+  hasLoaded: boolean
   isLoading: boolean
   error: string | null
 
@@ -22,6 +23,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   accessToken: null,
   refreshToken: null,
   isAuthenticated: false,
+  hasLoaded: false,
   isLoading: false,
   error: null,
 
@@ -90,14 +92,19 @@ export const useAuthStore = create<AuthState>((set) => ({
           accessToken: token,
           refreshToken: localStorage.getItem('refresh_token'),
           isAuthenticated: true,
+          hasLoaded: true,
         })
+        return
       } catch {
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
         localStorage.removeItem('user')
       }
     }
+    set({ hasLoaded: true, isAuthenticated: false })
   },
 
   clearError: () => set({ error: null }),
 }))
+
+export const useAuthLoaded = () => useAuthStore((s) => s.hasLoaded)

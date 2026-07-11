@@ -11,6 +11,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 export default function App() {
   const loadFromStorage = useAuthStore((s) => s.loadFromStorage)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const hasLoaded = useAuthStore((s) => s.hasLoaded)
 
   useEffect(() => {
     loadFromStorage()
@@ -22,7 +23,13 @@ export default function App() {
         <Route
           path="/"
           element={
-            <Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />
+            !hasLoaded ? (
+              <div className="flex min-h-screen items-center justify-center bg-gray-950">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-white" />
+              </div>
+            ) : (
+              <Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />
+            )
           }
         />
         <Route path="/login" element={<Login />} />
