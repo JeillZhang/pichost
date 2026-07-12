@@ -28,3 +28,6 @@ rand = "0.8"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 infer = "0.16"
+figment = { version = "0.10", features = ["toml", "env"] }
+image = { version = "0.25", default-features = false }
+webp = "0.2"
