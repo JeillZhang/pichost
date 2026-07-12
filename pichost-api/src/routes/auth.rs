@@ -34,11 +34,25 @@ pub struct LoginRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TokenClaims {
+pub struct AccessTokenClaims {
     pub sub: String,
+    pub jti: String,
     pub exp: usize,
     pub iat: usize,
     pub is_admin: bool,
+    pub typ: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RefreshTokenClaims {
+    pub sub: String,
+    pub jti: String,
+    pub exp: usize,
+    pub iat: usize,
+    pub is_admin: bool,
+    pub typ: String,
+    pub access_jti: String,
+    pub access_exp: usize,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -62,21 +76,32 @@ fn generate_tokens(
     user_id: Uuid,
     is_admin: bool,
     config: &AppConfig,
-) -> Result<(String, String), jsonwebtoken::errors::Error> {
+) -> Result<(String, String, AccessTokenClaims, RefreshTokenClaims), jsonwebtoken::errors::Error> {
     let now = Utc::now().timestamp() as usize;
+    let access_exp = now + config.auth.access_token_ttl as usize;
+    let refresh_exp = now + config.auth.refresh_token_ttl as usize;
 
-    let access_claims = TokenClaims {
+    let access_jti = Uuid::new_v4().to_string();
+    let refresh_jti = Uuid::new_v4().to_string();
+
+    let access_claims = AccessTokenClaims {
         sub: user_id.to_string(),
-        exp: now + config.auth.access_token_ttl as usize,
+        jti: access_jti.clone(),
+        exp: access_exp,
         iat: now,
         is_admin,
+        typ: "access".to_string(),
     };
 
-    let refresh_claims = TokenClaims {
+    let refresh_claims = RefreshTokenClaims {
         sub: user_id.to_string(),
-        exp: now + config.auth.refresh_token_ttl as usize,
+        jti: refresh_jti,
+        exp: refresh_exp,
         iat: now,
         is_admin,
+        typ: "refresh".to_string(),
+        access_jti: access_jti.clone(),
+        access_exp,
     };
 
     let key = EncodingKey::from_secret(config.auth.jwt_secret.as_bytes());
@@ -84,7 +109,7 @@ fn generate_tokens(
     let access_token = encode(&Header::default(), &access_claims, &key)?;
     let refresh_token = encode(&Header::default(), &refresh_claims, &key)?;
 
-    Ok((access_token, refresh_token))
+    Ok((access_token, refresh_token, access_claims, refresh_claims))
 }
 
 fn error_response(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
@@ -138,10 +163,11 @@ pub async fn register(
         error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
     })?;
 
-    let (access_token, refresh_token) = generate_tokens(user_id, false, &state.config).map_err(|e| {
-        tracing::warn!("JWT generation failed: {e}");
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
-    })?;
+    let (access_token, refresh_token, _access_claims, _refresh_claims) =
+        generate_tokens(user_id, false, &state.config).map_err(|e| {
+            tracing::warn!("JWT generation failed: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        })?;
 
     let response = AuthResponse {
         access_token,
@@ -186,10 +212,11 @@ pub async fn login(
         .verify_password(payload.password.as_bytes(), &parsed_hash)
         .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid username or password"))?;
 
-    let (access_token, refresh_token) = generate_tokens(user_id, is_admin, &state.config).map_err(|e| {
-        tracing::warn!("JWT generation failed: {e}");
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
-    })?;
+    let (access_token, refresh_token, _access_claims, _refresh_claims) =
+        generate_tokens(user_id, is_admin, &state.config).map_err(|e| {
+            tracing::warn!("JWT generation failed: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        })?;
 
     let response = AuthResponse {
         access_token,

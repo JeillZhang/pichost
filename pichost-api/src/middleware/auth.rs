@@ -50,7 +50,7 @@ pub async fn require_auth(
     let key = DecodingKey::from_secret(state.config.auth.jwt_secret.as_bytes());
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
-    let token_data = decode::<super::super::routes::auth::TokenClaims>(token, &key, &validation)
+    let token_data = decode::<super::super::routes::auth::AccessTokenClaims>(token, &key, &validation)
         .map_err(|e| {
             tracing::warn!("JWT decode failed: {e}");
             (
