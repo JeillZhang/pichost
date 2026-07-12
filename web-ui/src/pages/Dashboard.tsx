@@ -44,6 +44,14 @@ export default function Dashboard() {
       {/* Upload result links */}
       {uploadResult && (
         <div className="mt-4 space-y-2">
+          {uploadResult.status && (
+            <p className="flex items-center gap-2 text-sm text-gray-400">
+              Status:{' '}
+              <span className="rounded border border-green-700 bg-green-900/50 px-2 py-0.5 text-xs font-medium text-green-400">
+                {uploadResult.status}
+              </span>
+            </p>
+          )}
           {uploadResult.url && (
             <LinkCard label="URL" value={uploadResult.url} />
           )}

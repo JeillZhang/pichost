@@ -1,6 +1,11 @@
 import { create } from 'zustand'
 import type { UserInfo } from '../api/client'
-import { login as apiLogin, register as apiRegister } from '../api/client'
+import {
+  login as apiLogin,
+  register as apiRegister,
+  logout as apiLogout,
+  refreshToken as apiRefreshToken,
+} from '../api/client'
 
 interface AuthState {
   user: UserInfo | null
@@ -13,7 +18,9 @@ interface AuthState {
 
   login: (username: string, password: string) => Promise<void>
   register: (username: string, password: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
+  refresh: () => Promise<boolean>
+  forceLogout: () => void
   loadFromStorage: () => void
   clearError: () => void
 }
@@ -69,7 +76,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  logout: () => {
+  logout: async () => {
+    try {
+      await apiLogout()
+    } catch {
+      // Server-side logout failed (network error, etc.)
+      // Still clear local state — better than being stuck logged in
+    }
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
     localStorage.removeItem('user')
@@ -79,6 +92,34 @@ export const useAuthStore = create<AuthState>((set) => ({
       refreshToken: null,
       isAuthenticated: false,
     })
+  },
+
+  refresh: async () => {
+    try {
+      const res = await apiRefreshToken()
+      localStorage.setItem('access_token', res.access_token)
+      localStorage.setItem('refresh_token', res.refresh_token)
+      set({
+        accessToken: res.access_token,
+        refreshToken: res.refresh_token,
+      })
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  forceLogout: () => {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    localStorage.removeItem('user')
+    set({
+      user: null,
+      accessToken: null,
+      refreshToken: null,
+      isAuthenticated: false,
+    })
+    window.location.href = '/login'
   },
 
   loadFromStorage: () => {
