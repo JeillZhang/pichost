@@ -1,5 +1,11 @@
-use deadpool_redis::{Config as RedisConfig, Pool as RedisPool, Runtime};
+use std::collections::HashMap;
 use std::sync::Arc;
+
+use deadpool_redis::{Config as RedisConfig, Pool as RedisPool, Runtime};
+use pichost_core::storage::local::LocalStorage;
+use pichost_core::storage::s3::RustfsStorage;
+use pichost_core::storage::StorageBackend;
+use pichost_core::StorageRouter;
 
 mod config;
 mod db;
@@ -45,25 +51,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!(count = recovered.len(), "recovered stale tasks");
     }
 
-    // 5. Wrap config in Arc for sharing across tasks
+    // 5. Init StorageRouter
+    let mut backends: HashMap<String, Arc<dyn StorageBackend>> = HashMap::new();
+
+    let local = LocalStorage::new(
+        app_config.storage.local_base_path.clone(),
+        app_config.server.public_url.clone(),
+    );
+    backends.insert("local".into(), Arc::new(local));
+
+    if let Some(rustfs_config) = &app_config.storage.rustfs {
+        let rustfs = RustfsStorage::new(rustfs_config).await;
+        tracing::info!(endpoint = %rustfs_config.endpoint, "Rustfs storage initialized");
+        backends.insert("rustfs".into(), Arc::new(rustfs));
+    }
+
+    let router = Arc::new(StorageRouter::new(
+        backends,
+        app_config.storage.default_backend.clone(),
+    ));
+
+    // 6. Wrap config in Arc for sharing across tasks
     let config = Arc::new(app_config);
     let concurrency = config.worker.concurrency;
 
-    // 6. Spawn worker loop for each concurrency slot
+    // 7. Spawn worker loop for each concurrency slot
     let mut handles = Vec::with_capacity(concurrency);
     for i in 0..concurrency {
         let pool = pool.clone();
         let redis = redis_pool.clone();
         let config = config.clone();
+        let router = router.clone();
 
         let handle = tokio::spawn(async move {
             tracing::info!(worker_id = i, "worker started");
-            worker_loop(i, pool, redis, config).await;
+            worker_loop(i, pool, redis, config, router).await;
         });
         handles.push(handle);
     }
 
-    // 7. Wait for all workers (they run forever unless shutdown signal)
+    // 8. Wait for all workers (they run forever unless shutdown signal)
     for handle in handles {
         let _ = handle.await;
     }
@@ -76,6 +103,7 @@ async fn worker_loop(
     pool: sqlx::PgPool,
     redis: RedisPool,
     config: Arc<pichost_core::config::AppConfig>,
+    router: Arc<StorageRouter>,
 ) {
     let timeout = config.worker.queue_poll_timeout;
 
@@ -101,7 +129,7 @@ async fn worker_loop(
         // Process with timeout
         let process_result = tokio::time::timeout(
             tokio::time::Duration::from_secs(config.worker.task_timeout),
-            pipeline::process_task(&pool, &config, &task),
+            pipeline::process_task(&pool, &router, &config, &task),
         )
         .await;
 
