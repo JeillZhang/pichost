@@ -1,3 +1,4 @@
+mod processor;
 mod queue;
 mod pipeline;
 

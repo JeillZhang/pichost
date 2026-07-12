@@ -17,7 +17,7 @@ sqlx.workspace = true
 deadpool-redis.workspace = true
 redis.workspace = true
 figment.workspace = true
-image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
+image = { workspace = true, features = ["png", "jpeg", "gif", "webp", "avif", "bmp"] }
 webp.workspace = true
 
 [[bin]]
