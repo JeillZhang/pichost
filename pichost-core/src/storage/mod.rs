@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use crate::error::StorageError;
 
 pub mod local;
+pub mod router;
 pub mod s3;
 
 #[async_trait]
