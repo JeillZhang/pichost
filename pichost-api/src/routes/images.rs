@@ -30,8 +30,13 @@ pub async fn list_images(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
 ) -> Result<Json<Vec<UploadResult>>, (StatusCode, Json<serde_json::Value>)> {
-    let rows = sqlx::query_as::<_, (Uuid, String, String, String, i64, String, String)>(
-        r#"SELECT id, public_key, original_name, url, file_size, sha256, mime_type
+    let rows = sqlx::query_as::<_, (
+        Uuid, String, String, String, String, i64, String,
+        Option<i32>, Option<i32>, String,
+        Option<String>, Option<String>, chrono::DateTime<chrono::Utc>,
+    )>(
+        r#"SELECT id, public_key, original_name, url, mime_type, file_size,
+                  sha256, width, height, status, thumbnail_url, webp_url, created_at
            FROM images WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50"#,
     )
     .bind(user.id)
@@ -47,10 +52,10 @@ pub async fn list_images(
 
     let images = rows
         .into_iter()
-        .map(|(image_id, public_key, original_name, url, file_size, sha256, _mime_type)| {
+        .map(|(id, public_key, original_name, url, mime_type, file_size,
+              sha256, width, height, status, thumbnail_url, webp_url, created_at)| {
             UploadResult {
-                id: image_id,
-                public_key,
+                id, public_key,
                 original_name: original_name.clone(),
                 url: url.clone(),
                 markdown: format!("![{}]({})", original_name, url),
@@ -60,8 +65,8 @@ pub async fn list_images(
                     html_escape(&original_name)
                 ),
                 bbcode: format!("[img]{}[/img]", url),
-                sha256,
-                file_size,
+                sha256, file_size, mime_type, width, height, status,
+                thumbnail_url, webp_url, created_at,
             }
         })
         .collect();
@@ -75,8 +80,13 @@ pub async fn get_image(
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<UploadResult>, (StatusCode, Json<serde_json::Value>)> {
-    let row = sqlx::query_as::<_, (Uuid, String, String, String, i64, String, String)>(
-        r#"SELECT id, public_key, original_name, url, file_size, sha256, mime_type
+    let row = sqlx::query_as::<_, (
+        Uuid, String, String, String, String, i64, String,
+        Option<i32>, Option<i32>, String,
+        Option<String>, Option<String>, chrono::DateTime<chrono::Utc>,
+    )>(
+        r#"SELECT id, public_key, original_name, url, mime_type, file_size,
+                  sha256, width, height, status, thumbnail_url, webp_url, created_at
            FROM images WHERE id = $1 AND user_id = $2"#,
     )
     .bind(id)
@@ -97,11 +107,11 @@ pub async fn get_image(
         )
     })?;
 
-    let (image_id, public_key, original_name, url, file_size, sha256, _mime_type) = row;
+    let (id, public_key, original_name, url, mime_type, file_size,
+         sha256, width, height, status, thumbnail_url, webp_url, created_at) = row;
 
     Ok(Json(UploadResult {
-        id: image_id,
-        public_key,
+        id, public_key,
         original_name: original_name.clone(),
         url: url.clone(),
         markdown: format!("![{}]({})", original_name, url),
@@ -111,8 +121,8 @@ pub async fn get_image(
             html_escape(&original_name)
         ),
         bbcode: format!("[img]{}[/img]", url),
-        sha256,
-        file_size,
+        sha256, file_size, mime_type, width, height, status,
+        thumbnail_url, webp_url, created_at,
     }))
 }
 

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use axum::extract::Multipart;
 use axum::http::StatusCode;
 use axum::Json;
+use chrono::{DateTime, Utc};
 use pichost_core::storage::StorageBackend;
 use serde::Serialize;
 use uuid::Uuid;
@@ -24,6 +25,13 @@ pub struct UploadResult {
     pub bbcode: String,
     pub sha256: String,
     pub file_size: i64,
+    pub mime_type: String,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub status: String,
+    pub thumbnail_url: Option<String>,
+    pub webp_url: Option<String>,
+    pub created_at: DateTime<Utc>,
 }
 
 async fn enqueue_processing_task(
@@ -183,6 +191,13 @@ pub async fn process_upload(
             bbcode,
             sha256,
             file_size,
+            mime_type: _mime_type.clone(),
+            width: None,
+            height: None,
+            status: "active".to_string(),
+            thumbnail_url: None,
+            webp_url: None,
+            created_at: chrono::Utc::now(),
         });
     }
 
@@ -315,5 +330,12 @@ pub async fn process_upload(
         bbcode,
         sha256,
         file_size,
+        mime_type,
+        width,
+        height,
+        status: "active".to_string(),
+        thumbnail_url: None,
+        webp_url: None,
+        created_at: chrono::Utc::now(),
     })
 }
