@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use axum::{extract::DefaultBodyLimit, middleware, routing::{get, post}, Router};
+use axum::http::{HeaderName, HeaderValue};
 use pichost_api::{app::AppState, cache, db, routes};
 use pichost_core::config::load_config;
 use tower_http::cors::CorsLayer;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -45,6 +47,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest("/u", public_routes)
         .layer(CorsLayer::permissive())
         .layer(DefaultBodyLimit::max(52_428_800))
+        // Security headers
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("x-content-type-options"),
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("x-frame-options"),
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("content-security-policy"),
+            HeaderValue::from_static(
+                "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
+            ),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("strict-transport-security"),
+            HeaderValue::from_static("max-age=31536000; includeSubDomains; preload"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("referrer-policy"),
+            HeaderValue::from_static("strict-origin-when-cross-origin"),
+        ))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
