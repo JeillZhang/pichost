@@ -10,6 +10,9 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Load .env file (sibling of Cargo.toml, i.e. project root at runtime)
+    let _ = dotenvy::dotenv();
+
     tracing_subscriber::fmt()
         .with_env_filter("info")
         .json()
