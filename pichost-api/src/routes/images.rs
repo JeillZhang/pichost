@@ -153,8 +153,8 @@ pub async fn public_get(
 
     let (storage_key, mime_type, status) = row;
 
-    // Only serve active images
-    if status != "active" {
+    // Only serve active or ready images
+    if status != "active" && status != "ready" {
         return Err((
             StatusCode::NOT_FOUND,
             Json(json!({"error": "image not found"})),
@@ -185,4 +185,87 @@ pub async fn public_get(
         .unwrap();
 
     Ok(response)
+}
+
+fn mime_for_thumb_key(key: &str) -> &'static str {
+    if key.ends_with(".png") { "image/png" }
+    else { "image/jpeg" }
+}
+
+/// GET /u/thumb/{image_id} — serve generated thumbnail (unauthenticated)
+pub async fn public_get_thumb(
+    State(state): State<Arc<AppState>>,
+    Path(image_id): Path<Uuid>,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let row = sqlx::query_as::<_, (Option<String>,)>(
+        "SELECT thumbnail_key FROM images WHERE id = $1 AND status IN ('active', 'ready')",
+    )
+    .bind(image_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Thumb query failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal error"})))
+    })?
+    .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"}))))?;
+
+    let (thumb_key,) = row;
+    let thumb_key = thumb_key.ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(json!({"error": "thumbnail not yet generated"})))
+    })?;
+
+    let storage = pichost_core::storage::local::LocalStorage::new(
+        state.config.storage.local_base_path.clone(),
+        state.config.server.public_url.clone(),
+    );
+    let bytes = storage.get(&thumb_key).await.map_err(|e| {
+        tracing::warn!("Thumb storage read failed: {e}");
+        (StatusCode::NOT_FOUND, Json(json!({"error": "thumbnail not found"})))
+    })?;
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, mime_for_thumb_key(&thumb_key))
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+        .body(axum::body::Body::from(bytes))
+        .unwrap())
+}
+
+/// GET /u/webp/{image_id} — serve generated WebP (unauthenticated)
+pub async fn public_get_webp(
+    State(state): State<Arc<AppState>>,
+    Path(image_id): Path<Uuid>,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let row = sqlx::query_as::<_, (Option<String>,)>(
+        "SELECT webp_key FROM images WHERE id = $1 AND status IN ('active', 'ready')",
+    )
+    .bind(image_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("WebP query failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal error"})))
+    })?
+    .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"}))))?;
+
+    let (webp_key,) = row;
+    let webp_key = webp_key.ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(json!({"error": "WebP not yet generated"})))
+    })?;
+
+    let storage = pichost_core::storage::local::LocalStorage::new(
+        state.config.storage.local_base_path.clone(),
+        state.config.server.public_url.clone(),
+    );
+    let bytes = storage.get(&webp_key).await.map_err(|e| {
+        tracing::warn!("WebP storage read failed: {e}");
+        (StatusCode::NOT_FOUND, Json(json!({"error": "WebP not found"})))
+    })?;
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "image/webp")
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+        .body(axum::body::Body::from(bytes))
+        .unwrap())
 }

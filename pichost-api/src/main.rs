@@ -32,7 +32,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route_layer(protected);
 
     let public_routes = Router::new()
-        .route("/{public_key}", get(routes::images::public_get));
+        .route("/{public_key}", get(routes::images::public_get))
+        .route("/thumb/{image_id}", get(routes::images::public_get_thumb))
+        .route("/webp/{image_id}", get(routes::images::public_get_webp));
 
     let app = Router::new()
         .nest(
