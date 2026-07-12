@@ -74,3 +74,8 @@
 - No `deny.toml` (no cargo-deny).
 - No Makefile or Justfile.
 - No `opencode.json`.
+
+## Rules
+
+- 当一个阶段Plan开发完成时，自动清理生成的临时文件（如 log 文件等），避免垃圾残留。
+- 当一条命令卡主超过30s时，自动取消重试，避免任务进度阻塞。
