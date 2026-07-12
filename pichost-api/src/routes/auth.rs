@@ -6,11 +6,11 @@ use argon2::{
 };
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 use chrono::Utc;
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use tracing;
 use uuid::Uuid;
@@ -33,12 +33,38 @@ pub struct LoginRequest {
     pub password: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RefreshRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RefreshResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub user: UserInfo,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TokenClaims {
+pub struct AccessTokenClaims {
     pub sub: String,
+    pub jti: String,
     pub exp: usize,
     pub iat: usize,
     pub is_admin: bool,
+    pub typ: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RefreshTokenClaims {
+    pub sub: String,
+    pub jti: String,
+    pub exp: usize,
+    pub iat: usize,
+    pub is_admin: bool,
+    pub typ: String,
+    pub access_jti: String,
+    pub access_exp: usize,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -62,21 +88,32 @@ fn generate_tokens(
     user_id: Uuid,
     is_admin: bool,
     config: &AppConfig,
-) -> Result<(String, String), jsonwebtoken::errors::Error> {
+) -> Result<(String, String, AccessTokenClaims, RefreshTokenClaims), jsonwebtoken::errors::Error> {
     let now = Utc::now().timestamp() as usize;
+    let access_exp = now + config.auth.access_token_ttl as usize;
+    let refresh_exp = now + config.auth.refresh_token_ttl as usize;
 
-    let access_claims = TokenClaims {
+    let access_jti = Uuid::new_v4().to_string();
+    let refresh_jti = Uuid::new_v4().to_string();
+
+    let access_claims = AccessTokenClaims {
         sub: user_id.to_string(),
-        exp: now + config.auth.access_token_ttl as usize,
+        jti: access_jti.clone(),
+        exp: access_exp,
         iat: now,
         is_admin,
+        typ: "access".to_string(),
     };
 
-    let refresh_claims = TokenClaims {
+    let refresh_claims = RefreshTokenClaims {
         sub: user_id.to_string(),
-        exp: now + config.auth.refresh_token_ttl as usize,
+        jti: refresh_jti,
+        exp: refresh_exp,
         iat: now,
         is_admin,
+        typ: "refresh".to_string(),
+        access_jti: access_jti.clone(),
+        access_exp,
     };
 
     let key = EncodingKey::from_secret(config.auth.jwt_secret.as_bytes());
@@ -84,7 +121,7 @@ fn generate_tokens(
     let access_token = encode(&Header::default(), &access_claims, &key)?;
     let refresh_token = encode(&Header::default(), &refresh_claims, &key)?;
 
-    Ok((access_token, refresh_token))
+    Ok((access_token, refresh_token, access_claims, refresh_claims))
 }
 
 fn error_response(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
@@ -138,10 +175,11 @@ pub async fn register(
         error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
     })?;
 
-    let (access_token, refresh_token) = generate_tokens(user_id, false, &state.config).map_err(|e| {
-        tracing::warn!("JWT generation failed: {e}");
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
-    })?;
+    let (access_token, refresh_token, _access_claims, _refresh_claims) =
+        generate_tokens(user_id, false, &state.config).map_err(|e| {
+            tracing::warn!("JWT generation failed: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        })?;
 
     let response = AuthResponse {
         access_token,
@@ -186,10 +224,11 @@ pub async fn login(
         .verify_password(payload.password.as_bytes(), &parsed_hash)
         .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid username or password"))?;
 
-    let (access_token, refresh_token) = generate_tokens(user_id, is_admin, &state.config).map_err(|e| {
-        tracing::warn!("JWT generation failed: {e}");
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
-    })?;
+    let (access_token, refresh_token, _access_claims, _refresh_claims) =
+        generate_tokens(user_id, is_admin, &state.config).map_err(|e| {
+            tracing::warn!("JWT generation failed: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        })?;
 
     let response = AuthResponse {
         access_token,
@@ -203,4 +242,111 @@ pub async fn login(
     };
 
     Ok((StatusCode::OK, Json(response)))
+}
+
+pub async fn refresh(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<RefreshRequest>,
+) -> Result<(StatusCode, Json<RefreshResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let config = &state.config;
+    let key = DecodingKey::from_secret(config.auth.jwt_secret.as_bytes());
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = true;
+
+    let token_data = decode::<RefreshTokenClaims>(&payload.refresh_token, &key, &validation)
+        .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid or expired refresh token"))?;
+    let claims = token_data.claims;
+
+    if claims.typ != "refresh" {
+        return Err(error_response(StatusCode::UNAUTHORIZED, "invalid token type"));
+    }
+
+    let bl_refresh_key = format!("bl:{}", claims.jti);
+    if state.cache.exists(&bl_refresh_key).await.unwrap_or(true) {
+        return Err(error_response(StatusCode::UNAUTHORIZED, "refresh token has been revoked"));
+    }
+
+    let user_id: Uuid = claims.sub.parse()
+        .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid token subject"))?;
+
+    let row = sqlx::query_as::<_, (String, Option<String>, bool)>(
+        "SELECT username, email, is_admin FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Refresh user lookup failed: {e}");
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+    })?
+    .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "user not found"))?;
+    let (username, email, is_admin) = row;
+
+    let (new_access, new_refresh, _new_access_claims, _new_refresh_claims) =
+        generate_tokens(user_id, is_admin, config)
+            .map_err(|e| {
+                tracing::warn!("Refresh token generation failed: {e}");
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "token generation failed")
+            })?;
+
+    let now = Utc::now().timestamp() as usize;
+
+    let refresh_ttl = claims.exp.saturating_sub(now);
+    let _ = state.cache.set_ex(&bl_refresh_key, "revoked", refresh_ttl as u64).await;
+
+    let bl_access_key = format!("bl:{}", claims.access_jti);
+    let access_ttl = claims.access_exp.saturating_sub(now);
+    if access_ttl > 0 {
+        let _ = state.cache.set_ex(&bl_access_key, "revoked", access_ttl as u64).await;
+    }
+
+    tracing::info!(user = %user_id, "tokens refreshed (rotation)");
+
+    Ok((
+        StatusCode::OK,
+        Json(RefreshResponse {
+            access_token: new_access,
+            refresh_token: new_refresh,
+            user: UserInfo { id: user_id, username, email, is_admin },
+        }),
+    ))
+}
+
+pub async fn logout(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
+    let token = headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "missing authorization header"))?;
+
+    let key = DecodingKey::from_secret(state.config.auth.jwt_secret.as_bytes());
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = false;
+
+    let token_data = decode::<AccessTokenClaims>(token, &key, &validation)
+        .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid token"))?;
+    let claims = token_data.claims;
+
+    if claims.typ != "access" {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "only access tokens can be logged out via this endpoint",
+        ));
+    }
+
+    let now = Utc::now().timestamp() as usize;
+    let ttl = claims.exp.saturating_sub(now);
+    if ttl > 0 {
+        let bl_key = format!("bl:{}", claims.jti);
+        let _ = state.cache.set_ex(&bl_key, "revoked", ttl as u64).await;
+    }
+
+    tracing::info!(user = %claims.sub, jti = %claims.jti, "logged out");
+    Ok((
+        StatusCode::OK,
+        Json(serde_json::json!({"message": "logged out successfully"})),
+    ))
 }

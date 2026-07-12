@@ -50,7 +50,7 @@ pub async fn require_auth(
     let key = DecodingKey::from_secret(state.config.auth.jwt_secret.as_bytes());
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
-    let token_data = decode::<super::super::routes::auth::TokenClaims>(token, &key, &validation)
+    let token_data = decode::<super::super::routes::auth::AccessTokenClaims>(token, &key, &validation)
         .map_err(|e| {
             tracing::warn!("JWT decode failed: {e}");
             (
@@ -62,14 +62,14 @@ pub async fn require_auth(
     let claims = token_data.claims;
 
     // Check Redis blacklist (fail closed if Redis is down)
-    let blacklist_key = format!("bl:{}", claims.sub);
-    let is_blacklisted = state
+    let bl_key = format!("bl:{}", claims.jti);
+    let is_revoked = state
         .cache
-        .exists(&blacklist_key)
+        .exists(&bl_key)
         .await
         .unwrap_or(true);
 
-    if is_blacklisted {
+    if is_revoked {
         return Err((
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "token has been revoked"})),
