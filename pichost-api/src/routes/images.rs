@@ -73,56 +73,56 @@ pub async fn list_images(
     Ok(Json(images))
 }
 
-/// GET /api/v1/images/{id} — get image metadata (protected)
+/// GET /api/v1/images/{id} — single image detail (protected, cached)
 pub async fn get_image(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<UploadResult>, (StatusCode, Json<serde_json::Value>)> {
-    let row = sqlx::query_as::<_, (
-        Uuid, String, String, String, String, i64, String,
-        Option<i32>, Option<i32>, String,
-        Option<String>, Option<String>, chrono::DateTime<chrono::Utc>,
-    )>(
-        r#"SELECT id, public_key, original_name, url, mime_type, file_size,
-                  sha256, width, height, status, thumbnail_url, webp_url, created_at
-           FROM images WHERE id = $1 AND user_id = $2"#,
+    let result = state.cache.cached_meta(
+        &id,
+        600, // 10 min TTL
+        async {
+            sqlx::query_as::<_, (
+                Uuid, String, String, String, String, i64, String,
+                Option<i32>, Option<i32>, String,
+                Option<String>, Option<String>, chrono::DateTime<chrono::Utc>,
+            )>(
+                r#"SELECT id, public_key, original_name, url, mime_type, file_size,
+                          sha256, width, height, status, thumbnail_url, webp_url, created_at
+                   FROM images WHERE id = $1 AND user_id = $2"#,
+            )
+            .bind(id)
+            .bind(user.id)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Get image query failed: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal error"})))
+            })?
+            .ok_or_else(|| {
+                (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"})))
+            })
+            .map(|row| {
+                let (id, public_key, original_name, url, mime_type, file_size,
+                     sha256, width, height, status, thumbnail_url, webp_url, created_at) = row;
+                UploadResult {
+                    id, public_key,
+                    original_name: original_name.clone(),
+                    url: url.clone(),
+                    markdown: format!("![{}]({})", original_name, url),
+                    html: format!("<img src=\"{}\" alt=\"{}\" />", url, html_escape(&original_name)),
+                    bbcode: format!("[img]{}[/img]", url),
+                    sha256, file_size, mime_type, width, height, status,
+                    thumbnail_url, webp_url, created_at,
+                }
+            })
+        },
     )
-    .bind(id)
-    .bind(user.id)
-    .fetch_optional(&state.pool)
     .await
-    .map_err(|e| {
-        tracing::warn!("Get image query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "internal server error"})),
-        )
-    })?
-    .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "image not found"})),
-        )
-    })?;
+    .map_err(|e| e)?;
 
-    let (id, public_key, original_name, url, mime_type, file_size,
-         sha256, width, height, status, thumbnail_url, webp_url, created_at) = row;
-
-    Ok(Json(UploadResult {
-        id, public_key,
-        original_name: original_name.clone(),
-        url: url.clone(),
-        markdown: format!("![{}]({})", original_name, url),
-        html: format!(
-            "<img src=\"{}\" alt=\"{}\" />",
-            url,
-            html_escape(&original_name)
-        ),
-        bbcode: format!("[img]{}[/img]", url),
-        sha256, file_size, mime_type, width, height, status,
-        thumbnail_url, webp_url, created_at,
-    }))
+    Ok(Json(result))
 }
 
 /// GET /u/{public_key} — serve image publicly (unauthenticated)

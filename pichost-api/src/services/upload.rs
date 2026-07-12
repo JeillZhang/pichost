@@ -4,7 +4,7 @@ use axum::extract::Multipart;
 use axum::http::StatusCode;
 use axum::Json;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::app::AppState;
@@ -13,7 +13,7 @@ use deadpool_redis::redis::AsyncCommands;
 use crate::middleware::auth::AuthUser;
 use crate::services::html_escape;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UploadResult {
     pub id: Uuid,
     pub public_key: String,
