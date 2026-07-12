@@ -67,5 +67,31 @@ services:
       PICHOST_STORAGE_LOCAL_BASE_PATH: /app/storage-local
       PICHOST_SERVER_PUBLIC_URL: http://localhost:3000
 
+  # -------------------------------------------------------------------------
+  # PicHost Worker — async image processing
+  # -------------------------------------------------------------------------
+  worker:
+    build:
+      dockerfile: Dockerfile.worker
+      context: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./storage-local:/app/storage-local
+    environment:
+      # sqlx CLI / compile-time helper (not consumed by figment)
+      DATABASE_URL: postgres://pichost:pichost@postgres/pichost
+
+      # Application config (figment prefix PICHOST_)
+      PICHOST_DATABASE_URL: postgres://pichost:pichost@postgres/pichost
+      PICHOST_REDIS_URL: redis://redis:6379
+      PICHOST_AUTH_JWT_SECRET: dev-secret-32-bytes-long-for-pichost-!!!
+      PICHOST_STORAGE_LOCAL_BASE_PATH: /app/storage-local
+      PICHOST_SERVER_PUBLIC_URL: http://localhost:3000
+
 volumes:
   pgdata:
