@@ -8,6 +8,8 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::cache::CachePool;
+use deadpool_redis::redis::AsyncCommands;
 use crate::middleware::auth::AuthUser;
 use crate::services::html_escape;
 
@@ -22,6 +24,48 @@ pub struct UploadResult {
     pub bbcode: String,
     pub sha256: String,
     pub file_size: i64,
+}
+
+async fn enqueue_processing_task(
+    redis_pool: &CachePool,
+    image_id: Uuid,
+    user_id: Uuid,
+    storage_key: &str,
+    mime_type: &str,
+) {
+    let task_id = Uuid::new_v4();
+    let payload = serde_json::json!({
+        "task_id": task_id.to_string(),
+        "image_id": image_id.to_string(),
+        "user_id": user_id.to_string(),
+        "storage_backend": "local",
+        "source_key": storage_key,
+        "source_mime": mime_type,
+        "retry_count": 0,
+        "max_retries": 3,
+    });
+
+    let pool_err = |e: deadpool_redis::PoolError| {
+        tracing::warn!("redis pool error during enqueue: {e}");
+    };
+
+    let mut conn = match redis_pool.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            pool_err(e);
+            return;
+        }
+    };
+
+    let payload_json = serde_json::to_string(&payload).unwrap_or_default();
+    let task_key = format!("pichost:task:{task_id}");
+
+    // Store payload hash
+    let _: Result<(), _> = conn.hset(&task_key, "payload", &payload_json).await;
+    // Push to pending queue
+    let _: Result<(), _> = conn.lpush("pichost:tasks:pending", task_id.to_string()).await;
+
+    tracing::info!(%task_id, %image_id, "enqueued processing task");
 }
 
 pub async fn process_upload(
@@ -168,6 +212,24 @@ pub async fn process_upload(
         .map(|t| t.mime_type().to_string())
         .unwrap_or_else(|| "application/octet-stream".to_string());
 
+    // ---- Detect image dimensions ----
+    let (width, height): (Option<i32>, Option<i32>) = {
+        let cursor = std::io::Cursor::new(&bytes);
+        match image::ImageReader::new(cursor).with_guessed_format() {
+            Ok(reader) => match reader.into_dimensions() {
+                Ok((w, h)) => (Some(w as i32), Some(h as i32)),
+                Err(e) => {
+                    tracing::warn!("Failed to decode image dimensions: {e}");
+                    (None, None)
+                }
+            },
+            Err(e) => {
+                tracing::warn!("Failed to create image reader: {e}");
+                (None, None)
+            }
+        }
+    };
+
     // ---- Write to LocalStorage ----
     let storage = pichost_core::storage::local::LocalStorage::new(
         state.config.storage.local_base_path.clone(),
@@ -215,8 +277,8 @@ pub async fn process_upload(
     .bind("local")
     .bind(&mime_type)
     .bind(file_size)
-    .bind(None::<i32>) // width — skipped
-    .bind(None::<i32>) // height — skipped
+    .bind(width)
+    .bind(height)
     .bind(&sha256)
     .bind(&url)
     .fetch_one(&state.pool)
@@ -228,6 +290,16 @@ pub async fn process_upload(
             Json(serde_json::json!({"error": "failed to save image metadata"})),
         )
     })?;
+
+    // ---- Enqueue async processing task ----
+    enqueue_processing_task(
+        &state.cache.get_pool(),
+        image_id,
+        user.id,
+        &storage_key,
+        &mime_type,
+    )
+    .await;
 
     Ok(UploadResult {
         id: image_id,

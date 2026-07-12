@@ -18,6 +18,10 @@ impl Cache {
         Self { pool }
     }
 
+    pub fn get_pool(&self) -> CachePool {
+        self.pool.clone()
+    }
+
     pub async fn get(&self, key: &str) -> Result<Option<String>, deadpool_redis::redis::RedisError> {
         let mut c = self.pool.get().await.map_err(pool_err)?;
         c.get(key).await
@@ -45,5 +49,5 @@ impl Cache {
 }
 
 fn pool_err(e: deadpool_redis::PoolError) -> deadpool_redis::redis::RedisError {
-    deadpool_redis::redis::RedisError::from(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+    deadpool_redis::redis::RedisError::from(std::io::Error::other(e.to_string()))
 }
