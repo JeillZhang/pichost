@@ -210,11 +210,21 @@ pub async fn public_get_thumb(
         (StatusCode::NOT_FOUND, Json(json!({"error": "thumbnail not yet generated"})))
     })?;
 
-    let storage = state.router.for_backend(&storage_backend);
-    let bytes = storage.get(&thumb_key).await.map_err(|e| {
-        tracing::warn!("Thumb storage read failed on {}: {e}", storage.backend_name());
-        (StatusCode::NOT_FOUND, Json(json!({"error": "thumbnail not found"})))
-    })?;
+    let bytes = state
+        .cache
+        .cached_thumb(
+            &format!("thumb:{}", image_id),
+            3600,
+            async {
+                let backend = state.router.for_backend(&storage_backend);
+                backend.get(&thumb_key).await.map_err(|e| {
+                    tracing::warn!("Thumb storage read failed: {e}");
+                    (StatusCode::NOT_FOUND, Json(json!({"error": "thumbnail not found"})))
+                })
+            },
+        )
+        .await
+        .map_err(|e| e)?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -246,11 +256,21 @@ pub async fn public_get_webp(
         (StatusCode::NOT_FOUND, Json(json!({"error": "WebP not yet generated"})))
     })?;
 
-    let storage = state.router.for_backend(&storage_backend);
-    let bytes = storage.get(&webp_key).await.map_err(|e| {
-        tracing::warn!("WebP storage read failed on {}: {e}", storage.backend_name());
-        (StatusCode::NOT_FOUND, Json(json!({"error": "WebP not found"})))
-    })?;
+    let bytes = state
+        .cache
+        .cached_thumb(
+            &format!("webp:{}", image_id),
+            3600,
+            async {
+                let backend = state.router.for_backend(&storage_backend);
+                backend.get(&webp_key).await.map_err(|e| {
+                    tracing::warn!("WebP storage read failed: {e}");
+                    (StatusCode::NOT_FOUND, Json(json!({"error": "WebP not found"})))
+                })
+            },
+        )
+        .await
+        .map_err(|e| e)?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
