@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub redis: RedisConfig,
     pub upload: UploadConfig,
     pub logging: LoggingConfig,
+    pub worker: WorkerConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -59,6 +60,47 @@ pub struct LoggingConfig {
     pub format: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorkerProcessingConfig {
+    pub thumbnail_size: u32,
+    pub thumbnail_quality: u8,
+    pub webp_quality: f32,
+    pub compress_threshold_kb: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorkerConfig {
+    pub concurrency: usize,
+    pub queue_poll_timeout: u64,
+    pub task_timeout: u64,
+    pub recovery_scan_interval: u64,
+    #[serde(default)]
+    pub processing: WorkerProcessingConfig,
+}
+
+impl Default for WorkerProcessingConfig {
+    fn default() -> Self {
+        Self {
+            thumbnail_size: 300,
+            thumbnail_quality: 85,
+            webp_quality: 82.0,
+            compress_threshold_kb: 500,
+        }
+    }
+}
+
+impl Default for WorkerConfig {
+    fn default() -> Self {
+        Self {
+            concurrency: 4,
+            queue_poll_timeout: 5,
+            task_timeout: 300,
+            recovery_scan_interval: 60,
+            processing: WorkerProcessingConfig::default(),
+        }
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -69,6 +111,7 @@ impl Default for AppConfig {
             redis: RedisConfig { url: "redis://localhost:6379".into(), pool_size: 20 },
             upload: UploadConfig { max_file_size_admin: 52_428_800, max_file_size_user: 10_485_760, allowed_mimes: vec!["image/png".into(), "image/jpeg".into(), "image/gif".into(), "image/webp".into(), "image/svg+xml".into(), "image/avif".into(), "image/bmp".into()] },
             logging: LoggingConfig { level: "info".into(), format: "json".into() },
+            worker: WorkerConfig::default(),
         }
     }
 }
