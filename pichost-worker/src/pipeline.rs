@@ -1,7 +1,6 @@
 use pichost_core::config::AppConfig;
 use pichost_core::storage::{local::LocalStorage, StorageBackend};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 use crate::processor;
 
@@ -21,24 +20,7 @@ pub enum PipelineError {
     Database(String),
 }
 
-// TEMPORARY STUB — will move to queue.rs in Task 6.
-mod task_stub {
-    use serde::{Deserialize, Serialize};
-    use uuid::Uuid;
-
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct TaskPayload {
-        pub task_id: Uuid,
-        pub image_id: Uuid,
-        pub user_id: Uuid,
-        pub storage_backend: String,
-        pub source_key: String,
-        pub source_mime: String,
-        pub retry_count: i32,
-        pub max_retries: i32,
-    }
-}
-use task_stub::TaskPayload;
+use crate::queue::TaskPayload;
 
 pub async fn process_task(
     pool: &PgPool,
