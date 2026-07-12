@@ -98,6 +98,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .route_layer(protected.clone());
 
+    // User routes — rate limit by user + auth
+    let user_routes = Router::new()
+        .route("/me/stats", get(routes::users::get_my_stats))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit::rate_limit_general,
+        ))
+        .route_layer(protected.clone());
+
     // Public routes — rate limit by IP, 200 req/min
     let public_routes = Router::new()
         .route("/{public_key}", get(routes::images::public_get))
@@ -112,6 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest("/api/v1/auth", auth_routes)
         .nest("/api/v1/images", upload_routes)
         .nest("/api/v1/images", image_routes)
+        .nest("/api/v1/users", user_routes)
         .nest("/u", public_routes)
         .layer(CorsLayer::permissive())
         .layer(DefaultBodyLimit::max(52_428_800))
