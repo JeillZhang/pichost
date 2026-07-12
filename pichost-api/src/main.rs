@@ -38,7 +38,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Router::new()
                 .route("/register", post(routes::auth::register))
                 .route("/login", post(routes::auth::login))
-                .route("/refresh", post(routes::auth::refresh)),
+                .route("/refresh", post(routes::auth::refresh))
+                .route("/logout", post(routes::auth::logout)),
         )
         .nest("/api/v1/images", image_routes)
         .nest("/u", public_routes)

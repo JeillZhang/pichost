@@ -6,7 +6,7 @@ use argon2::{
 };
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 use chrono::Utc;
@@ -309,5 +309,44 @@ pub async fn refresh(
             refresh_token: new_refresh,
             user: UserInfo { id: user_id, username, email, is_admin },
         }),
+    ))
+}
+
+pub async fn logout(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
+    let token = headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "missing authorization header"))?;
+
+    let key = DecodingKey::from_secret(state.config.auth.jwt_secret.as_bytes());
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = false;
+
+    let token_data = decode::<AccessTokenClaims>(token, &key, &validation)
+        .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid token"))?;
+    let claims = token_data.claims;
+
+    if claims.typ != "access" {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "only access tokens can be logged out via this endpoint",
+        ));
+    }
+
+    let now = Utc::now().timestamp() as usize;
+    let ttl = claims.exp.saturating_sub(now);
+    if ttl > 0 {
+        let bl_key = format!("bl:{}", claims.jti);
+        let _ = state.cache.set_ex(&bl_key, "revoked", ttl as u64).await;
+    }
+
+    tracing::info!(user = %claims.sub, jti = %claims.jti, "logged out");
+    Ok((
+        StatusCode::OK,
+        Json(serde_json::json!({"message": "logged out successfully"})),
     ))
 }
