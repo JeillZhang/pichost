@@ -269,3 +269,48 @@ pub async fn public_get_webp(
         .body(axum::body::Body::from(bytes))
         .unwrap())
 }
+
+/// DELETE /api/v1/images/{id} — delete image + storage files (protected)
+pub async fn delete_image(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let row = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
+        r#"SELECT storage_key, storage_backend, thumbnail_key, webp_key
+           FROM images WHERE id = $1 AND (user_id = $2 OR $3)"#,
+    )
+    .bind(id)
+    .bind(user.id)
+    .bind(user.is_admin)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Delete image query failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal server error"})))
+    })?
+    .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"}))))?;
+
+    let (storage_key, _storage_backend, thumb_key, webp_key) = row;
+
+    let storage = pichost_core::storage::local::LocalStorage::new(
+        state.config.storage.local_base_path.clone(),
+        state.config.server.public_url.clone(),
+    );
+
+    let _ = storage.delete(&storage_key).await;
+    if let Some(ref tk) = thumb_key { let _ = storage.delete(tk).await; }
+    if let Some(ref wk) = webp_key { let _ = storage.delete(wk).await; }
+
+    sqlx::query("DELETE FROM images WHERE id = $1")
+        .bind(id)
+        .execute(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Image delete db failed: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "failed to delete image"})))
+        })?;
+
+    tracing::info!(image_id = %id, user_id = %user.id, "image deleted");
+    Ok(Json(json!({"message": "image deleted", "id": id})))
+}

@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let image_routes = Router::new()
         .route("/", get(routes::images::list_images).post(routes::images::upload_handler))
-        .route("/{id}", get(routes::images::get_image))
+        .route("/{id}", get(routes::images::get_image).delete(routes::images::delete_image))
         .route_layer(protected);
 
     let public_routes = Router::new()
