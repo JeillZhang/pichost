@@ -63,7 +63,9 @@ function createApi(): KyInstance {
       ],
       afterResponse: [
         async ({ request, response }) => {
-          if (response.status === 401) {
+          // Skip refresh on auth endpoints to avoid infinite loop
+          // when the refresh token itself is expired
+          if (response.status === 401 && !request.url.includes('/auth/')) {
             try {
               const { useAuthStore } = await import('../stores/auth')
               const refreshed = await useAuthStore.getState().refresh()
