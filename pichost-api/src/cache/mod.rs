@@ -46,6 +46,19 @@ impl Cache {
         let mut c = self.pool.get().await.map_err(pool_err)?;
         c.exists(key).await
     }
+
+    /// Atomically increment a counter and set TTL on first creation.
+    /// Returns the new count after increment.
+    pub async fn incr(&self, key: &str, ttl: u64) -> Result<u64, deadpool_redis::redis::RedisError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let mut pipe = deadpool_redis::redis::pipe();
+        pipe.cmd("INCR").arg(key).ignore()
+            .cmd("EXPIRE").arg(key).arg(ttl as usize).ignore();
+        pipe.query_async::<_, ()>(&mut *conn).await?;
+        let count: u64 = deadpool_redis::redis::cmd("GET").arg(key)
+            .query_async(&mut *conn).await?;
+        Ok(count)
+    }
 }
 
 fn pool_err(e: deadpool_redis::PoolError) -> deadpool_redis::redis::RedisError {
