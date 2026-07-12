@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{extract::DefaultBodyLimit, middleware, routing::{get, post}, Router};
@@ -19,10 +20,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = db::create_pool(&config.database.url, config.database.max_connections).await?;
     db::run_migrations(&pool).await?;
     let cache_pool = cache::create_pool(&config.redis.url, config.redis.pool_size as usize);
+
+    // ---- Initialize storage backends ----
+    use pichost_core::storage::local::LocalStorage;
+    use pichost_core::storage::s3::RustfsStorage;
+    use pichost_core::storage::StorageBackend;
+    use pichost_core::StorageRouter;
+
+    let mut backends: HashMap<String, Arc<dyn StorageBackend>> = HashMap::new();
+
+    // Always register local backend
+    let local = LocalStorage::new(
+        config.storage.local_base_path.clone(),
+        config.server.public_url.clone(),
+    );
+    backends.insert("local".into(), Arc::new(local));
+
+    // Conditionally register Rustfs backend if configured
+    if let Some(rustfs_config) = &config.storage.rustfs {
+        let rustfs = RustfsStorage::new(rustfs_config).await;
+        tracing::info!(
+            endpoint = %rustfs_config.endpoint,
+            bucket = %rustfs_config.bucket,
+            "Rustfs storage backend initialized"
+        );
+        backends.insert("rustfs".into(), Arc::new(rustfs));
+    }
+
+    let router = Arc::new(StorageRouter::new(
+        backends,
+        config.storage.default_backend.clone(),
+    ));
+
     let state = Arc::new(AppState {
         pool,
         cache: Arc::new(cache::Cache::new(cache_pool)),
         config: Arc::new(config),
+        router,
     });
 
     let protected =

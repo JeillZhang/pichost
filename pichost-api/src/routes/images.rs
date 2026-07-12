@@ -6,7 +6,6 @@ use axum::{
     response::Response,
     Json,
 };
-use pichost_core::storage::StorageBackend;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -131,8 +130,8 @@ pub async fn public_get(
     State(state): State<Arc<AppState>>,
     Path(public_key): Path<String>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    let row = sqlx::query_as::<_, (String, String, String)>(
-        "SELECT storage_key, mime_type, status FROM images WHERE public_key = $1",
+    let row = sqlx::query_as::<_, (String, String, String, String)>(
+        "SELECT storage_key, mime_type, status, storage_backend FROM images WHERE public_key = $1",
     )
     .bind(&public_key)
     .fetch_optional(&state.pool)
@@ -151,7 +150,7 @@ pub async fn public_get(
         )
     })?;
 
-    let (storage_key, mime_type, status) = row;
+    let (storage_key, mime_type, status, storage_backend) = row;
 
     // Only serve active or ready images
     if status != "active" && status != "ready" {
@@ -161,13 +160,10 @@ pub async fn public_get(
         ));
     }
 
-    // Read from LocalStorage
-    let storage = pichost_core::storage::local::LocalStorage::new(
-        state.config.storage.local_base_path.clone(),
-        state.config.server.public_url.clone(),
-    );
+    // Read from backend via router
+    let storage = state.router.for_backend(&storage_backend);
     let bytes = storage.get(&storage_key).await.map_err(|e| {
-        tracing::warn!("Storage read failed: {e}");
+        tracing::warn!("Storage read failed on {}: {e}", storage.backend_name());
         (
             StatusCode::NOT_FOUND,
             Json(json!({"error": "image not found"})),
@@ -197,8 +193,8 @@ pub async fn public_get_thumb(
     State(state): State<Arc<AppState>>,
     Path(image_id): Path<Uuid>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    let row = sqlx::query_as::<_, (Option<String>,)>(
-        "SELECT thumbnail_key FROM images WHERE id = $1 AND status IN ('active', 'ready')",
+    let row = sqlx::query_as::<_, (Option<String>, String)>(
+        "SELECT thumbnail_key, storage_backend FROM images WHERE id = $1 AND status IN ('active', 'ready')",
     )
     .bind(image_id)
     .fetch_optional(&state.pool)
@@ -209,17 +205,14 @@ pub async fn public_get_thumb(
     })?
     .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"}))))?;
 
-    let (thumb_key,) = row;
+    let (thumb_key, storage_backend) = row;
     let thumb_key = thumb_key.ok_or_else(|| {
         (StatusCode::NOT_FOUND, Json(json!({"error": "thumbnail not yet generated"})))
     })?;
 
-    let storage = pichost_core::storage::local::LocalStorage::new(
-        state.config.storage.local_base_path.clone(),
-        state.config.server.public_url.clone(),
-    );
+    let storage = state.router.for_backend(&storage_backend);
     let bytes = storage.get(&thumb_key).await.map_err(|e| {
-        tracing::warn!("Thumb storage read failed: {e}");
+        tracing::warn!("Thumb storage read failed on {}: {e}", storage.backend_name());
         (StatusCode::NOT_FOUND, Json(json!({"error": "thumbnail not found"})))
     })?;
 
@@ -236,8 +229,8 @@ pub async fn public_get_webp(
     State(state): State<Arc<AppState>>,
     Path(image_id): Path<Uuid>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    let row = sqlx::query_as::<_, (Option<String>,)>(
-        "SELECT webp_key FROM images WHERE id = $1 AND status IN ('active', 'ready')",
+    let row = sqlx::query_as::<_, (Option<String>, String)>(
+        "SELECT webp_key, storage_backend FROM images WHERE id = $1 AND status IN ('active', 'ready')",
     )
     .bind(image_id)
     .fetch_optional(&state.pool)
@@ -248,17 +241,14 @@ pub async fn public_get_webp(
     })?
     .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"}))))?;
 
-    let (webp_key,) = row;
+    let (webp_key, storage_backend) = row;
     let webp_key = webp_key.ok_or_else(|| {
         (StatusCode::NOT_FOUND, Json(json!({"error": "WebP not yet generated"})))
     })?;
 
-    let storage = pichost_core::storage::local::LocalStorage::new(
-        state.config.storage.local_base_path.clone(),
-        state.config.server.public_url.clone(),
-    );
+    let storage = state.router.for_backend(&storage_backend);
     let bytes = storage.get(&webp_key).await.map_err(|e| {
-        tracing::warn!("WebP storage read failed: {e}");
+        tracing::warn!("WebP storage read failed on {}: {e}", storage.backend_name());
         (StatusCode::NOT_FOUND, Json(json!({"error": "WebP not found"})))
     })?;
 
@@ -291,12 +281,9 @@ pub async fn delete_image(
     })?
     .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"}))))?;
 
-    let (storage_key, _storage_backend, thumb_key, webp_key) = row;
+    let (storage_key, storage_backend, thumb_key, webp_key) = row;
 
-    let storage = pichost_core::storage::local::LocalStorage::new(
-        state.config.storage.local_base_path.clone(),
-        state.config.server.public_url.clone(),
-    );
+    let storage = state.router.for_backend(&storage_backend);
 
     let _ = storage.delete(&storage_key).await;
     if let Some(ref tk) = thumb_key { let _ = storage.delete(tk).await; }
