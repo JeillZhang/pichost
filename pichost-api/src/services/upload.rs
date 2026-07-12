@@ -4,8 +4,7 @@ use axum::extract::Multipart;
 use axum::http::StatusCode;
 use axum::Json;
 use chrono::{DateTime, Utc};
-use pichost_core::storage::StorageBackend;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::app::AppState;
@@ -14,7 +13,7 @@ use deadpool_redis::redis::AsyncCommands;
 use crate::middleware::auth::AuthUser;
 use crate::services::html_escape;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UploadResult {
     pub id: Uuid,
     pub public_key: String,
@@ -249,16 +248,13 @@ pub async fn process_upload(
         }
     };
 
-    // ---- Write to LocalStorage ----
-    let storage = pichost_core::storage::local::LocalStorage::new(
-        state.config.storage.local_base_path.clone(),
-        state.config.server.public_url.clone(),
-    );
+    // ---- Write to storage ----
+    let storage = state.router.default_backend();
     storage
         .put(&storage_key, &bytes, &mime_type)
         .await
         .map_err(|e| {
-            tracing::warn!("Storage write failed: {e}");
+            tracing::warn!("Storage write failed on {}: {e}", storage.backend_name());
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": "storage write failed"})),
@@ -267,11 +263,15 @@ pub async fn process_upload(
 
     // ---- Build URL and link formats ----
     let original_name = file_name.unwrap_or_else(|| "file".to_string());
-    let url = format!(
-        "{}/u/{}",
-        state.config.server.public_url.trim_end_matches('/'),
-        public_key
-    );
+    let url = if storage.backend_name() == "local" {
+        format!(
+            "{}/u/{}",
+            state.config.server.public_url.trim_end_matches('/'),
+            public_key
+        )
+    } else {
+        storage.public_url(&storage_key)
+    };
     let markdown = format!("![{}]({})", original_name, url);
     let html = format!(
         "<img src=\"{}\" alt=\"{}\" />",

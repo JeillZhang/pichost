@@ -33,6 +33,26 @@ pub struct AuthConfig {
 pub struct StorageConfig {
     pub default_backend: String,
     pub local_base_path: PathBuf,
+    #[serde(default)]
+    pub rustfs: Option<RustfsStorageConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RustfsStorageConfig {
+    pub endpoint: String,
+    pub bucket: String,
+    pub access_key: String,
+    pub secret_key: String,
+    #[serde(default = "default_rustfs_region")]
+    pub region: String,
+    #[serde(default)]
+    pub use_ssl: bool,
+    #[serde(default)]
+    pub public_endpoint: Option<String>,
+}
+
+fn default_rustfs_region() -> String {
+    "us-east-1".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -106,7 +126,11 @@ impl Default for AppConfig {
         Self {
             server: ServerConfig { host: "0.0.0.0".into(), port: 3000, public_url: "http://localhost:3000".into(), cors_origins: vec!["http://localhost:5173".into()] },
             auth: AuthConfig { jwt_secret: String::new(), access_token_ttl: 900, refresh_token_ttl: 2_592_000 },
-            storage: StorageConfig { default_backend: "local".into(), local_base_path: PathBuf::from("./storage-local") },
+            storage: StorageConfig {
+                default_backend: "local".into(),
+                local_base_path: PathBuf::from("./storage-local"),
+                rustfs: None,
+            },
             database: DatabaseConfig { url: "postgres://pichost:pichost@localhost:5432/pichost".into(), max_connections: 10 },
             redis: RedisConfig { url: "redis://localhost:6379".into(), pool_size: 20 },
             upload: UploadConfig { max_file_size_admin: 52_428_800, max_file_size_user: 10_485_760, allowed_mimes: vec!["image/png".into(), "image/jpeg".into(), "image/gif".into(), "image/webp".into(), "image/svg+xml".into(), "image/avif".into(), "image/bmp".into()] },

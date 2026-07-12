@@ -31,3 +31,5 @@ infer = "0.16"
 figment = { version = "0.10", features = ["toml", "env"] }
 image = { version = "0.25", default-features = false }
 webp = "0.2"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1"

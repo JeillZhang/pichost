@@ -1,5 +1,5 @@
 use pichost_core::config::AppConfig;
-use pichost_core::storage::{local::LocalStorage, StorageBackend};
+use pichost_core::StorageRouter;
 use sqlx::PgPool;
 
 use crate::processor;
@@ -25,15 +25,13 @@ use crate::queue::TaskPayload;
 
 pub async fn process_task(
     pool: &PgPool,
+    router: &StorageRouter,
     config: &AppConfig,
     task: &TaskPayload,
 ) -> Result<(), PipelineError> {
-    let storage = LocalStorage::new(
-        config.storage.local_base_path.clone(),
-        config.server.public_url.clone(),
-    );
+    let source_backend = router.for_backend(&task.storage_backend);
 
-    let bytes = storage
+    let bytes = source_backend
         .get(&task.source_key)
         .await
         .map_err(|e| PipelineError::StorageRead(e.to_string()))?;
@@ -56,7 +54,7 @@ pub async fn process_task(
     let (thumb_written, _thumb_mime) = processor::generate_thumbnail(
         &img,
         fmt,
-        &storage,
+        source_backend.as_ref(),
         &thumb_key,
         config.worker.processing.thumbnail_size,
         config.worker.processing.thumbnail_quality,
@@ -67,7 +65,7 @@ pub async fn process_task(
     let (webp_written, _webp_mime) = processor::convert_to_webp(
         &img,
         fmt,
-        &storage,
+        source_backend.as_ref(),
         &webp_key,
         config.worker.processing.webp_quality,
     )
@@ -112,6 +110,7 @@ pub async fn process_task(
     tracing::info!(
         image_id = %task.image_id, width, height,
         thumb = thumb_written, webp = webp_written,
+        backend = task.storage_backend,
         "processing complete"
     );
 
