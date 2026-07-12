@@ -58,10 +58,14 @@ async fn enqueue_processing_task(
     };
 
     let payload_json = serde_json::to_string(&payload).unwrap_or_default();
+    let now = chrono::Utc::now().to_rfc3339();
     let task_key = format!("pichost:task:{task_id}");
 
-    // Store payload hash
-    let _: Result<(), _> = conn.hset(&task_key, "payload", &payload_json).await;
+    // Store task data hash — field names must match queue.rs convention
+    let _: Result<(), _> = conn.hset(&task_key, "data", &payload_json).await;
+    let _: Result<(), _> = conn.hset(&task_key, "status", "pending").await;
+    let _: Result<(), _> = conn.hset(&task_key, "created_at", &now).await;
+    let _: Result<(), _> = conn.hset(&task_key, "updated_at", &now).await;
     // Push to pending queue
     let _: Result<(), _> = conn.lpush("pichost:tasks:pending", task_id.to_string()).await;
 

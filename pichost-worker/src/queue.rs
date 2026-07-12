@@ -99,7 +99,16 @@ pub async fn dequeue_task(redis: &Pool, timeout: u64) -> Result<Option<TaskPaylo
 
     // Read the full task data from the HSET
     let json: Option<String> = conn.hget(&key, "data").await?;
-    let json = json.ok_or(QueueError::MissingData(task_id))?;
+    let json = match json {
+        Some(j) => j,
+        None => {
+            // Orphaned task — data hash was never written. Clean up and skip.
+            conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, task_id.to_string())
+                .await.map_err(QueueError::Redis)?;
+            tracing::warn!(%task_id, "cleaned up orphaned task (no data hash)");
+            return Err(QueueError::MissingData(task_id));
+        }
+    };
 
     let task: TaskPayload = serde_json::from_str(&json)?;
 
