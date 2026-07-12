@@ -8,6 +8,7 @@ use crate::processor;
 pub enum PipelineError {
     #[error("storage read failed: {0}")]
     StorageRead(String),
+    #[allow(dead_code)]
     #[error("storage write failed: {0}")]
     StorageWrite(String),
     #[error("image decode failed: {0}")]
@@ -44,8 +45,7 @@ pub async fn process_task(
         .map_err(|e| PipelineError::Decode(e.to_string()))?;
 
     let (width, height) = (img.width() as i32, img.height() as i32);
-    let fmt = image::guess_format(&bytes)
-        .map_err(|e| PipelineError::Decode(e.to_string()))?;
+    let fmt = image::guess_format(&bytes).map_err(|e| PipelineError::Decode(e.to_string()))?;
 
     let thumb_key = format!("{}/thumb.{}", task.user_id, task.image_id);
     let webp_key = format!("{}/webp.{}", task.user_id, task.image_id);
@@ -54,19 +54,25 @@ pub async fn process_task(
     let webp_url = format!("{}/u/webp-{}", public_url, task.image_id);
 
     let (thumb_written, _thumb_mime) = processor::generate_thumbnail(
-        &img, fmt, &storage, &thumb_key,
+        &img,
+        fmt,
+        &storage,
+        &thumb_key,
         config.worker.processing.thumbnail_size,
         config.worker.processing.thumbnail_quality,
     )
     .await
-    .map_err(|e| PipelineError::Thumbnail(e))?;
+    .map_err(PipelineError::Thumbnail)?;
 
     let (webp_written, _webp_mime) = processor::convert_to_webp(
-        &img, fmt, &storage, &webp_key,
+        &img,
+        fmt,
+        &storage,
+        &webp_key,
         config.worker.processing.webp_quality,
     )
     .await
-    .map_err(|e| PipelineError::Webp(e))?;
+    .map_err(PipelineError::Webp)?;
 
     sqlx::query(
         r#"UPDATE images SET
@@ -78,10 +84,26 @@ pub async fn process_task(
     )
     .bind(width)
     .bind(height)
-    .bind(if thumb_written { Some(&thumb_key) } else { None::<&String> })
-    .bind(if thumb_written { Some(&thumb_url) } else { None::<&String> })
-    .bind(if webp_written { Some(&webp_key) } else { None::<&String> })
-    .bind(if webp_written { Some(&webp_url) } else { None::<&String> })
+    .bind(if thumb_written {
+        Some(&thumb_key)
+    } else {
+        None::<&String>
+    })
+    .bind(if thumb_written {
+        Some(&thumb_url)
+    } else {
+        None::<&String>
+    })
+    .bind(if webp_written {
+        Some(&webp_key)
+    } else {
+        None::<&String>
+    })
+    .bind(if webp_written {
+        Some(&webp_url)
+    } else {
+        None::<&String>
+    })
     .bind(task.image_id)
     .execute(pool)
     .await

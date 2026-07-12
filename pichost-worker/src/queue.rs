@@ -52,6 +52,7 @@ fn task_key(task_id: Uuid) -> String {
 ///
 /// Serializes `task` to JSON, stores it in an HSET under `pichost:task:{task_id}`,
 /// and pushes the task ID to `pichost:tasks:pending`.
+#[allow(dead_code)]
 pub async fn enqueue_task(redis: &Pool, task: &TaskPayload) -> Result<(), QueueError> {
     let mut conn = redis.get().await?;
     let key = task_key(task.task_id);
@@ -65,7 +66,8 @@ pub async fn enqueue_task(redis: &Pool, task: &TaskPayload) -> Result<(), QueueE
     conn.hset::<_, _, _, ()>(&key, "updated_at", &now).await?;
 
     // Push to pending queue (list)
-    conn.lpush::<_, _, ()>(KEY_PENDING, task.task_id.to_string()).await?;
+    conn.lpush::<_, _, ()>(KEY_PENDING, task.task_id.to_string())
+        .await?;
 
     Ok(())
 }
@@ -80,8 +82,9 @@ pub async fn dequeue_task(redis: &Pool, timeout: u64) -> Result<Option<TaskPaylo
 
     // Atomically move from pending to processing.
     // BLOCKING — waits up to `timeout` seconds for an element.
-    let task_id_str: Option<String> =
-        conn.brpoplpush(KEY_PENDING, KEY_PROCESSING, timeout as f64).await?;
+    let task_id_str: Option<String> = conn
+        .brpoplpush(KEY_PENDING, KEY_PROCESSING, timeout as f64)
+        .await?;
 
     let task_id_str = match task_id_str {
         Some(s) => s,
@@ -102,7 +105,8 @@ pub async fn dequeue_task(redis: &Pool, timeout: u64) -> Result<Option<TaskPaylo
 
     // Mark as processing
     let now = Utc::now().to_rfc3339();
-    conn.hset::<_, _, _, ()>(&key, "status", "processing").await?;
+    conn.hset::<_, _, _, ()>(&key, "status", "processing")
+        .await?;
     conn.hset::<_, _, _, ()>(&key, "updated_at", &now).await?;
 
     Ok(Some(task))
@@ -118,7 +122,8 @@ pub async fn ack_task(redis: &Pool, task_id: Uuid) -> Result<(), QueueError> {
     let now = Utc::now().to_rfc3339();
 
     // Remove one occurrence from the processing queue
-    conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, task_id.to_string()).await?;
+    conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, task_id.to_string())
+        .await?;
 
     // Mark as done
     conn.hset::<_, _, _, ()>(&key, "status", "done").await?;
@@ -144,7 +149,8 @@ pub async fn nack_task(
     let now = Utc::now().to_rfc3339();
 
     // Remove from processing queue
-    conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, task.task_id.to_string()).await?;
+    conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, task.task_id.to_string())
+        .await?;
 
     // Store the error message
     conn.hset::<_, _, _, ()>(&key, "error", err).await?;
@@ -158,12 +164,14 @@ pub async fn nack_task(
         let json = serde_json::to_string(&updated)?;
         conn.hset::<_, _, _, ()>(&key, "data", &json).await?;
         conn.hset::<_, _, _, ()>(&key, "status", "pending").await?;
-        conn.lpush::<_, _, ()>(KEY_PENDING, task.task_id.to_string()).await?;
+        conn.lpush::<_, _, ()>(KEY_PENDING, task.task_id.to_string())
+            .await?;
 
         Ok(NackAction::Retry)
     } else {
         // Max retries exhausted — move to dead-letter queue
-        conn.lpush::<_, _, ()>(KEY_DEAD, task.task_id.to_string()).await?;
+        conn.lpush::<_, _, ()>(KEY_DEAD, task.task_id.to_string())
+            .await?;
         conn.hset::<_, _, _, ()>(&key, "status", "dead").await?;
 
         tracing::warn!(
@@ -249,7 +257,8 @@ pub async fn recover_stale_tasks(
         let now = Utc::now().to_rfc3339();
         conn.hset::<_, _, _, ()>(&key, "status", "pending").await?;
         conn.hset::<_, _, _, ()>(&key, "updated_at", &now).await?;
-        conn.hset::<_, _, _, ()>(&key, "error", "recovered: stale").await?;
+        conn.hset::<_, _, _, ()>(&key, "error", "recovered: stale")
+            .await?;
         conn.lpush::<_, _, ()>(KEY_PENDING, id_str).await?;
 
         tracing::info!(

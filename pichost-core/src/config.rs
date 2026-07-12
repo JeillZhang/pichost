@@ -116,6 +116,7 @@ impl Default for AppConfig {
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub fn load_config() -> Result<AppConfig, figment::Error> {
     Figment::new()
         .merge(Serialized::defaults(AppConfig::default()))

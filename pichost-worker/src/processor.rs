@@ -1,7 +1,10 @@
 use image::{DynamicImage, ImageFormat};
 use pichost_core::storage::StorageBackend;
 
-fn thumbnail_output_format(img: &DynamicImage, source_fmt: ImageFormat) -> (ImageFormat, &'static str) {
+fn thumbnail_output_format(
+    img: &DynamicImage,
+    source_fmt: ImageFormat,
+) -> (ImageFormat, &'static str) {
     match source_fmt {
         ImageFormat::Png => {
             if img.color().has_alpha() {
@@ -19,7 +22,10 @@ fn should_thumbnail(fmt: ImageFormat) -> bool {
 }
 
 fn should_webp(fmt: ImageFormat) -> bool {
-    matches!(fmt, ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::Avif | ImageFormat::Bmp)
+    matches!(
+        fmt,
+        ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::Avif | ImageFormat::Bmp
+    )
 }
 
 pub async fn generate_thumbnail(
@@ -43,15 +49,20 @@ pub async fn generate_thumbnail(
     match out_fmt {
         ImageFormat::Jpeg => {
             let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
-            thumb.write_with_encoder(encoder).map_err(|e| format!("jpeg encode: {e}"))?;
+            thumb
+                .write_with_encoder(encoder)
+                .map_err(|e| format!("jpeg encode: {e}"))?;
         }
         ImageFormat::Png => {
-            thumb.write_to(&mut std::io::Cursor::new(&mut buf), ImageFormat::Png)
+            thumb
+                .write_to(&mut std::io::Cursor::new(&mut buf), ImageFormat::Png)
                 .map_err(|e| format!("png encode: {e}"))?;
         }
         _ => return Err(format!("unsupported thumb output format: {out_fmt:?}")),
     }
-    storage.put(key, &buf, mime).await
+    storage
+        .put(key, &buf, mime)
+        .await
         .map_err(|e| format!("thumb storage write: {e}"))?;
     Ok((true, mime.to_string()))
 }
@@ -68,8 +79,15 @@ pub async fn convert_to_webp(
     }
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
-    let webp_data = webp::Encoder::from_rgba(&rgba, w, h).encode(quality);
-    storage.put(key, webp_data.as_ref(), "image/webp").await
+    let webp_bytes: Vec<u8> = {
+        let webp_data = webp::Encoder::from_rgba(&rgba, w, h).encode(quality);
+        webp_data.to_vec()
+        // webp_data (WebPMemory) is dropped here — it is not Send, so we
+        // scope it tightly before the await boundary.
+    };
+    storage
+        .put(key, &webp_bytes, "image/webp")
+        .await
         .map_err(|e| format!("webp storage write: {e}"))?;
     Ok((true, "image/webp".to_string()))
 }
