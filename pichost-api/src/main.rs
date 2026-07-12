@@ -123,6 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest("/api/v1/images", image_routes)
         .nest("/api/v1/users", user_routes)
         .nest("/u", public_routes)
+        .route("/api/health", get(routes::health::health_check))
         .layer(CorsLayer::permissive())
         .layer(DefaultBodyLimit::max(52_428_800))
         // Security headers

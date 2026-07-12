@@ -119,8 +119,7 @@ pub async fn get_image(
             })
         },
     )
-    .await
-    .map_err(|e| e)?;
+    .await?;
 
     Ok(Json(result))
 }
@@ -223,8 +222,7 @@ pub async fn public_get_thumb(
                 })
             },
         )
-        .await
-        .map_err(|e| e)?;
+        .await?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -269,8 +267,7 @@ pub async fn public_get_webp(
                 })
             },
         )
-        .await
-        .map_err(|e| e)?;
+        .await?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
