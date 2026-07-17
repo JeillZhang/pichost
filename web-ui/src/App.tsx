@@ -2,11 +2,14 @@ import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { useAuthStore } from './stores/auth'
+import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Gallery from './pages/Gallery'
 import ImageDetail from './pages/ImageDetail'
+import Admin from './pages/Admin'
 import ProtectedRoute from './components/ProtectedRoute'
+import AdminRoute from './components/AdminRoute'
 
 export default function App() {
   const loadFromStorage = useAuthStore((s) => s.loadFromStorage)
@@ -17,19 +20,27 @@ export default function App() {
     loadFromStorage()
   }, [loadFromStorage])
 
+  if (!hasLoaded) {
+    return (
+      <div
+        className="flex min-h-screen items-center justify-center"
+        style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-muted)' }}
+      >
+        <div
+          className="h-8 w-8 animate-spin rounded-full border-2"
+          style={{ borderColor: 'var(--color-border)', borderTopColor: 'var(--color-accent)' }}
+        />
+      </div>
+    )
+  }
+
   return (
     <>
       <Routes>
         <Route
           path="/"
           element={
-            !hasLoaded ? (
-              <div className="flex min-h-screen items-center justify-center bg-gray-950">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-white" />
-              </div>
-            ) : (
-              <Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />
-            )
+            <Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />
           }
         />
         <Route path="/login" element={<Login />} />
@@ -37,7 +48,9 @@ export default function App() {
           path="/dashboard"
           element={
             <ProtectedRoute>
-              <Dashboard />
+              <Layout>
+                <Dashboard />
+              </Layout>
             </ProtectedRoute>
           }
         />
@@ -45,7 +58,9 @@ export default function App() {
           path="/gallery"
           element={
             <ProtectedRoute>
-              <Gallery />
+              <Layout>
+                <Gallery />
+              </Layout>
             </ProtectedRoute>
           }
         />
@@ -53,7 +68,21 @@ export default function App() {
           path="/images/:id"
           element={
             <ProtectedRoute>
-              <ImageDetail />
+              <Layout>
+                <ImageDetail />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/*"
+          element={
+            <ProtectedRoute>
+              <AdminRoute>
+                <Layout>
+                  <Admin />
+                </Layout>
+              </AdminRoute>
             </ProtectedRoute>
           }
         />
