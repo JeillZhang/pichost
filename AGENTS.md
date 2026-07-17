@@ -87,6 +87,7 @@
   避免每次重复分析待开发功能。
 - commit 时，描述信息及标题统一使用英文，`docs\superpowers` 下的文档统一使用中文。
 - 当要创建PR时，只需要创建并反馈链接即可，实际创建合入过程交给我就行。
+- 每次规划需求活开发新特性前，先阅读一下 `.omo\summary\summary_and_next.md`、`docs\superpowers` 下的文档。
 
 ## Summary
 
