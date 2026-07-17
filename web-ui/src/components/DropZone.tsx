@@ -63,8 +63,8 @@ export default function DropZone({ onUpload, isUploading }: DropZoneProps) {
       {...getRootProps()}
       className={`cursor-pointer rounded-xl border-2 border-dashed p-12 text-center transition-colors ${
         isDragActive
-          ? 'border-blue-500 bg-blue-500/10'
-          : 'border-gray-700 bg-gray-900/50 hover:border-gray-500'
+          ? 'border-[var(--color-accent)] bg-[var(--color-accent-subtle)]'
+          : 'border-[var(--color-border)] bg-[var(--glass-bg)] hover:border-[var(--color-border-hover)]'
       } ${isUploading ? 'pointer-events-none opacity-50' : ''}`}
     >
       <input {...getInputProps()} />

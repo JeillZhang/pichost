@@ -22,7 +22,7 @@ export default function LinkCard({ label, value }: LinkCardProps) {
   }
 
   return (
-    <div className="group rounded-lg border border-gray-800 bg-gray-900/30 p-3">
+    <div className="group rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-3">
       <div className="mb-1 text-xs font-medium text-gray-500">{label}</div>
       <div className="flex items-center gap-2">
         <code className="max-w-full flex-1 truncate text-sm text-gray-300">
