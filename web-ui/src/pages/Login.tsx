@@ -30,21 +30,39 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
+    <div className="flex min-h-screen items-center justify-center p-4" style={{ backgroundColor: 'var(--color-bg)' }}>
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-white">PicHost</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <h1
+            className="text-4xl font-bold"
+            style={{
+              background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+            }}
+          >
+            PicHost
+          </h1>
+          <p className="mt-1 text-sm" style={{ color: 'var(--color-text-muted)' }}>
             Self-hosted image hosting
           </p>
         </div>
 
         <form
           onSubmit={handleSubmit}
-          className="space-y-4 rounded-xl border border-gray-800 bg-gray-900/50 p-6"
+          className="space-y-4 rounded-xl p-6"
+          style={{
+            backgroundColor: 'var(--glass-bg)',
+            border: '1px solid var(--glass-border)',
+            backdropFilter: 'blur(var(--glass-blur))',
+            boxShadow: 'var(--glass-shadow)',
+          }}
         >
           {error && (
-            <div className="rounded-lg bg-red-900/30 px-4 py-2 text-sm text-red-400">
+            <div
+              className="rounded-lg px-4 py-2 text-sm"
+              style={{ backgroundColor: 'var(--color-danger-subtle)', color: 'var(--color-danger)' }}
+            >
               {error}
             </div>
           )}
@@ -52,7 +70,8 @@ export default function Login() {
           <div>
             <label
               htmlFor="username"
-              className="block text-sm font-medium text-gray-300"
+              className="block text-sm font-medium"
+              style={{ color: 'var(--color-text-secondary)' }}
             >
               Username
             </label>
@@ -63,7 +82,12 @@ export default function Login() {
               minLength={3}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg px-3 py-2 placeholder-gray-500 focus:outline-none focus:ring-1"
+              style={{
+                backgroundColor: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
               placeholder="your username"
             />
           </div>
@@ -71,7 +95,8 @@ export default function Login() {
           <div>
             <label
               htmlFor="password"
-              className="block text-sm font-medium text-gray-300"
+              className="block text-sm font-medium"
+              style={{ color: 'var(--color-text-secondary)' }}
             >
               Password
             </label>
@@ -82,7 +107,12 @@ export default function Login() {
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg px-3 py-2 placeholder-gray-500 focus:outline-none focus:ring-1"
+              style={{
+                backgroundColor: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
               placeholder="••••••••"
             />
           </div>
@@ -90,7 +120,10 @@ export default function Login() {
           <button
             type="submit"
             disabled={isLoading}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ backgroundColor: 'var(--color-accent)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-accent)')}
           >
             {isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -102,12 +135,13 @@ export default function Login() {
             {isRegister ? 'Register' : 'Sign In'}
           </button>
 
-          <p className="text-center text-sm text-gray-500">
+          <p className="text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
             {isRegister ? 'Already have an account?' : "Don't have an account?"}{' '}
             <button
               type="button"
               onClick={toggleMode}
-              className="text-blue-400 hover:text-blue-300"
+              style={{ color: 'var(--color-accent)' }}
+              className="hover:opacity-80"
             >
               {isRegister ? 'Sign in' : 'Register'}
             </button>
