@@ -97,7 +97,15 @@ pub async fn rate_limit_upload(
         .get::<AuthUser>()
         .map(|u| u.id.to_string())
         .unwrap_or_else(|| extract_client_ip(&req));
-    match check_rate_limit(&state.cache, "upload", &key, POLICY_UPLOAD.1, POLICY_UPLOAD.2).await {
+    match check_rate_limit(
+        &state.cache,
+        "upload",
+        &key,
+        POLICY_UPLOAD.1,
+        POLICY_UPLOAD.2,
+    )
+    .await
+    {
         Ok(_) => Ok(next.run(req).await),
         Err(retry_after) => {
             tracing::warn!(key = %key, "upload rate limited");
@@ -139,7 +147,15 @@ pub async fn rate_limit_public(
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     let ip = extract_client_ip(&req);
-    match check_rate_limit(&state.cache, "public", &ip, POLICY_PUBLIC.1, POLICY_PUBLIC.2).await {
+    match check_rate_limit(
+        &state.cache,
+        "public",
+        &ip,
+        POLICY_PUBLIC.1,
+        POLICY_PUBLIC.2,
+    )
+    .await
+    {
         Ok(_) => Ok(next.run(req).await),
         Err(retry_after) => {
             tracing::warn!(ip = %ip, "public rate limited");

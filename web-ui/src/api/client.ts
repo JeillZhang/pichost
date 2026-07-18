@@ -36,6 +36,19 @@ export interface ImageInfo {
 
 export interface UploadResult extends ImageInfo {}
 
+export interface InviteCodeInfo {
+  code: string
+  created_by: string
+  expires_at: number
+  used_by: string | null
+  created_at: number
+}
+
+export interface CreateInviteResponse {
+  code: string
+  expires_at: number
+}
+
 export async function refreshToken(): Promise<AuthResponse> {
   const refreshToken = localStorage.getItem('refresh_token')
   if (!refreshToken) throw new Error('No refresh token')
@@ -98,9 +111,12 @@ const api = createApi()
 export async function register(
   username: string,
   password: string,
+  inviteCode?: string,
 ): Promise<AuthResponse> {
+  const body: Record<string, string> = { username, password }
+  if (inviteCode) body.invite_code = inviteCode
   return api
-    .post('auth/register', { json: { username, password } })
+    .post('auth/register', { json: body })
     .json<AuthResponse>()
 }
 
@@ -125,6 +141,16 @@ export async function listImages(): Promise<ImageInfo[]> {
 
 export async function getImage(id: string): Promise<ImageInfo> {
   return api.get(`images/${id}`).json<ImageInfo>()
+}
+
+export async function createInviteCode(ttlDays?: number): Promise<CreateInviteResponse> {
+  return api
+    .post('admin/invites', { json: { ttl_days: ttlDays ?? 7 } })
+    .json<CreateInviteResponse>()
+}
+
+export async function listInviteCodes(): Promise<InviteCodeInfo[]> {
+  return api.get('admin/invites').json<InviteCodeInfo[]>()
 }
 
 export default api

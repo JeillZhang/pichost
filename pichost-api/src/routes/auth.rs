@@ -16,6 +16,7 @@ use tracing;
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::cache;
 use pichost_core::config::AppConfig;
 
 // ---- Request / Response types ----
@@ -25,6 +26,7 @@ pub struct RegisterRequest {
     pub username: String,
     pub password: String,
     pub email: Option<String>,
+    pub invite_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,6 +143,49 @@ pub async fn register(
         ));
     }
 
+    // Check if this is the first user (admin)
+    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("User count query failed: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        })?;
+
+    let is_first_user = user_count == 0;
+
+    // Require and verify invite code if users already exist
+    if !is_first_user {
+        let code = payload.invite_code.as_deref().ok_or_else(|| {
+            error_response(StatusCode::BAD_REQUEST, "invite code is required")
+        })?;
+
+        match state.cache.verify_invite_code(code).await.map_err(|e| {
+            tracing::warn!("Invite code verification failed: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        })? {
+            cache::InviteVerifyResult::Valid => {}
+            cache::InviteVerifyResult::Used => {
+                return Err(error_response(
+                    StatusCode::BAD_REQUEST,
+                    "invite code has already been used",
+                ));
+            }
+            cache::InviteVerifyResult::Expired => {
+                return Err(error_response(
+                    StatusCode::BAD_REQUEST,
+                    "invite code has expired",
+                ));
+            }
+            cache::InviteVerifyResult::NotFound => {
+                return Err(error_response(
+                    StatusCode::BAD_REQUEST,
+                    "invalid invite code",
+                ));
+            }
+        }
+    }
+
     // Hash password
     let salt = SaltString::generate(&mut OsRng);
     let hash = Argon2::default()
@@ -151,13 +196,14 @@ pub async fn register(
         })?
         .to_string();
 
-    // Insert user
+    // Insert user (first user becomes admin)
     let user_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
+        "INSERT INTO users (username, email, password_hash, is_admin) VALUES ($1, $2, $3, $4) RETURNING id",
     )
     .bind(&payload.username)
     .bind(&payload.email)
     .bind(&hash)
+    .bind(is_first_user)
     .fetch_one(&state.pool)
     .await
     .map_err(|e| {
@@ -175,8 +221,15 @@ pub async fn register(
         error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
     })?;
 
+    // Consume invite code if not first user
+    if !is_first_user {
+        if let Some(code) = &payload.invite_code {
+            let _ = state.cache.consume_invite_code(code, &user_id).await;
+        }
+    }
+
     let (access_token, refresh_token, _access_claims, _refresh_claims) =
-        generate_tokens(user_id, false, &state.config).map_err(|e| {
+        generate_tokens(user_id, is_first_user, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         })?;
@@ -188,7 +241,7 @@ pub async fn register(
             id: user_id,
             username: payload.username,
             email: payload.email,
-            is_admin: false,
+            is_admin: is_first_user,
         },
     };
 
@@ -254,19 +307,29 @@ pub async fn refresh(
     validation.validate_exp = true;
 
     let token_data = decode::<RefreshTokenClaims>(&payload.refresh_token, &key, &validation)
-        .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid or expired refresh token"))?;
+        .map_err(|_| {
+            error_response(StatusCode::UNAUTHORIZED, "invalid or expired refresh token")
+        })?;
     let claims = token_data.claims;
 
     if claims.typ != "refresh" {
-        return Err(error_response(StatusCode::UNAUTHORIZED, "invalid token type"));
+        return Err(error_response(
+            StatusCode::UNAUTHORIZED,
+            "invalid token type",
+        ));
     }
 
     let bl_refresh_key = format!("bl:{}", claims.jti);
     if state.cache.exists(&bl_refresh_key).await.unwrap_or(true) {
-        return Err(error_response(StatusCode::UNAUTHORIZED, "refresh token has been revoked"));
+        return Err(error_response(
+            StatusCode::UNAUTHORIZED,
+            "refresh token has been revoked",
+        ));
     }
 
-    let user_id: Uuid = claims.sub.parse()
+    let user_id: Uuid = claims
+        .sub
+        .parse()
         .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid token subject"))?;
 
     let row = sqlx::query_as::<_, (String, Option<String>, bool)>(
@@ -283,21 +346,26 @@ pub async fn refresh(
     let (username, email, is_admin) = row;
 
     let (new_access, new_refresh, _new_access_claims, _new_refresh_claims) =
-        generate_tokens(user_id, is_admin, config)
-            .map_err(|e| {
-                tracing::warn!("Refresh token generation failed: {e}");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "token generation failed")
-            })?;
+        generate_tokens(user_id, is_admin, config).map_err(|e| {
+            tracing::warn!("Refresh token generation failed: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "token generation failed")
+        })?;
 
     let now = Utc::now().timestamp() as usize;
 
     let refresh_ttl = claims.exp.saturating_sub(now);
-    let _ = state.cache.set_ex(&bl_refresh_key, "revoked", refresh_ttl as u64).await;
+    let _ = state
+        .cache
+        .set_ex(&bl_refresh_key, "revoked", refresh_ttl as u64)
+        .await;
 
     let bl_access_key = format!("bl:{}", claims.access_jti);
     let access_ttl = claims.access_exp.saturating_sub(now);
     if access_ttl > 0 {
-        let _ = state.cache.set_ex(&bl_access_key, "revoked", access_ttl as u64).await;
+        let _ = state
+            .cache
+            .set_ex(&bl_access_key, "revoked", access_ttl as u64)
+            .await;
     }
 
     tracing::info!(user = %user_id, "tokens refreshed (rotation)");
@@ -307,7 +375,12 @@ pub async fn refresh(
         Json(RefreshResponse {
             access_token: new_access,
             refresh_token: new_refresh,
-            user: UserInfo { id: user_id, username, email, is_admin },
+            user: UserInfo {
+                id: user_id,
+                username,
+                email,
+                is_admin,
+            },
         }),
     ))
 }

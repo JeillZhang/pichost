@@ -10,8 +10,22 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::cache::InviteCodeInfo;
 use crate::middleware::auth::AuthUser;
 use crate::routes::auth::UserInfo;
+
+// ── Invite Code types ──
+
+#[derive(Debug, Deserialize)]
+pub struct CreateInviteBody {
+    pub ttl_days: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateInviteResponse {
+    pub code: String,
+    pub expires_at: i64,
+}
 
 // ---- User management types ----
 
@@ -40,10 +54,23 @@ pub async fn list_users(
         .await
         .map_err(|e| {
             tracing::warn!("Admin user count query failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal error"})),
+            )
         })?;
 
-    let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, bool, String, chrono::DateTime<chrono::Utc>)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            String,
+            Option<String>,
+            bool,
+            String,
+            chrono::DateTime<chrono::Utc>,
+        ),
+    >(
         r#"SELECT id, username, email, is_admin, storage_backend, created_at
            FROM users ORDER BY created_at DESC OFFSET $1 LIMIT $2"#,
     )
@@ -53,17 +80,22 @@ pub async fn list_users(
     .await
     .map_err(|e| {
         tracing::warn!("Admin user list query failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "internal error"})),
+        )
     })?;
 
     let users = rows
         .into_iter()
-        .map(|(id, username, email, _is_admin, _storage_backend, _created_at)| UserInfo {
-            id,
-            username,
-            email,
-            is_admin: _is_admin,
-        })
+        .map(
+            |(id, username, email, _is_admin, _storage_backend, _created_at)| UserInfo {
+                id,
+                username,
+                email,
+                is_admin: _is_admin,
+            },
+        )
         .collect();
 
     Ok(Json(ListUsersResponse { users, total }))
@@ -102,10 +134,16 @@ pub async fn update_user(
     .await
     .map_err(|e| {
         tracing::warn!("Admin update user query failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "internal error"})),
+        )
     })?
     .ok_or_else(|| {
-        (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "user not found"})))
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "user not found"})),
+        )
     })?;
 
     let (username, email, is_admin, storage_backend) = existing;
@@ -153,7 +191,10 @@ pub async fn update_user(
         .await
         .map_err(|e| {
             tracing::warn!("Admin update user (with pw) failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal error"})),
+            )
         })?;
     } else {
         sqlx::query(
@@ -169,7 +210,10 @@ pub async fn update_user(
         .await
         .map_err(|e| {
             tracing::warn!("Admin update user failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal error"})),
+            )
         })?;
     }
 
@@ -198,19 +242,18 @@ pub async fn delete_user(
     }
 
     // Verify user exists
-    let exists: bool = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)",
-    )
-    .bind(user_id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("Admin delete user check failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal error"})),
-        )
-    })?;
+    let exists: bool =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
+            .bind(user_id)
+            .fetch_one(&state.pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Admin delete user check failed: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "internal error"})),
+                )
+            })?;
 
     if !exists {
         return Err((
@@ -350,7 +393,10 @@ pub async fn get_admin_stats(
         .await
         .map_err(|e| {
             tracing::warn!("Admin stats user count failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal error"})),
+            )
         })?;
 
     let img_row = sqlx::query_as::<_, (i64, Option<i64>)>(
@@ -361,7 +407,10 @@ pub async fn get_admin_stats(
     .await
     .map_err(|e| {
         tracing::warn!("Admin stats image query failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "internal error"})),
+        )
     })?;
     let (total_images, total_size) = (img_row.0, img_row.1.unwrap_or(0));
 
@@ -417,14 +466,80 @@ pub async fn get_admin_stats(
 
     // Populate cache (best-effort)
     let nil_uuid = uuid::Uuid::nil();
-    let _ = state.cache.incr_user_stat(&nil_uuid, "total_users", total_users).await;
-    let _ = state.cache.incr_user_stat(&nil_uuid, "total_images", total_images).await;
-    let _ = state.cache.incr_user_stat(&nil_uuid, "total_size", total_size).await;
-    let _ = state.cache.incr_user_stat(&nil_uuid, "active_users_24h", active_users_24h).await;
-    let _ = state.cache.incr_user_stat(&nil_uuid, "local_images", local_row.0).await;
-    let _ = state.cache.incr_user_stat(&nil_uuid, "local_size", local_row.1.unwrap_or(0)).await;
-    let _ = state.cache.incr_user_stat(&nil_uuid, "rustfs_images", rustfs_row.0).await;
-    let _ = state.cache.incr_user_stat(&nil_uuid, "rustfs_size", rustfs_row.1.unwrap_or(0)).await;
+    let _ = state
+        .cache
+        .incr_user_stat(&nil_uuid, "total_users", total_users)
+        .await;
+    let _ = state
+        .cache
+        .incr_user_stat(&nil_uuid, "total_images", total_images)
+        .await;
+    let _ = state
+        .cache
+        .incr_user_stat(&nil_uuid, "total_size", total_size)
+        .await;
+    let _ = state
+        .cache
+        .incr_user_stat(&nil_uuid, "active_users_24h", active_users_24h)
+        .await;
+    let _ = state
+        .cache
+        .incr_user_stat(&nil_uuid, "local_images", local_row.0)
+        .await;
+    let _ = state
+        .cache
+        .incr_user_stat(&nil_uuid, "local_size", local_row.1.unwrap_or(0))
+        .await;
+    let _ = state
+        .cache
+        .incr_user_stat(&nil_uuid, "rustfs_images", rustfs_row.0)
+        .await;
+    let _ = state
+        .cache
+        .incr_user_stat(&nil_uuid, "rustfs_size", rustfs_row.1.unwrap_or(0))
+        .await;
 
     Ok(Json(stats))
+}
+
+// ── Invite Code handlers ──
+
+/// POST /api/v1/admin/invites — create an invite code (admin only)
+pub async fn create_invite(
+    State(state): State<Arc<AppState>>,
+    Extension(admin): Extension<AuthUser>,
+    Json(body): Json<CreateInviteBody>,
+) -> Result<Json<CreateInviteResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let ttl_days = body.ttl_days.unwrap_or(7).clamp(1, 90);
+    let ttl_secs = ttl_days * 86400;
+    let now = chrono::Utc::now().timestamp();
+    let expires_at = now + ttl_secs as i64;
+
+    let code = state
+        .cache
+        .create_invite_code(&admin.id, ttl_secs)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Failed to create invite code: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal error"})),
+            )
+        })?;
+
+    Ok(Json(CreateInviteResponse { code, expires_at }))
+}
+
+/// GET /api/v1/admin/invites — list all invite codes (admin only)
+pub async fn list_invites(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<InviteCodeInfo>>, (StatusCode, Json<serde_json::Value>)> {
+    let codes = state.cache.list_invite_codes().await.map_err(|e| {
+        tracing::warn!("Failed to list invite codes: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "internal error"})),
+        )
+    })?;
+    Ok(Json(codes))
 }
