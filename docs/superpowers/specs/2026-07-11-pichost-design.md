@@ -1550,7 +1550,7 @@ cd web-ui && npm run build               # 打包验证
 - [x] Button/Input 组件提取
 
 **P2 — 完善 (后续迭代)**:
-- 水平扩展 (Nginx upstream 多 api 实例)
+- [x] 水平扩展 (Nginx upstream least_conn, api ×2, worker ×2, Docker deploy replicas)
 - [x] 图片库增强: 分页/搜索/排序/无限滚动 (offset pagination, ILIKE search, sort by created_at/file_size/name, Infinite scroll via IntersectionObserver)
 - [x] 多文件并发拖拽上传 (useUploadQueue hook, MAX_CONCURRENT=3, per-file UploadCard progress)
 - [x] 批量管理 (multi-select, batch delete via POST /images/batch-delete, toolbar + confirmation dialog)
@@ -1558,4 +1558,4 @@ cd web-ui && npm run build               # 打包验证
 - [x] 用户存储配额 (storage_quota BIGINT NULL, default 1GB, upload enforcement, admin management, Dashboard usage bar)
 - [x] /metrics Prometheus 端点 (prometheus crate, HTTP counters/latency histograms, business gauges: uploads/users/images/storage)
 - [x] OAuth 登录 (GitHub/Google OAuth2, oauth_accounts table, social login buttons, Settings linking)
-- CDN 集成 (Cloudflare/七牛云)
+- [x] CDN 集成 (Nginx proxy_cache + Cloudflare guide)

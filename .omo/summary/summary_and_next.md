@@ -63,9 +63,24 @@
 - **Frontend**: Login 页 GitHub/Google 社交登录按钮, Settings 页 OAuth 关联入口
 - **验证**: `cargo clippy` ✅, `cargo test` ✅(14 pass), `npm run build` ✅
 
-## 建议下一步开发
-CDN 集成 或 水平扩展
+### P2: CDN + 水平扩展 ✅ (本次完成 — P2 全部完成!)
+- **Nginx**: reverse proxy, proxy_cache (IMAGE_CACHE 50MB/1h), gzip, upstream least_conn
+- **Docker**: Nginx 入口 (port 80), API ×2 replicas, Worker ×2 replicas
+- **Docs**: CDN 集成指南 (Cloudflare + 其他 CDN)
+- **验证**: `cargo clippy` ✅, `cargo test` ✅(14 pass), `npm run build` ✅
 
-## 剩余待开发特性
+## P2 完成总结
 
-- **P2 (remaining)**: CDN 集成, 水平扩展
+所有 10 个 P2 特性全部完成:
+1. ✅ 邀请码注册
+2. ✅ 图片库增强 (分页/搜索/排序/滚动)
+3. ✅ 多文件并发上传
+4. ✅ 用户存储配额
+5. ✅ 批量管理
+6. ✅ /metrics Prometheus
+7. ✅ OAuth 登录
+8. ✅ CDN 集成
+9. ✅ 水平扩展
+10. ✅ (plan docs + guides)
+
+版本: `0.14.0` — PicHost P2 阶段完成 🎉
