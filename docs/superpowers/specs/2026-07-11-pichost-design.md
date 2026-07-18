@@ -1526,29 +1526,36 @@ cd web-ui && npm run build               # 打包验证
 
 ## 15. 开发优先级
 
-**P0 — Baseline (必须先完成)**:
-- 用户注册/登录/登出 (JWT + Argon2id)
-- 图片单文件上传 (LocalFS 存储)
-- 公开 URL 访问 + 全格式链接 (URL/Markdown/HTML/BBCode)
-- 多用户独立空间
-- SHA256 去重检查
-- 安全基础: magic bytes 校验, CORS, 限流
-- 前端核心页: 登录 + 上传 + 图片详情
+**P0 — Baseline (已完成)** ✅
+- [x] 用户注册/登录/登出 (JWT + Argon2id)
+- [x] 图片单文件上传 (LocalFS 存储)
+- [x] 公开 URL 访问 + 全格式链接 (URL/Markdown/HTML/BBCode)
+- [x] 多用户独立空间
+- [x] SHA256 去重检查
+- [x] 安全基础: magic bytes 校验, JWT 黑名单, 5 安全响应头, Redis 限流
+- [x] 前端核心页: 登录 + 上传 + 图片详情 + 图片库(grid)
 
-**P1 — 增强 (紧随其后)**:
+**P1 — 增强 (已完成)** ✅
+- [x] JWT claims 拆分 (Access/Refresh) + token 轮转刷新
+- [x] POST /auth/logout 服务端登出 (per-JTI 黑名单)
+- [x] DELETE /images/{id} 图片删除 (含存储文件清理)
+- [x] Redis 限流 (4 策略: auth/upload/general/public)
 - [x] 缩略图生成 + WebP 转换 (异步 Worker + Redis 队列)
-- [x] RustFS 存储后端支持 (aws-sdk-s3 实现) + StorageRouter 多后端路由
+- [x] RustFS 存储后端支持 (aws-sdk-s3) + StorageRouter 多后端路由
 - [x] Redis 三层缓存 (元数据 + 缩略图 + 用户统计)
-- [x] 健康检查 + 结构化日志 (tracing)
-- [ ] 水平扩展 (Nginx upstream 多 api 实例)
-- [ ] 图片库浏览 (分页/搜索/排序/无限滚动)
-- [ ] 管理员面板 (用户管理/系统统计)
-- [ ] 视觉打磨: 毛玻璃效果 + 亮暗主题切换
+- [x] 健康检查 `/api/health` + 结构化日志 (tracing)
+- [x] 管理后台: require_admin 中间件 + 4 API 端点 (stats/list/update/delete users)
+- [x] 视觉打磨: 毛玻璃效果 + 亮暗/跟随系统主题切换
+- [x] 管理后台前端: 统计仪表盘 + 用户管理表 (编辑/删除)
+- [x] Button/Input 组件提取
 
 **P2 — 完善 (后续迭代)**:
+- 水平扩展 (Nginx upstream 多 api 实例)
+- 图片库增强: 分页/搜索/排序/无限滚动
 - 多文件并发拖拽上传
 - 批量管理 (删除/标签/搜索)
 - 邀请码注册系统
 - 用户存储配额
 - /metrics Prometheus 端点
+- OAuth 登录
 - CDN 集成 (Cloudflare/七牛云)
