@@ -93,6 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Image list/get/delete — rate limit by user_id (or IP), 60 req/min + auth
     let image_routes = Router::new()
         .route("/", get(routes::images::list_images))
+        .route("/batch-delete", post(routes::images::batch_delete))
         .route(
             "/{id}",
             get(routes::images::get_image).delete(routes::images::delete_image),
