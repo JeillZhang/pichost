@@ -72,11 +72,19 @@ export default function NavBar() {
 
         {/* User */}
         <div className="flex items-center gap-3">
-          <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+          <span className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--color-text-muted)' }}>
             Logged in as{' '}
             <span style={{ color: 'var(--color-text-secondary)' }}>
               {user?.username}
             </span>
+            {user?.is_admin && (
+              <span
+                className="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none"
+                style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)' }}
+              >
+                Admin
+              </span>
+            )}
           </span>
           <ThemeToggle />
           <button

@@ -19,8 +19,14 @@ export default function Login() {
     } else {
       await login(username, password)
     }
-    if (useAuthStore.getState().isAuthenticated) {
-      toast.success(isRegister ? 'Registered!' : 'Logged in!')
+    const state = useAuthStore.getState()
+    if (state.isAuthenticated) {
+      const user = state.user
+      if (isRegister && user?.is_admin) {
+        toast.success('Admin account created! You are now the administrator.', { duration: 6000 })
+      } else {
+        toast.success(isRegister ? 'Registered!' : 'Logged in!')
+      }
       navigate('/dashboard', { replace: true })
     }
   }

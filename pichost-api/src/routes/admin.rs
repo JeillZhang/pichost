@@ -399,8 +399,8 @@ pub async fn get_admin_stats(
             )
         })?;
 
-    let img_row = sqlx::query_as::<_, (i64, Option<i64>)>(
-        r#"SELECT COUNT(*) as total_images, COALESCE(SUM(file_size), 0) as total_size
+    let img_row = sqlx::query_as::<_, (i64, i64)>(
+        r#"SELECT COUNT(*)::BIGINT as total_images, COALESCE(SUM(file_size), 0)::BIGINT as total_size
            FROM images"#,
     )
     .fetch_one(&state.pool)
@@ -412,7 +412,7 @@ pub async fn get_admin_stats(
             Json(serde_json::json!({"error": "internal error"})),
         )
     })?;
-    let (total_images, total_size) = (img_row.0, img_row.1.unwrap_or(0));
+    let (total_images, total_size) = (img_row.0, img_row.1);
 
     // Active users in last 24h
     let active_users_24h: i64 = sqlx::query_scalar(
@@ -424,35 +424,35 @@ pub async fn get_admin_stats(
     .unwrap_or(0);
 
     // Per-backend breakdown
-    let local_row = sqlx::query_as::<_, (i64, Option<i64>)>(
-        r#"SELECT COUNT(*), COALESCE(SUM(file_size), 0)
+    let local_row = sqlx::query_as::<_, (i64, i64)>(
+        r#"SELECT COUNT(*)::BIGINT, COALESCE(SUM(file_size), 0)::BIGINT
            FROM images WHERE storage_backend = 'local'"#,
     )
     .fetch_one(&state.pool)
     .await
-    .unwrap_or((0, None));
+    .unwrap_or((0, 0));
 
-    let rustfs_row = sqlx::query_as::<_, (i64, Option<i64>)>(
-        r#"SELECT COUNT(*), COALESCE(SUM(file_size), 0)
+    let rustfs_row = sqlx::query_as::<_, (i64, i64)>(
+        r#"SELECT COUNT(*)::BIGINT, COALESCE(SUM(file_size), 0)::BIGINT
            FROM images WHERE storage_backend = 'rustfs'"#,
     )
     .fetch_one(&state.pool)
     .await
-    .unwrap_or((0, None));
+    .unwrap_or((0, 0));
 
     let mut backends = HashMap::new();
     backends.insert(
         "local".to_string(),
         BackendStats {
             total_images: local_row.0,
-            total_size: local_row.1.unwrap_or(0),
+            total_size: local_row.1,
         },
     );
     backends.insert(
         "rustfs".to_string(),
         BackendStats {
             total_images: rustfs_row.0,
-            total_size: rustfs_row.1.unwrap_or(0),
+            total_size: rustfs_row.1,
         },
     );
 
@@ -488,15 +488,15 @@ pub async fn get_admin_stats(
         .await;
     let _ = state
         .cache
-        .incr_user_stat(&nil_uuid, "local_size", local_row.1.unwrap_or(0))
+        .incr_user_stat(&nil_uuid, "local_size", local_row.1)
         .await;
     let _ = state
         .cache
-        .incr_user_stat(&nil_uuid, "rustfs_images", rustfs_row.0)
+        .incr_user_stat(&nil_uuid, "local_size", local_row.1)
         .await;
     let _ = state
         .cache
-        .incr_user_stat(&nil_uuid, "rustfs_size", rustfs_row.1.unwrap_or(0))
+        .incr_user_stat(&nil_uuid, "rustfs_size", rustfs_row.1)
         .await;
 
     Ok(Json(stats))

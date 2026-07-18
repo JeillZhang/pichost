@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Shield } from 'lucide-react'
 import { toast } from 'sonner'
+import { useAuthStore } from '../stores/auth'
 import DropZone from '../components/DropZone'
 import LinkCard from '../components/LinkCard'
 import { uploadImage, listImages, type UploadResult } from '../api/client'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 export default function Dashboard() {
+  const user = useAuthStore((s) => s.user)
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const navigate = useNavigate()
@@ -35,7 +38,30 @@ export default function Dashboard() {
 
   return (
     <div className="mx-auto max-w-2xl p-4">
-        {/* DropZone */}
+      {/* Admin banner */}
+      {user?.is_admin && (
+        <div
+          className="mb-4 flex items-center gap-2 rounded-lg px-4 py-3 text-sm"
+          style={{
+            backgroundColor: 'var(--color-accent-subtle)',
+            border: '1px solid var(--color-accent)',
+            color: 'var(--color-accent)',
+          }}
+        >
+          <Shield className="h-4 w-4 shrink-0" />
+          <span>
+            You are an administrator.{' '}
+            <button
+              onClick={() => navigate('/admin')}
+              className="font-medium underline underline-offset-2 hover:opacity-80"
+            >
+              Go to Admin Panel
+            </button>
+          </span>
+        </div>
+      )}
+
+      {/* DropZone */}
       <DropZone onUpload={handleUpload} isUploading={isUploading} />
 
       {/* Upload result links */}
