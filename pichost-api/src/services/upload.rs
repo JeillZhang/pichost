@@ -169,6 +169,35 @@ pub async fn process_upload(
         ));
     }
 
+    if let Some(quota) = user.storage_quota {
+        let current_usage: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(file_size), 0) FROM images WHERE user_id = $1",
+        )
+        .bind(user.id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Quota usage query failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal server error"})),
+            )
+        })?;
+
+        let new_file_size = bytes.len() as i64;
+        if current_usage + new_file_size > quota {
+            return Err((
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(serde_json::json!({
+                    "error": "storage quota exceeded",
+                    "quota_bytes": quota,
+                    "used_bytes": current_usage,
+                    "file_bytes": new_file_size,
+                })),
+            ));
+        }
+    }
+
     // ---- Compute SHA256 ----
     use sha2::Digest;
     let hash = sha2::Sha256::digest(&bytes);
