@@ -20,6 +20,12 @@ export default function SearchBar({
     setLocalValue(value)
   }, [value])
 
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
+
   const handleChange = (next: string) => {
     setLocalValue(next)
     if (timerRef.current) clearTimeout(timerRef.current)

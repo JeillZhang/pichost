@@ -17,7 +17,7 @@ export default function Dashboard() {
 
   const { data } = useQuery({
     queryKey: ['images'],
-    queryFn: () => listImages(),
+    queryFn: () => listImages({ per_page: 50 }),
   })
   const images = data?.items
 
