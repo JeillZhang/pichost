@@ -15,10 +15,11 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
-  const { data: images } = useQuery({
+  const { data } = useQuery({
     queryKey: ['images'],
-    queryFn: listImages,
+    queryFn: () => listImages(),
   })
+  const images = data?.items
 
   async function handleUpload(file: File) {
     setIsUploading(true)

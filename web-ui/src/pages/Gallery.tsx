@@ -4,10 +4,11 @@ import { listImages } from '../api/client'
 
 export default function Gallery() {
   const navigate = useNavigate()
-  const { data: images, isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['images'],
-    queryFn: listImages,
+    queryFn: () => listImages(),
   })
+  const images = data?.items
 
   if (isLoading) {
     return (

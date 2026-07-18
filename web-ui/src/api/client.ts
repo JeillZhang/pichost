@@ -36,6 +36,22 @@ export interface ImageInfo {
 
 export interface UploadResult extends ImageInfo {}
 
+export interface PaginatedListParams {
+  page?: number
+  per_page?: number
+  sort?: 'created_at' | 'file_size' | 'original_name'
+  order?: 'asc' | 'desc'
+  search?: string
+}
+
+export interface PaginatedResponse<T> {
+  items: T[]
+  total: number
+  page: number
+  per_page: number
+  total_pages: number
+}
+
 export interface InviteCodeInfo {
   code: string
   created_by: string
@@ -135,8 +151,17 @@ export async function uploadImage(file: File): Promise<UploadResult> {
   return api.post('images', { body: formData }).json<UploadResult>()
 }
 
-export async function listImages(): Promise<ImageInfo[]> {
-  return api.get('images').json<ImageInfo[]>()
+export async function listImages(
+  params: PaginatedListParams = {},
+): Promise<PaginatedResponse<ImageInfo>> {
+  const searchParams = new URLSearchParams()
+  if (params.page) searchParams.set('page', String(params.page))
+  if (params.per_page) searchParams.set('per_page', String(params.per_page))
+  if (params.sort) searchParams.set('sort', params.sort)
+  if (params.order) searchParams.set('order', params.order)
+  if (params.search) searchParams.set('search', params.search)
+  const qs = searchParams.toString()
+  return api.get(`images${qs ? `?${qs}` : ''}`).json<PaginatedResponse<ImageInfo>>()
 }
 
 export async function getImage(id: string): Promise<ImageInfo> {
