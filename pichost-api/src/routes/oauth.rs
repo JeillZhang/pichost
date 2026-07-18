@@ -4,7 +4,7 @@ use axum::{
     extract::{Query, State},
     http::StatusCode,
     response::Redirect,
-    Json,
+    Extension, Json,
 };
 use oauth2::{
     basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl,
@@ -14,6 +14,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::middleware::auth::AuthUser;
 use crate::routes::auth::{generate_tokens, AuthResponse, UserInfo};
 
 /// Fully-configured OAuth2 client with auth and token endpoints set.
@@ -37,6 +38,12 @@ type ConfiguredOAuthClient = oauth2::Client<
 pub struct OAuthCallbackQuery {
     pub code: String,
     pub state: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OAuthLinkRequest {
+    pub provider: String,
+    pub code: String,
 }
 
 // ── GitHub redirect ──
@@ -327,4 +334,98 @@ async fn oauth_callback(
             storage_quota,
         },
     }))
+}
+
+// ── OAuth account linking (authenticated user links a provider) ──
+
+pub async fn oauth_link(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+    Json(body): Json<OAuthLinkRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let client = match body.provider.as_str() {
+        "github" => make_github_client(&state).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": e})),
+            )
+        })?,
+        "google" => make_google_client(&state).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": e})),
+            )
+        })?,
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "unknown provider"})),
+            ));
+        }
+    };
+
+    let http_client = reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| {
+            tracing::warn!("Failed to build HTTP client: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal error"})),
+            )
+        })?;
+
+    let token = client
+        .exchange_code(AuthorizationCode::new(body.code))
+        .request_async(&http_client)
+        .await
+        .map_err(|e| {
+            tracing::warn!("OAuth link token exchange failed: {e}");
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid authorization code"})),
+            )
+        })?;
+
+    let user_info = match body.provider.as_str() {
+        "github" => fetch_github_user(token.access_token().secret())
+            .await
+            .map_err(|e| {
+                tracing::warn!("GitHub user fetch failed: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "failed to fetch user info"})),
+                )
+            })?,
+        "google" => fetch_google_user(token.access_token().secret())
+            .await
+            .map_err(|e| {
+                tracing::warn!("Google user fetch failed: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "failed to fetch user info"})),
+                )
+            })?,
+        _ => unreachable!(),
+    };
+
+    sqlx::query(
+        r#"INSERT INTO oauth_accounts (user_id, provider, provider_user_id)
+           VALUES ($1, $2, $3) ON CONFLICT (provider, provider_user_id) DO NOTHING"#,
+    )
+    .bind(user.id)
+    .bind(&body.provider)
+    .bind(&user_info.provider_user_id)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("OAuth link insert failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "internal error"})),
+        )
+    })?;
+
+    tracing::info!(user_id = %user.id, provider = %body.provider, "oauth account linked");
+    Ok(Json(serde_json::json!({"message": "account linked successfully"})))
 }

@@ -115,6 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // User routes — rate limit by user + auth
     let user_routes = Router::new()
         .route("/me/stats", get(routes::users::get_my_stats))
+        .route("/oauth/link", post(routes::oauth::oauth_link))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit::rate_limit_general,
