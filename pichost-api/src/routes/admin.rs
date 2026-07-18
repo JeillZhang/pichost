@@ -69,9 +69,10 @@ pub async fn list_users(
             bool,
             String,
             chrono::DateTime<chrono::Utc>,
+            Option<i64>,
         ),
     >(
-        r#"SELECT id, username, email, is_admin, storage_backend, created_at
+        r#"SELECT id, username, email, is_admin, storage_backend, created_at, storage_quota
            FROM users ORDER BY created_at DESC OFFSET $1 LIMIT $2"#,
     )
     .bind(offset)
@@ -89,11 +90,12 @@ pub async fn list_users(
     let users = rows
         .into_iter()
         .map(
-            |(id, username, email, _is_admin, _storage_backend, _created_at)| UserInfo {
+            |(id, username, email, _is_admin, _storage_backend, _created_at, storage_quota)| UserInfo {
                 id,
                 username,
                 email,
                 is_admin: _is_admin,
+                storage_quota,
             },
         )
         .collect();
@@ -126,8 +128,8 @@ pub async fn update_user(
     }
 
     // Fetch existing user
-    let existing = sqlx::query_as::<_, (String, Option<String>, bool, String)>(
-        r#"SELECT username, email, is_admin, storage_backend FROM users WHERE id = $1"#,
+    let existing = sqlx::query_as::<_, (String, Option<String>, bool, String, Option<i64>)>(
+        r#"SELECT username, email, is_admin, storage_backend, storage_quota FROM users WHERE id = $1"#,
     )
     .bind(user_id)
     .fetch_optional(&state.pool)
@@ -146,7 +148,7 @@ pub async fn update_user(
         )
     })?;
 
-    let (username, email, is_admin, storage_backend) = existing;
+    let (username, email, is_admin, storage_backend, storage_quota) = existing;
 
     let new_username = body.username.unwrap_or(username);
     let new_email = body.email.or(email);
@@ -224,6 +226,7 @@ pub async fn update_user(
         username: new_username,
         email: new_email,
         is_admin: new_is_admin,
+        storage_quota,
     }))
 }
 

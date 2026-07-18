@@ -11,6 +11,7 @@ pub struct UserStats {
     pub total_images: i64,
     pub total_size: i64,
     pub backend: String,
+    pub storage_quota: Option<i64>,
 }
 
 /// GET /api/v1/users/me/stats — usage statistics (protected, cached)
@@ -18,6 +19,22 @@ pub async fn get_my_stats(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
 ) -> Result<Json<UserStats>, (StatusCode, Json<serde_json::Value>)> {
+    // Fetch storage_quota from users table
+    let quota: Option<i64> = sqlx::query_scalar(
+        "SELECT storage_quota FROM users WHERE id = $1",
+    )
+    .bind(user.id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Quota query failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "internal server error"})),
+        )
+    })?
+    .flatten();
+
     // Try cache first
     if let Ok(Some(stats_map)) = state.cache.get_user_stats(&user.id).await {
         let total_images = stats_map
@@ -32,6 +49,7 @@ pub async fn get_my_stats(
             total_images,
             total_size,
             backend: state.router.default_name().to_string(),
+            storage_quota: quota,
         }));
     }
 
@@ -56,6 +74,7 @@ pub async fn get_my_stats(
         total_images: row.0,
         total_size: row.1.unwrap_or(0),
         backend: state.router.default_name().to_string(),
+        storage_quota: quota,
     };
 
     // Populate cache (best-effort)

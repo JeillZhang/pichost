@@ -75,6 +75,7 @@ pub struct UserInfo {
     pub username: String,
     pub email: Option<String>,
     pub is_admin: bool,
+    pub storage_quota: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -196,14 +197,22 @@ pub async fn register(
         })?
         .to_string();
 
+    // Compute storage quota for new user
+    let storage_quota = if state.config.upload.storage_quota_default > 0 {
+        Some(state.config.upload.storage_quota_default as i64)
+    } else {
+        None
+    };
+
     // Insert user (first user becomes admin)
     let user_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO users (username, email, password_hash, is_admin) VALUES ($1, $2, $3, $4) RETURNING id",
+        "INSERT INTO users (username, email, password_hash, is_admin, storage_quota) VALUES ($1, $2, $3, $4, $5) RETURNING id",
     )
     .bind(&payload.username)
     .bind(&payload.email)
     .bind(&hash)
     .bind(is_first_user)
+    .bind(storage_quota)
     .fetch_one(&state.pool)
     .await
     .map_err(|e| {
@@ -242,6 +251,7 @@ pub async fn register(
             username: payload.username,
             email: payload.email,
             is_admin: is_first_user,
+            storage_quota,
         },
     };
 
@@ -253,8 +263,8 @@ pub async fn login(
     Json(payload): Json<LoginRequest>,
 ) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
     // Query user
-    let row = sqlx::query_as::<_, (Uuid, String, Option<String>, String, bool)>(
-        "SELECT id, username, email, password_hash, is_admin FROM users WHERE username = $1",
+    let row = sqlx::query_as::<_, (Uuid, String, Option<String>, String, bool, Option<i64>)>(
+        "SELECT id, username, email, password_hash, is_admin, storage_quota FROM users WHERE username = $1",
     )
     .bind(&payload.username)
     .fetch_optional(&state.pool)
@@ -265,7 +275,7 @@ pub async fn login(
     })?
     .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "invalid username or password"))?;
 
-    let (user_id, username, email, password_hash, is_admin) = row;
+    let (user_id, username, email, password_hash, is_admin, storage_quota) = row;
 
     // Verify password
     let parsed_hash = PasswordHash::new(&password_hash).map_err(|e| {
@@ -291,6 +301,7 @@ pub async fn login(
             username,
             email,
             is_admin,
+            storage_quota,
         },
     };
 
@@ -332,8 +343,8 @@ pub async fn refresh(
         .parse()
         .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid token subject"))?;
 
-    let row = sqlx::query_as::<_, (String, Option<String>, bool)>(
-        "SELECT username, email, is_admin FROM users WHERE id = $1",
+    let row = sqlx::query_as::<_, (String, Option<String>, bool, Option<i64>)>(
+        "SELECT username, email, is_admin, storage_quota FROM users WHERE id = $1",
     )
     .bind(user_id)
     .fetch_optional(&state.pool)
@@ -343,7 +354,7 @@ pub async fn refresh(
         error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
     })?
     .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "user not found"))?;
-    let (username, email, is_admin) = row;
+    let (username, email, is_admin, storage_quota) = row;
 
     let (new_access, new_refresh, _new_access_claims, _new_refresh_claims) =
         generate_tokens(user_id, is_admin, config).map_err(|e| {
@@ -380,6 +391,7 @@ pub async fn refresh(
                 username,
                 email,
                 is_admin,
+                storage_quota,
             },
         }),
     ))
