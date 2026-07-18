@@ -55,6 +55,10 @@ fn default_rustfs_region() -> String {
     "us-east-1".to_string()
 }
 
+fn default_storage_quota() -> u64 {
+    1_073_741_824 // 1 GB
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DatabaseConfig {
     pub url: String,
@@ -72,6 +76,8 @@ pub struct UploadConfig {
     pub max_file_size_admin: u64,
     pub max_file_size_user: u64,
     pub allowed_mimes: Vec<String>,
+    #[serde(default = "default_storage_quota")]
+    pub storage_quota_default: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -133,7 +139,7 @@ impl Default for AppConfig {
             },
             database: DatabaseConfig { url: "postgres://pichost:pichost@localhost:5432/pichost".into(), max_connections: 10 },
             redis: RedisConfig { url: "redis://localhost:6379".into(), pool_size: 20 },
-            upload: UploadConfig { max_file_size_admin: 52_428_800, max_file_size_user: 10_485_760, allowed_mimes: vec!["image/png".into(), "image/jpeg".into(), "image/gif".into(), "image/webp".into(), "image/svg+xml".into(), "image/avif".into(), "image/bmp".into()] },
+            upload: UploadConfig { max_file_size_admin: 52_428_800, max_file_size_user: 10_485_760, allowed_mimes: vec!["image/png".into(), "image/jpeg".into(), "image/gif".into(), "image/webp".into(), "image/svg+xml".into(), "image/avif".into(), "image/bmp".into()], storage_quota_default: 1_073_741_824 },
             logging: LoggingConfig { level: "info".into(), format: "json".into() },
             worker: WorkerConfig::default(),
         }

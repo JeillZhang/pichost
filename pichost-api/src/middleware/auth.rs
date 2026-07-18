@@ -17,6 +17,7 @@ use crate::app::AppState;
 pub struct AuthUser {
     pub id: Uuid,
     pub is_admin: bool,
+    pub storage_quota: Option<i64>,
 }
 
 pub async fn require_auth(
@@ -79,9 +80,24 @@ pub async fn require_auth(
         )
     })?;
 
+    let storage_quota: Option<i64> =
+        sqlx::query_scalar("SELECT storage_quota FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Auth quota lookup failed: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "internal server error"})),
+                )
+            })?
+            .flatten();
+
     let auth_user = AuthUser {
         id: user_id,
         is_admin: claims.is_admin,
+        storage_quota,
     };
     req.extensions_mut().insert(auth_user);
     req.extensions_mut().insert(state);

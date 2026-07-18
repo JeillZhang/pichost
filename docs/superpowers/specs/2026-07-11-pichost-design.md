@@ -1555,7 +1555,7 @@ cd web-ui && npm run build               # 打包验证
 - [x] 多文件并发拖拽上传 (useUploadQueue hook, MAX_CONCURRENT=3, per-file UploadCard progress)
 - 批量管理 (删除/标签/搜索)
 - [x] 邀请码注册系统 (Redis 存储, 首个用户自动 admin, 管理后台创建/列表)
-- 用户存储配额
+- [x] 用户存储配额 (storage_quota BIGINT NULL, default 1GB, upload enforcement, admin management, Dashboard usage bar)
 - /metrics Prometheus 端点
 - OAuth 登录
 - CDN 集成 (Cloudflare/七牛云)
