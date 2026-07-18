@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { uploadImage, type UploadResult } from '../api/client'
 
 export type UploadStatus = 'pending' | 'uploading' | 'done' | 'error'
@@ -25,6 +25,13 @@ export function useUploadQueue() {
   // Keep a ref-sync of tasks so processNext never reads stale closure state
   const tasksRef = useRef(tasks)
   tasksRef.current = tasks
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const queue = Array.from(tasks.values())
 
@@ -49,15 +56,21 @@ export function useUploadQueue() {
       updateTask(id, { status: 'uploading', progress: 0 })
       uploadImage(task.file)
         .then((result) => {
-          updateTask(id, { status: 'done', progress: 100, result })
+          if (mountedRef.current) {
+            updateTask(id, { status: 'done', progress: 100, result })
+          }
         })
         .catch((e: unknown) => {
-          const msg = e instanceof Error ? e.message : 'Upload failed'
-          updateTask(id, { status: 'error', progress: 0, error: msg })
+          if (mountedRef.current) {
+            const msg = e instanceof Error ? e.message : 'Upload failed'
+            updateTask(id, { status: 'error', progress: 0, error: msg })
+          }
         })
         .finally(() => {
           activeRef.current -= 1
-          processNext()
+          if (mountedRef.current) {
+            processNext()
+          }
         })
     }
   }, [updateTask])
