@@ -1,6 +1,6 @@
-import { useRef, useCallback, useState } from 'react'
+import { useRef, useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useInfiniteQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, keepPreviousData } from '@tanstack/react-query'
 import { listImages } from '../api/client'
 import type { ImageInfo, PaginatedListParams } from '../api/client'
 import SearchBar from '../components/SearchBar'
@@ -30,6 +30,7 @@ export default function Gallery() {
       }
       return undefined
     },
+    placeholderData: keepPreviousData,
   })
 
   // Infinite scroll sentinel
@@ -51,6 +52,12 @@ export default function Gallery() {
     },
     [isFetchingNextPage, hasNextPage, fetchNextPage],
   )
+
+  useEffect(() => {
+    return () => {
+      observerRef.current?.disconnect()
+    }
+  }, [])
 
   const allImages: ImageInfo[] = data?.pages.flatMap((p) => p.items) ?? []
   const total = data?.pages[0]?.total ?? 0
