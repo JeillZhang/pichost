@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::{Extension, Json, extract::State, http::StatusCode};
+use axum::{extract::State, http::StatusCode, Extension, Json};
 use serde::Serialize;
 
 use crate::app::AppState;
@@ -59,8 +59,14 @@ pub async fn get_my_stats(
     };
 
     // Populate cache (best-effort)
-    let _ = state.cache.incr_user_stat(&user.id, "total_images", stats.total_images).await;
-    let _ = state.cache.incr_user_stat(&user.id, "total_size", stats.total_size).await;
+    let _ = state
+        .cache
+        .incr_user_stat(&user.id, "total_images", stats.total_images)
+        .await;
+    let _ = state
+        .cache
+        .incr_user_stat(&user.id, "total_size", stats.total_size)
+        .await;
 
     Ok(Json(stats))
 }

@@ -29,11 +29,24 @@ pub async fn list_images(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
 ) -> Result<Json<Vec<UploadResult>>, (StatusCode, Json<serde_json::Value>)> {
-    let rows = sqlx::query_as::<_, (
-        Uuid, String, String, String, String, i64, String,
-        Option<i32>, Option<i32>, String,
-        Option<String>, Option<String>, chrono::DateTime<chrono::Utc>,
-    )>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            String,
+            Option<i32>,
+            Option<i32>,
+            String,
+            Option<String>,
+            Option<String>,
+            chrono::DateTime<chrono::Utc>,
+        ),
+    >(
         r#"SELECT id, public_key, original_name, url, mime_type, file_size,
                   sha256, width, height, status, thumbnail_url, webp_url, created_at
            FROM images WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50"#,
@@ -51,23 +64,46 @@ pub async fn list_images(
 
     let images = rows
         .into_iter()
-        .map(|(id, public_key, original_name, url, mime_type, file_size,
-              sha256, width, height, status, thumbnail_url, webp_url, created_at)| {
-            UploadResult {
-                id, public_key,
-                original_name: original_name.clone(),
-                url: url.clone(),
-                markdown: format!("![{}]({})", original_name, url),
-                html: format!(
-                    "<img src=\"{}\" alt=\"{}\" />",
-                    url,
-                    html_escape(&original_name)
-                ),
-                bbcode: format!("[img]{}[/img]", url),
-                sha256, file_size, mime_type, width, height, status,
-                thumbnail_url, webp_url, created_at,
-            }
-        })
+        .map(
+            |(
+                id,
+                public_key,
+                original_name,
+                url,
+                mime_type,
+                file_size,
+                sha256,
+                width,
+                height,
+                status,
+                thumbnail_url,
+                webp_url,
+                created_at,
+            )| {
+                UploadResult {
+                    id,
+                    public_key,
+                    original_name: original_name.clone(),
+                    url: url.clone(),
+                    markdown: format!("![{}]({})", original_name, url),
+                    html: format!(
+                        "<img src=\"{}\" alt=\"{}\" />",
+                        url,
+                        html_escape(&original_name)
+                    ),
+                    bbcode: format!("[img]{}[/img]", url),
+                    sha256,
+                    file_size,
+                    mime_type,
+                    width,
+                    height,
+                    status,
+                    thumbnail_url,
+                    webp_url,
+                    created_at,
+                }
+            },
+        )
         .collect();
 
     Ok(Json(images))
@@ -79,47 +115,93 @@ pub async fn get_image(
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<UploadResult>, (StatusCode, Json<serde_json::Value>)> {
-    let result = state.cache.cached_meta(
-        &id,
-        600, // 10 min TTL
-        async {
-            sqlx::query_as::<_, (
-                Uuid, String, String, String, String, i64, String,
-                Option<i32>, Option<i32>, String,
-                Option<String>, Option<String>, chrono::DateTime<chrono::Utc>,
-            )>(
-                r#"SELECT id, public_key, original_name, url, mime_type, file_size,
+    let result = state
+        .cache
+        .cached_meta(
+            &id,
+            600, // 10 min TTL
+            async {
+                sqlx::query_as::<
+                    _,
+                    (
+                        Uuid,
+                        String,
+                        String,
+                        String,
+                        String,
+                        i64,
+                        String,
+                        Option<i32>,
+                        Option<i32>,
+                        String,
+                        Option<String>,
+                        Option<String>,
+                        chrono::DateTime<chrono::Utc>,
+                    ),
+                >(
+                    r#"SELECT id, public_key, original_name, url, mime_type, file_size,
                           sha256, width, height, status, thumbnail_url, webp_url, created_at
                    FROM images WHERE id = $1 AND user_id = $2"#,
-            )
-            .bind(id)
-            .bind(user.id)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|e| {
-                tracing::warn!("Get image query failed: {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal error"})))
-            })?
-            .ok_or_else(|| {
-                (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"})))
-            })
-            .map(|row| {
-                let (id, public_key, original_name, url, mime_type, file_size,
-                     sha256, width, height, status, thumbnail_url, webp_url, created_at) = row;
-                UploadResult {
-                    id, public_key,
-                    original_name: original_name.clone(),
-                    url: url.clone(),
-                    markdown: format!("![{}]({})", original_name, url),
-                    html: format!("<img src=\"{}\" alt=\"{}\" />", url, html_escape(&original_name)),
-                    bbcode: format!("[img]{}[/img]", url),
-                    sha256, file_size, mime_type, width, height, status,
-                    thumbnail_url, webp_url, created_at,
-                }
-            })
-        },
-    )
-    .await?;
+                )
+                .bind(id)
+                .bind(user.id)
+                .fetch_optional(&state.pool)
+                .await
+                .map_err(|e| {
+                    tracing::warn!("Get image query failed: {e}");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "internal error"})),
+                    )
+                })?
+                .ok_or_else(|| {
+                    (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({"error": "image not found"})),
+                    )
+                })
+                .map(|row| {
+                    let (
+                        id,
+                        public_key,
+                        original_name,
+                        url,
+                        mime_type,
+                        file_size,
+                        sha256,
+                        width,
+                        height,
+                        status,
+                        thumbnail_url,
+                        webp_url,
+                        created_at,
+                    ) = row;
+                    UploadResult {
+                        id,
+                        public_key,
+                        original_name: original_name.clone(),
+                        url: url.clone(),
+                        markdown: format!("![{}]({})", original_name, url),
+                        html: format!(
+                            "<img src=\"{}\" alt=\"{}\" />",
+                            url,
+                            html_escape(&original_name)
+                        ),
+                        bbcode: format!("[img]{}[/img]", url),
+                        sha256,
+                        file_size,
+                        mime_type,
+                        width,
+                        height,
+                        status,
+                        thumbnail_url,
+                        webp_url,
+                        created_at,
+                    }
+                })
+            },
+        )
+        .await?;
 
     Ok(Json(result))
 }
@@ -172,10 +254,7 @@ pub async fn public_get(
     let response = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, &mime_type)
-        .header(
-            header::CACHE_CONTROL,
-            "public, max-age=31536000, immutable",
-        )
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
         .body(axum::body::Body::from(bytes))
         .unwrap();
 
@@ -183,8 +262,11 @@ pub async fn public_get(
 }
 
 fn mime_for_thumb_key(key: &str) -> &'static str {
-    if key.ends_with(".png") { "image/png" }
-    else { "image/jpeg" }
+    if key.ends_with(".png") {
+        "image/png"
+    } else {
+        "image/jpeg"
+    }
 }
 
 /// GET /u/thumb/{image_id} — serve generated thumbnail (unauthenticated)
@@ -206,22 +288,24 @@ pub async fn public_get_thumb(
 
     let (thumb_key, storage_backend) = row;
     let thumb_key = thumb_key.ok_or_else(|| {
-        (StatusCode::NOT_FOUND, Json(json!({"error": "thumbnail not yet generated"})))
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "thumbnail not yet generated"})),
+        )
     })?;
 
     let bytes = state
         .cache
-        .cached_thumb(
-            &format!("thumb:{}", image_id),
-            3600,
-            async {
-                let backend = state.router.for_backend(&storage_backend);
-                backend.get(&thumb_key).await.map_err(|e| {
-                    tracing::warn!("Thumb storage read failed: {e}");
-                    (StatusCode::NOT_FOUND, Json(json!({"error": "thumbnail not found"})))
-                })
-            },
-        )
+        .cached_thumb(&format!("thumb:{}", image_id), 3600, async {
+            let backend = state.router.for_backend(&storage_backend);
+            backend.get(&thumb_key).await.map_err(|e| {
+                tracing::warn!("Thumb storage read failed: {e}");
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "thumbnail not found"})),
+                )
+            })
+        })
         .await?;
 
     Ok(Response::builder()
@@ -251,22 +335,24 @@ pub async fn public_get_webp(
 
     let (webp_key, storage_backend) = row;
     let webp_key = webp_key.ok_or_else(|| {
-        (StatusCode::NOT_FOUND, Json(json!({"error": "WebP not yet generated"})))
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "WebP not yet generated"})),
+        )
     })?;
 
     let bytes = state
         .cache
-        .cached_thumb(
-            &format!("webp:{}", image_id),
-            3600,
-            async {
-                let backend = state.router.for_backend(&storage_backend);
-                backend.get(&webp_key).await.map_err(|e| {
-                    tracing::warn!("WebP storage read failed: {e}");
-                    (StatusCode::NOT_FOUND, Json(json!({"error": "WebP not found"})))
-                })
-            },
-        )
+        .cached_thumb(&format!("webp:{}", image_id), 3600, async {
+            let backend = state.router.for_backend(&storage_backend);
+            backend.get(&webp_key).await.map_err(|e| {
+                tracing::warn!("WebP storage read failed: {e}");
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "WebP not found"})),
+                )
+            })
+        })
         .await?;
 
     Ok(Response::builder()
@@ -294,17 +380,29 @@ pub async fn delete_image(
     .await
     .map_err(|e| {
         tracing::warn!("Delete image query failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal server error"})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "internal server error"})),
+        )
     })?
-    .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"}))))?;
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "image not found"})),
+        )
+    })?;
 
     let (storage_key, storage_backend, thumb_key, webp_key) = row;
 
     let storage = state.router.for_backend(&storage_backend);
 
     let _ = storage.delete(&storage_key).await;
-    if let Some(ref tk) = thumb_key { let _ = storage.delete(tk).await; }
-    if let Some(ref wk) = webp_key { let _ = storage.delete(wk).await; }
+    if let Some(ref tk) = thumb_key {
+        let _ = storage.delete(tk).await;
+    }
+    if let Some(ref wk) = webp_key {
+        let _ = storage.delete(wk).await;
+    }
 
     sqlx::query("DELETE FROM images WHERE id = $1")
         .bind(id)
@@ -312,7 +410,10 @@ pub async fn delete_image(
         .await
         .map_err(|e| {
             tracing::warn!("Image delete db failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "failed to delete image"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "failed to delete image"})),
+            )
         })?;
 
     tracing::info!(image_id = %id, user_id = %user.id, "image deleted");

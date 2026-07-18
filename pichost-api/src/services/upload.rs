@@ -9,9 +9,9 @@ use uuid::Uuid;
 
 use crate::app::AppState;
 use crate::cache::CachePool;
-use deadpool_redis::redis::AsyncCommands;
 use crate::middleware::auth::AuthUser;
 use crate::services::html_escape;
+use deadpool_redis::redis::AsyncCommands;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UploadResult {
@@ -74,7 +74,9 @@ async fn enqueue_processing_task(
     let _: Result<(), _> = conn.hset(&task_key, "created_at", &now).await;
     let _: Result<(), _> = conn.hset(&task_key, "updated_at", &now).await;
     // Push to pending queue
-    let _: Result<(), _> = conn.lpush("pichost:tasks:pending", task_id.to_string()).await;
+    let _: Result<(), _> = conn
+        .lpush("pichost:tasks:pending", task_id.to_string())
+        .await;
 
     tracing::info!(%task_id, %image_id, "enqueued processing task");
 }
@@ -138,20 +140,19 @@ pub async fn process_upload(
     let sha256 = format!("{:x}", hash);
 
     // ---- Dedup check ----
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM images WHERE user_id=$1 AND sha256=$2)",
-    )
-    .bind(user.id)
-    .bind(&sha256)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("Dedup query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
-    })?;
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM images WHERE user_id=$1 AND sha256=$2)")
+            .bind(user.id)
+            .bind(&sha256)
+            .fetch_one(&state.pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Dedup query failed: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "internal server error"})),
+                )
+            })?;
 
     if exists {
         let row = sqlx::query_as::<_, (Uuid, String, String, String, String, i64, String, String)>(
@@ -170,7 +171,8 @@ pub async fn process_upload(
             )
         })?;
 
-        let (image_id, public_key, original_name, _storage_key, _mime_type, file_size, url, sha256) = row;
+        let (image_id, public_key, original_name, _storage_key, _mime_type, file_size, url, sha256) =
+            row;
 
         let markdown = format!("![{}]({})", original_name, url);
         let html = format!(
@@ -204,19 +206,18 @@ pub async fn process_upload(
     use rand::Rng;
     let public_key = loop {
         let key = format!("{:06x}", rand::thread_rng().gen::<u32>() & 0xFFFFFF);
-        let key_exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM images WHERE public_key=$1)",
-        )
-        .bind(&key)
-        .fetch_one(&state.pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Public key uniqueness check failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
-            )
-        })?;
+        let key_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM images WHERE public_key=$1)")
+                .bind(&key)
+                .fetch_one(&state.pool)
+                .await
+                .map_err(|e| {
+                    tracing::warn!("Public key uniqueness check failed: {e}");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({"error": "internal server error"})),
+                    )
+                })?;
         if !key_exists {
             break key;
         }

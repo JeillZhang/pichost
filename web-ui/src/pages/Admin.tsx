@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import AdminStats from './AdminStats'
 import AdminUsers from './AdminUsers'
+import AdminInvites from './AdminInvites'
 
-type Tab = 'overview' | 'users'
+type Tab = 'overview' | 'users' | 'invites'
 
 export default function Admin() {
   const [activeTab, setActiveTab] = useState<Tab>('overview')
@@ -40,9 +41,21 @@ export default function Admin() {
         >
           Users
         </button>
+        <button
+          onClick={() => setActiveTab('invites')}
+          className="flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: activeTab === 'invites' ? 'var(--color-accent-subtle)' : 'transparent',
+            color: activeTab === 'invites' ? 'var(--color-accent)' : 'var(--color-text-muted)',
+          }}
+        >
+          Invites
+        </button>
       </div>
 
-      {activeTab === 'overview' ? <AdminStats /> : <AdminUsers />}
+      {activeTab === 'overview' && <AdminStats />}
+      {activeTab === 'users' && <AdminUsers />}
+      {activeTab === 'invites' && <AdminInvites />}
     </div>
   )
 }

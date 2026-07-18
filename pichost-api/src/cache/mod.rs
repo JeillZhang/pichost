@@ -1,5 +1,7 @@
 use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::{Config, Pool, Runtime};
+use serde::Serialize;
+use uuid::Uuid;
 
 pub type CachePool = Pool;
 
@@ -22,7 +24,10 @@ impl Cache {
         self.pool.clone()
     }
 
-    pub async fn get(&self, key: &str) -> Result<Option<String>, deadpool_redis::redis::RedisError> {
+    pub async fn get(
+        &self,
+        key: &str,
+    ) -> Result<Option<String>, deadpool_redis::redis::RedisError> {
         let mut c = self.pool.get().await.map_err(pool_err)?;
         c.get(key).await
     }
@@ -32,7 +37,12 @@ impl Cache {
         c.set(key, val).await
     }
 
-    pub async fn set_ex(&self, key: &str, val: &str, ttl: u64) -> Result<(), deadpool_redis::redis::RedisError> {
+    pub async fn set_ex(
+        &self,
+        key: &str,
+        val: &str,
+        ttl: u64,
+    ) -> Result<(), deadpool_redis::redis::RedisError> {
         let mut c = self.pool.get().await.map_err(pool_err)?;
         c.set_ex(key, val, ttl).await
     }
@@ -49,14 +59,25 @@ impl Cache {
 
     /// Atomically increment a counter and set TTL on first creation.
     /// Returns the new count after increment.
-    pub async fn incr(&self, key: &str, ttl: u64) -> Result<u64, deadpool_redis::redis::RedisError> {
+    pub async fn incr(
+        &self,
+        key: &str,
+        ttl: u64,
+    ) -> Result<u64, deadpool_redis::redis::RedisError> {
         let mut conn = self.pool.get().await.map_err(pool_err)?;
         let mut pipe = deadpool_redis::redis::pipe();
-        pipe.cmd("INCR").arg(key).ignore()
-            .cmd("EXPIRE").arg(key).arg(ttl as usize).ignore();
+        pipe.cmd("INCR")
+            .arg(key)
+            .ignore()
+            .cmd("EXPIRE")
+            .arg(key)
+            .arg(ttl as usize)
+            .ignore();
         pipe.query_async::<_, ()>(&mut *conn).await?;
-        let count: u64 = deadpool_redis::redis::cmd("GET").arg(key)
-            .query_async(&mut *conn).await?;
+        let count: u64 = deadpool_redis::redis::cmd("GET")
+            .arg(key)
+            .query_async(&mut *conn)
+            .await?;
         Ok(count)
     }
 
@@ -152,9 +173,17 @@ impl Cache {
         let mut conn = self.pool.get().await.map_err(pool_err)?;
 
         deadpool_redis::redis::pipe()
-            .cmd("HINCRBY").arg(&key).arg(field).arg(delta).ignore()
-            .cmd("EXPIRE").arg(&key).arg(300usize).ignore()
-            .query_async::<_, ()>(&mut *conn).await?;
+            .cmd("HINCRBY")
+            .arg(&key)
+            .arg(field)
+            .arg(delta)
+            .ignore()
+            .cmd("EXPIRE")
+            .arg(&key)
+            .arg(300usize)
+            .ignore()
+            .query_async::<_, ()>(&mut *conn)
+            .await?;
 
         Ok(())
     }
@@ -163,11 +192,217 @@ impl Cache {
     pub async fn get_user_stats(
         &self,
         user_id: &uuid::Uuid,
-    ) -> Result<Option<std::collections::HashMap<String, String>>, deadpool_redis::redis::RedisError> {
+    ) -> Result<Option<std::collections::HashMap<String, String>>, deadpool_redis::redis::RedisError>
+    {
         let key = format!("pichost:stats:{}", user_id);
         let mut conn = self.pool.get().await.map_err(pool_err)?;
         conn.hgetall(&key).await
     }
+
+    // ── Invite Code Methods ──
+
+    pub async fn create_invite_code(
+        &self,
+        admin_id: &Uuid,
+        ttl: u64,
+    ) -> Result<String, deadpool_redis::redis::RedisError> {
+        let code = Uuid::new_v4().to_string().replace('-', "");
+        let key = format!("pichost:invite:{}", code);
+        let now = chrono::Utc::now().timestamp();
+        let expires_at = now + ttl as i64;
+
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        deadpool_redis::redis::pipe()
+            .cmd("HSET")
+            .arg(&key)
+            .arg("created_by")
+            .arg(admin_id.to_string())
+            .ignore()
+            .cmd("HSET")
+            .arg(&key)
+            .arg("created_at")
+            .arg(now.to_string())
+            .ignore()
+            .cmd("HSET")
+            .arg(&key)
+            .arg("expires_at")
+            .arg(expires_at.to_string())
+            .ignore()
+            .cmd("HSET")
+            .arg(&key)
+            .arg("used_by")
+            .arg("")
+            .ignore()
+            .cmd("EXPIRE")
+            .arg(&key)
+            .arg(ttl as usize)
+            .ignore()
+            .cmd("SADD")
+            .arg("pichost:invites")
+            .arg(&code)
+            .ignore()
+            .query_async::<_, ()>(&mut *conn)
+            .await?;
+
+        Ok(code)
+    }
+
+    pub async fn verify_invite_code(
+        &self,
+        code: &str,
+    ) -> Result<InviteVerifyResult, deadpool_redis::redis::RedisError> {
+        let key = format!("pichost:invite:{}", code);
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+
+        let exists: bool = conn.exists(&key).await?;
+        if !exists {
+            return Ok(InviteVerifyResult::NotFound);
+        }
+
+        let fields: std::collections::HashMap<String, String> = conn.hgetall(&key).await?;
+
+        if let Some(used_by) = fields.get("used_by") {
+            if !used_by.is_empty() {
+                return Ok(InviteVerifyResult::Used);
+            }
+        }
+
+        if let Some(expires_at_str) = fields.get("expires_at") {
+            if let Ok(expires_at) = expires_at_str.parse::<i64>() {
+                let now = chrono::Utc::now().timestamp();
+                if now > expires_at {
+                    return Ok(InviteVerifyResult::Expired);
+                }
+            }
+        }
+
+        Ok(InviteVerifyResult::Valid)
+    }
+
+    pub async fn consume_invite_code(
+        &self,
+        code: &str,
+        user_id: &Uuid,
+    ) -> Result<bool, deadpool_redis::redis::RedisError> {
+        let key = format!("pichost:invite:{}", code);
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+
+        let exists: bool = conn.exists(&key).await?;
+        if !exists {
+            return Ok(false);
+        }
+
+        deadpool_redis::redis::pipe()
+            .cmd("HSET")
+            .arg(&key)
+            .arg("used_by")
+            .arg(user_id.to_string())
+            .ignore()
+            .cmd("SREM")
+            .arg("pichost:invites")
+            .arg(code)
+            .ignore()
+            .query_async::<_, ()>(&mut *conn)
+            .await?;
+
+        Ok(true)
+    }
+
+    pub async fn list_invite_codes(
+        &self,
+    ) -> Result<Vec<InviteCodeInfo>, deadpool_redis::redis::RedisError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+
+        let members: Vec<String> = deadpool_redis::redis::cmd("SMEMBERS")
+            .arg("pichost:invites")
+            .query_async(&mut *conn)
+            .await?;
+
+        let mut codes = Vec::new();
+        let mut stale = Vec::new();
+        let now = chrono::Utc::now().timestamp();
+
+        for code in &members {
+            let key = format!("pichost:invite:{}", code);
+            let fields: std::collections::HashMap<String, String> =
+                deadpool_redis::redis::cmd("HGETALL")
+                    .arg(&key)
+                    .query_async(&mut *conn)
+                    .await?;
+
+            if fields.is_empty() {
+                stale.push(code.clone());
+                continue;
+            }
+
+            let used_by = fields.get("used_by").and_then(|v| {
+                if v.is_empty() {
+                    None
+                } else {
+                    Uuid::parse_str(v).ok()
+                }
+            });
+            let expires_at = fields
+                .get("expires_at")
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(0);
+            let created_at = fields
+                .get("created_at")
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(0);
+            let created_by = fields
+                .get("created_by")
+                .and_then(|v| Uuid::parse_str(v).ok())
+                .unwrap_or(Uuid::nil());
+
+            // Skip expired or consumed
+            if now > expires_at || used_by.is_some() {
+                stale.push(code.clone());
+                continue;
+            }
+
+            codes.push(InviteCodeInfo {
+                code: code.clone(),
+                created_by,
+                expires_at,
+                used_by,
+                created_at,
+            });
+        }
+
+        // Sort by created_at desc
+        codes.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+
+        // Clean stale entries from set
+        if !stale.is_empty() {
+            let mut pipe = deadpool_redis::redis::pipe();
+            for s in &stale {
+                pipe.cmd("SREM").arg("pichost:invites").arg(s).ignore();
+            }
+            pipe.query_async::<_, ()>(&mut *conn).await?;
+        }
+
+        Ok(codes)
+    }
+}
+
+// ── Invite Code Types ──
+
+#[derive(Debug, PartialEq)]
+pub enum InviteVerifyResult {
+    Valid,
+    Used,
+    Expired,
+    NotFound,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InviteCodeInfo {
+    pub code: String,
+    pub created_by: Uuid,
+    pub expires_at: i64,
+    pub used_by: Option<Uuid>,
+    pub created_at: i64,
 }
 
 fn pool_err(e: deadpool_redis::PoolError) -> deadpool_redis::redis::RedisError {

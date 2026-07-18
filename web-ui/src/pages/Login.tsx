@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LogIn, UserPlus, Loader2 } from 'lucide-react'
+import { LogIn, UserPlus, Loader2, KeyRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuthStore } from '../stores/auth'
 
@@ -8,13 +8,14 @@ export default function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [isRegister, setIsRegister] = useState(false)
+  const [inviteCode, setInviteCode] = useState('')
   const { login, register, isLoading, error, clearError } = useAuthStore()
   const navigate = useNavigate()
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (isRegister) {
-      await register(username, password)
+      await register(username, password, inviteCode || undefined)
     } else {
       await login(username, password)
     }
@@ -116,6 +117,36 @@ export default function Login() {
               placeholder="••••••••"
             />
           </div>
+
+          {isRegister && (
+            <div>
+              <label
+                htmlFor="inviteCode"
+                className="block text-sm font-medium"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                Invite Code
+              </label>
+              <div className="relative mt-1">
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                  <KeyRound className="h-4 w-4" style={{ color: 'var(--color-text-muted)' }} />
+                </div>
+                <input
+                  id="inviteCode"
+                  type="text"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                  className="block w-full rounded-lg py-2 pl-10 pr-3 placeholder-gray-500 focus:outline-none focus:ring-1"
+                  style={{
+                    backgroundColor: 'var(--color-surface)',
+                    border: '1px solid var(--color-border)',
+                    color: 'var(--color-text-primary)',
+                  }}
+                  placeholder="optional invite code"
+                />
+              </div>
+            </div>
+          )}
 
           <button
             type="submit"

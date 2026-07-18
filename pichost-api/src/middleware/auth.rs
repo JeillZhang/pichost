@@ -24,7 +24,6 @@ pub async fn require_auth(
     mut req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-
     // Extract Authorization header
     let auth_header = req
         .headers()
@@ -37,37 +36,33 @@ pub async fn require_auth(
             )
         })?;
 
-    let token = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or_else(|| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "invalid authorization format"})),
-            )
-        })?;
+    let token = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "invalid authorization format"})),
+        )
+    })?;
 
     // Decode JWT
     let key = DecodingKey::from_secret(state.config.auth.jwt_secret.as_bytes());
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
-    let token_data = decode::<super::super::routes::auth::AccessTokenClaims>(token, &key, &validation)
-        .map_err(|e| {
-            tracing::warn!("JWT decode failed: {e}");
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "invalid or expired token"})),
-            )
-        })?;
+    let token_data =
+        decode::<super::super::routes::auth::AccessTokenClaims>(token, &key, &validation).map_err(
+            |e| {
+                tracing::warn!("JWT decode failed: {e}");
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({"error": "invalid or expired token"})),
+                )
+            },
+        )?;
 
     let claims = token_data.claims;
 
     // Check Redis blacklist (fail closed if Redis is down)
     let bl_key = format!("bl:{}", claims.jti);
-    let is_revoked = state
-        .cache
-        .exists(&bl_key)
-        .await
-        .unwrap_or(true);
+    let is_revoked = state.cache.exists(&bl_key).await.unwrap_or(true);
 
     if is_revoked {
         return Err((
@@ -100,16 +95,13 @@ pub async fn require_admin(
     req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    let auth_user = req
-        .extensions()
-        .get::<AuthUser>()
-        .ok_or_else(|| {
-            tracing::warn!("require_admin called without AuthUser in extensions");
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "authentication required"})),
-            )
-        })?;
+    let auth_user = req.extensions().get::<AuthUser>().ok_or_else(|| {
+        tracing::warn!("require_admin called without AuthUser in extensions");
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "authentication required"})),
+        )
+    })?;
 
     if !auth_user.is_admin {
         return Err((

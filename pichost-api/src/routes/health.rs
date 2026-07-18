@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{extract::State, http::StatusCode, Json};
 
 use crate::app::AppState;
 
@@ -9,10 +9,7 @@ pub async fn health_check(
     State(state): State<Arc<AppState>>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     // Check PostgreSQL
-    let pg_ok = sqlx::query("SELECT 1")
-        .execute(&state.pool)
-        .await
-        .is_ok();
+    let pg_ok = sqlx::query("SELECT 1").execute(&state.pool).await.is_ok();
 
     // Check Redis
     let redis_ok = state.cache.get("health:ping").await.is_ok();

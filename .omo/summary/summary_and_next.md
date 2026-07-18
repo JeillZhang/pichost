@@ -34,10 +34,20 @@
 - **毛玻璃视觉打磨**: Layout 组件, 所有页面玻璃质感 (Login/Dashboard/Gallery/ImageDetail/NavBar/DropZone/LinkCard), Button/Input 组件提取
 - **管理后台前端**: AdminRoute 守卫, 统计仪表盘 (4 卡片 + 存储后端分解), 用户管理表 (编辑/删除对话框)
 
+## 本次开发完成
+
+### P2: 邀请码注册系统 ✅ (本次完成)
+- **Redis 邀请码引擎**: `create_invite_code`, `verify_invite_code`, `consume_invite_code`, `list_invite_codes` 四个方法
+- **注册流程改造**: 首个用户自动设为管理员且免邀请码，后续注册需验证邀请码
+- **管理后台 API**: `POST/GET /api/v1/admin/invites` 邀请码创建/列表
+- **前端注册表单**: 注册模式增加邀请码输入框
+- **管理后台页面**: "Invites" 标签页，支持创建/复制/列表邀请码
+- **验证**: `cargo clippy --workspace -D warnings` ✅, `cargo test --workspace` ✅(10 passed), `npm run build` ✅
+
 ## 剩余待开发特性
 
-- **P1**: 无
-- **P2**: OAuth 登录, 邀请码注册, 清理临时文件
+- **P2 (remaining)**: OAuth 登录, 图片库增强(分页/搜索), 多文件并发拖拽上传,
+  用户存储配额, 批量管理, /metrics Prometheus 端点, CDN 集成, 水平扩展
 
 ## 建议下一步开发
-考虑 P2 特性: OAuth 登录 或 邀请码注册机制。
+OAuth 登录 (GitHub/Google) 或 图片库增强 (分页/无限滚动/搜索)。

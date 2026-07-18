@@ -1,10 +1,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::{extract::DefaultBodyLimit, middleware, routing::{get, patch, post}, Router};
 use axum::http::{HeaderName, HeaderValue};
-use pichost_api::{app::AppState, cache, db, routes};
+use axum::{
+    extract::DefaultBodyLimit,
+    middleware,
+    routing::{get, patch, post},
+    Router,
+};
 use pichost_api::middleware::rate_limit;
+use pichost_api::{app::AppState, cache, db, routes};
 use pichost_core::config::load_config;
 use tower_http::cors::CorsLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -108,10 +113,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route_layer(protected.clone());
 
     // Admin routes — auth + admin check + rate limit
-    let admin_protected = middleware::from_fn_with_state(
-        state.clone(),
-        pichost_api::middleware::auth::require_admin,
-    );
+    let admin_protected =
+        middleware::from_fn_with_state(state.clone(), pichost_api::middleware::auth::require_admin);
 
     let admin_routes = Router::new()
         .route("/stats", get(routes::admin::get_admin_stats))
@@ -120,6 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/users/{id}",
             patch(routes::admin::update_user).delete(routes::admin::delete_user),
         )
+        .route("/invites", get(routes::admin::list_invites).post(routes::admin::create_invite))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit::rate_limit_general,
