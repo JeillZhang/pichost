@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::app::AppState;
 use crate::middleware::auth::AuthUser;
 use crate::services::html_escape;
-use crate::services::upload::{self, UploadResult};
+use crate::services::upload::{self, ImageListQuery, ImageListResponse, UploadResult};
 
 /// POST /api/v1/images — upload an image (protected)
 pub async fn upload_handler(
@@ -24,48 +24,129 @@ pub async fn upload_handler(
     Ok((StatusCode::CREATED, Json(result)))
 }
 
-/// GET /api/v1/images — list user's images (protected)
+/// GET /api/v1/images — list user's images with pagination, search, and sort (protected)
 pub async fn list_images(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
-) -> Result<Json<Vec<UploadResult>>, (StatusCode, Json<serde_json::Value>)> {
-    let rows = sqlx::query_as::<
-        _,
-        (
-            Uuid,
-            String,
-            String,
-            String,
-            String,
-            i64,
-            String,
-            Option<i32>,
-            Option<i32>,
-            String,
-            Option<String>,
-            Option<String>,
-            chrono::DateTime<chrono::Utc>,
-        ),
-    >(
-        r#"SELECT id, public_key, original_name, url, mime_type, file_size,
-                  sha256, width, height, status, thumbnail_url, webp_url, created_at
-           FROM images WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50"#,
-    )
-    .bind(user.id)
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("List images query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "internal server error"})),
-        )
-    })?;
+    axum::extract::Query(params): axum::extract::Query<ImageListQuery>,
+) -> Result<Json<ImageListResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // --- Validate & clamp params ---
+    let page = params.page.max(1);
+    let per_page = params.per_page.clamp(1, 100);
+    let offset = ((page - 1) * per_page) as i64;
+    let limit = per_page as i64;
 
-    let images = rows
+    // --- Validate sort field (whitelist to prevent SQL injection) ---
+    let sort_col = match params.sort.as_str() {
+        "created_at" | "file_size" | "original_name" => params.sort.as_str(),
+        _ => "created_at", // fallback default
+    };
+    let order_dir = match params.order.as_str() {
+        "asc" | "ASC" => "ASC",
+        _ => "DESC",
+    };
+
+    // --- Build dynamic SQL with search ---
+    let search_term = params.search.trim();
+    let has_search = !search_term.is_empty();
+
+    // Count total matching rows
+    let total: i64 = if has_search {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM images WHERE user_id = $1 AND original_name ILIKE $2",
+        )
+        .bind(user.id)
+        .bind(format!("%{}%", search_term))
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Image count query failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "internal server error"})),
+            )
+        })?
+    } else {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM images WHERE user_id = $1")
+            .bind(user.id)
+            .fetch_one(&state.pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Image count query failed: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "internal server error"})),
+                )
+            })?
+    };
+
+    // Fetch paginated rows
+    type ImageRow = (
+        Uuid,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        String,
+        Option<i32>,
+        Option<i32>,
+        String,
+        Option<String>,
+        Option<String>,
+        chrono::DateTime<chrono::Utc>,
+    );
+
+    let rows: Vec<ImageRow> = if has_search {
+        let query_str = format!(
+            r#"SELECT id, public_key, original_name, url, mime_type, file_size,
+                      sha256, width, height, status, thumbnail_url, webp_url, created_at
+               FROM images WHERE user_id = $1 AND original_name ILIKE $2
+               ORDER BY {} {} LIMIT $3 OFFSET $4"#,
+            sort_col, order_dir
+        );
+        sqlx::query_as::<_, ImageRow>(&query_str)
+            .bind(user.id)
+            .bind(format!("%{}%", search_term))
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&state.pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Image list query failed: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "internal server error"})),
+                )
+            })?
+    } else {
+        let query_str = format!(
+            r#"SELECT id, public_key, original_name, url, mime_type, file_size,
+                      sha256, width, height, status, thumbnail_url, webp_url, created_at
+               FROM images WHERE user_id = $1
+               ORDER BY {} {} LIMIT $2 OFFSET $3"#,
+            sort_col, order_dir
+        );
+        sqlx::query_as::<_, ImageRow>(&query_str)
+            .bind(user.id)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&state.pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Image list query failed: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "internal server error"})),
+                )
+            })?
+    };
+
+    // Map rows to UploadResult
+    let items: Vec<UploadResult> = rows
         .into_iter()
-        .map(
-            |(
+        .map(|row| {
+            let (
                 id,
                 public_key,
                 original_name,
@@ -79,34 +160,45 @@ pub async fn list_images(
                 thumbnail_url,
                 webp_url,
                 created_at,
-            )| {
-                UploadResult {
-                    id,
-                    public_key,
-                    original_name: original_name.clone(),
-                    url: url.clone(),
-                    markdown: format!("![{}]({})", original_name, url),
-                    html: format!(
-                        "<img src=\"{}\" alt=\"{}\" />",
-                        url,
-                        html_escape(&original_name)
-                    ),
-                    bbcode: format!("[img]{}[/img]", url),
-                    sha256,
-                    file_size,
-                    mime_type,
-                    width,
-                    height,
-                    status,
-                    thumbnail_url,
-                    webp_url,
-                    created_at,
-                }
-            },
-        )
+            ) = row;
+            UploadResult {
+                id,
+                public_key,
+                original_name: original_name.clone(),
+                url: url.clone(),
+                markdown: format!("![{}]({})", original_name, url),
+                html: format!(
+                    "<img src=\"{}\" alt=\"{}\" />",
+                    url,
+                    html_escape(&original_name)
+                ),
+                bbcode: format!("[img]{}[/img]", url),
+                sha256,
+                file_size,
+                mime_type,
+                width,
+                height,
+                status,
+                thumbnail_url,
+                webp_url,
+                created_at,
+            }
+        })
         .collect();
 
-    Ok(Json(images))
+    let total_pages = if total == 0 {
+        1
+    } else {
+        ((total as f64) / (per_page as f64)).ceil() as u32
+    };
+
+    Ok(Json(ImageListResponse {
+        items,
+        total,
+        page,
+        per_page,
+        total_pages,
+    }))
 }
 
 /// GET /api/v1/images/{id} — single image detail (protected, cached)
