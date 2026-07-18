@@ -9,10 +9,14 @@ use axum::{
     Router,
 };
 use pichost_api::middleware::rate_limit;
-use pichost_api::{app::AppState, cache, db, routes};
+use pichost_api::{app::AppState, cache, db, metrics, routes};
 use pichost_core::config::load_config;
 use tower_http::cors::CorsLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
+
+async fn metrics_handler() -> String {
+    metrics::encode_metrics()
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -150,6 +154,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest("/api/v1/admin", admin_routes)
         .nest("/u", public_routes)
         .route("/api/health", get(routes::health::health_check))
+        .route("/metrics", get(metrics_handler))
+        .layer(middleware::from_fn(
+            pichost_api::middleware::metrics::track_metrics,
+        ))
         .layer(CorsLayer::permissive())
         .layer(DefaultBodyLimit::max(52_428_800))
         // Security headers

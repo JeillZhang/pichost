@@ -20,8 +20,16 @@ pub async fn upload_handler(
     Extension(user): Extension<AuthUser>,
     multipart: Multipart,
 ) -> Result<(StatusCode, Json<UploadResult>), (StatusCode, Json<serde_json::Value>)> {
-    let result = upload::process_upload(state, user, multipart).await?;
-    Ok((StatusCode::CREATED, Json(result)))
+    match upload::process_upload(state, user, multipart).await {
+        Ok(result) => {
+            crate::metrics::UPLOADS_TOTAL.inc();
+            Ok((StatusCode::CREATED, Json(result)))
+        }
+        Err(e) => {
+            crate::metrics::UPLOAD_ERRORS_TOTAL.inc();
+            Err(e)
+        }
+    }
 }
 
 /// GET /api/v1/images — list user's images with pagination, search, and sort (protected)
