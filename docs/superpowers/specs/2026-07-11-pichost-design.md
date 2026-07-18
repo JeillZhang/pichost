@@ -1552,7 +1552,7 @@ cd web-ui && npm run build               # 打包验证
 **P2 — 完善 (后续迭代)**:
 - 水平扩展 (Nginx upstream 多 api 实例)
 - [x] 图片库增强: 分页/搜索/排序/无限滚动 (offset pagination, ILIKE search, sort by created_at/file_size/name, Infinite scroll via IntersectionObserver)
-- 多文件并发拖拽上传
+- [x] 多文件并发拖拽上传 (useUploadQueue hook, MAX_CONCURRENT=3, per-file UploadCard progress)
 - 批量管理 (删除/标签/搜索)
 - [x] 邀请码注册系统 (Redis 存储, 首个用户自动 admin, 管理后台创建/列表)
 - 用户存储配额
