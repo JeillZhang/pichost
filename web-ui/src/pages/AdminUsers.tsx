@@ -5,6 +5,13 @@ import { Trash2, Pencil } from 'lucide-react'
 import api, { type UserInfo } from '../api/client'
 import EditUserDialog from '../components/EditUserDialog'
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
 interface ListUsersResponse {
   users: UserInfo[]
   total: number
@@ -61,6 +68,7 @@ export default function AdminUsers() {
               <th className="px-4 py-3 text-left font-medium" style={{ color: 'var(--color-text-muted)' }}>Username</th>
               <th className="hidden px-4 py-3 text-left font-medium sm:table-cell" style={{ color: 'var(--color-text-muted)' }}>Email</th>
               <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--color-text-muted)' }}>Admin</th>
+              <th className="hidden px-4 py-3 text-right font-medium sm:table-cell" style={{ color: 'var(--color-text-muted)' }}>Quota</th>
               <th className="px-4 py-3 text-right font-medium" style={{ color: 'var(--color-text-muted)' }}>Actions</th>
             </tr>
           </thead>
@@ -88,6 +96,9 @@ export default function AdminUsers() {
                   ) : (
                     <span style={{ color: 'var(--color-text-muted)' }}>—</span>
                   )}
+                </td>
+                <td className="hidden px-4 py-3 text-right font-mono text-xs sm:table-cell" style={{ color: 'var(--color-text-secondary)' }}>
+                  {user.storage_quota != null ? formatBytes(user.storage_quota) : 'Unlimited'}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-2">

@@ -10,11 +10,19 @@ interface EditUserDialogProps {
   onUpdated: () => void
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
 export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDialogProps) {
   const [username, setUsername] = useState(user.username)
   const [email, setEmail] = useState(user.email ?? '')
   const [isAdmin, setIsAdmin] = useState(user.is_admin)
   const [password, setPassword] = useState('')
+  const [storageQuota, setStorageQuota] = useState<number | null>(user.storage_quota)
   const [saving, setSaving] = useState(false)
 
   async function handleSubmit(e: FormEvent) {
@@ -25,6 +33,7 @@ export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDia
       if (email) body.email = email
       if (password) body.password = password
       body.is_admin = isAdmin
+      body.storage_quota = storageQuota
 
       await api.patch(`admin/users/${user.id}`, { json: body }).json()
       toast.success('User updated')
@@ -125,6 +134,30 @@ export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDia
               Admin privileges
             </span>
           </label>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+              Storage Quota
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={storageQuota ?? 0}
+              onChange={(e) => {
+                const v = e.target.value ? Number(e.target.value) : 0
+                setStorageQuota(v > 0 ? v : null)
+              }}
+              className="block w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1"
+              style={{
+                backgroundColor: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+            />
+            <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              {storageQuota != null && storageQuota > 0 ? formatBytes(storageQuota) : 'Unlimited'}
+            </p>
+          </div>
 
           <div className="flex justify-end gap-3 pt-2">
             <button
