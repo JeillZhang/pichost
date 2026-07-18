@@ -130,7 +130,7 @@
 - Docs under `docs/` are tracked deliverables — commit them.
 - Bump version on every feature (`0.1.0` → `0.2.0`) and bugfix (`0.1.0` → `0.1.1`).
 - Before planning/developing, read `.omo/summary/summary_and_next.md` and `docs/superpowers/` first.
-- Update `docs/superpowers/specs/2026-07-11-pichost-design.md` TODO list after each phase.
+- Update `docs/superpowers/specs` target spec docs TODO list after each phase.
 - After each plan completes, update `.omo/summary/summary_and_next.md`.
 - Clean up temp files, Docker containers after each development phase.
 - When a command hangs >120s, cancel and retry.

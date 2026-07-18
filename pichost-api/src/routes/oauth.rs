@@ -202,6 +202,91 @@ async fn fetch_google_user(token: &str) -> Result<OAuthUserInfo, Box<dyn std::er
     })
 }
 
+// ── Shared exchange-code + fetch-user helper ──
+
+async fn oauth_exchange_and_fetch_user(
+    state: &AppState,
+    provider: &str,
+    code: String,
+) -> Result<OAuthUserInfo, (StatusCode, Json<serde_json::Value>)> {
+    let oauth_client = match provider {
+        "github" => make_github_client(state),
+        "google" => make_google_client(state),
+        _ => Err("unknown provider".to_string()),
+    }
+    .map_err(|e| (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": e}))))?;
+
+    let http_client = reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| {
+            tracing::warn!("Failed to build HTTP client: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+        })?;
+
+    let token = oauth_client
+        .exchange_code(AuthorizationCode::new(code))
+        .request_async(&http_client)
+        .await
+        .map_err(|e| {
+            tracing::warn!("OAuth token exchange failed: {e}");
+            (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "invalid authorization code"})))
+        })?;
+
+    let access_token = token.access_token().secret();
+    match provider {
+        "github" => fetch_github_user(access_token).await.map_err(|e| {
+            tracing::warn!("GitHub user fetch failed: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to fetch user info"})))
+        }),
+        "google" => fetch_google_user(access_token).await.map_err(|e| {
+            tracing::warn!("Google user fetch failed: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to fetch user info"})))
+        }),
+        _ => unreachable!(),
+    }
+}
+
+// ── OAuth account → user lookup ──
+
+async fn lookup_oauth_user(
+    state: &AppState,
+    provider: &str,
+    provider_user_id: &str,
+) -> Result<(Uuid, String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)> {
+    let oauth_row = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT user_id FROM oauth_accounts WHERE provider = $1 AND provider_user_id = $2",
+    )
+    .bind(provider)
+    .bind(provider_user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("OAuth account lookup failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+    })?;
+
+    let (user_id,) = oauth_row.ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(serde_json::json!({
+            "error": "no account linked. Register first, then link OAuth in Settings."
+        })))
+    })?;
+
+    sqlx::query_as::<_, (Uuid, String, Option<String>, bool, Option<i64>)>(
+        "SELECT id, username, email, is_admin, storage_quota FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("User lookup failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+    })?
+    .ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "user not found"})))
+    })
+}
+
 // ── Callback handler ──
 
 async fn oauth_callback(
@@ -209,130 +294,20 @@ async fn oauth_callback(
     query: OAuthCallbackQuery,
     provider: &str,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let oauth_client = match provider {
-        "github" => make_github_client(state),
-        "google" => make_google_client(state),
-        _ => Err("unknown provider".to_string()),
-    }
-    .map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": e})),
-        )
-    })?;
-
-    let http_client = reqwest::ClientBuilder::new()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| {
-            tracing::warn!("Failed to build HTTP client: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
-        })?;
-
-    let token = oauth_client
-        .exchange_code(AuthorizationCode::new(query.code))
-        .request_async(&http_client)
-        .await
-        .map_err(|e| {
-            tracing::warn!("OAuth token exchange failed: {e}");
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "invalid authorization code"})),
-            )
-        })?;
-
-    let user_info = match provider {
-        "github" => fetch_github_user(token.access_token().secret())
-            .await
-            .map_err(|e| {
-                tracing::warn!("GitHub user fetch failed: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "failed to fetch user info"})),
-                )
-            })?,
-        "google" => fetch_google_user(token.access_token().secret())
-            .await
-            .map_err(|e| {
-                tracing::warn!("Google user fetch failed: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "failed to fetch user info"})),
-                )
-            })?,
-        _ => unreachable!(),
-    };
-
-    // Lookup OAuth account by provider + provider_user_id
-    let oauth_row =
-        sqlx::query_as::<_, (Uuid,)>(
-            "SELECT user_id FROM oauth_accounts WHERE provider = $1 AND provider_user_id = $2",
-        )
-        .bind(provider)
-        .bind(&user_info.provider_user_id)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("OAuth account lookup failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
-        })?;
-
-    let user_row = if let Some((user_id,)) = oauth_row {
-        sqlx::query_as::<_, (Uuid, String, Option<String>, bool, Option<i64>)>(
-            "SELECT id, username, email, is_admin, storage_quota FROM users WHERE id = $1",
-        )
-        .bind(user_id)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("User lookup failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "user not found"})),
-            )
-        })?
-    } else {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "error": "no account linked. Register first, then link OAuth in Settings."
-            })),
-        ));
-    };
-
-    let (user_id, username, email, is_admin, storage_quota) = user_row;
+    let user_info = oauth_exchange_and_fetch_user(state, provider, query.code).await?;
+    let (user_id, username, email, is_admin, storage_quota) =
+        lookup_oauth_user(state, provider, &user_info.provider_user_id).await?;
 
     let (access_token_str, refresh_token_str, _ac, _rc) =
         generate_tokens(user_id, is_admin, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
         })?;
 
     Ok(Json(AuthResponse {
         access_token: access_token_str,
         refresh_token: refresh_token_str,
-        user: UserInfo {
-            id: user_id,
-            username,
-            email,
-            is_admin,
-            storage_quota,
-        },
+        user: UserInfo { id: user_id, username, email, is_admin, storage_quota },
     }))
 }
 
@@ -343,71 +318,8 @@ pub async fn oauth_link(
     Extension(user): Extension<AuthUser>,
     Json(body): Json<OAuthLinkRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let client = match body.provider.as_str() {
-        "github" => make_github_client(&state).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": e})),
-            )
-        })?,
-        "google" => make_google_client(&state).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": e})),
-            )
-        })?,
-        _ => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "unknown provider"})),
-            ));
-        }
-    };
-
-    let http_client = reqwest::ClientBuilder::new()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| {
-            tracing::warn!("Failed to build HTTP client: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
-        })?;
-
-    let token = client
-        .exchange_code(AuthorizationCode::new(body.code))
-        .request_async(&http_client)
-        .await
-        .map_err(|e| {
-            tracing::warn!("OAuth link token exchange failed: {e}");
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "invalid authorization code"})),
-            )
-        })?;
-
-    let user_info = match body.provider.as_str() {
-        "github" => fetch_github_user(token.access_token().secret())
-            .await
-            .map_err(|e| {
-                tracing::warn!("GitHub user fetch failed: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "failed to fetch user info"})),
-                )
-            })?,
-        "google" => fetch_google_user(token.access_token().secret())
-            .await
-            .map_err(|e| {
-                tracing::warn!("Google user fetch failed: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "failed to fetch user info"})),
-                )
-            })?,
-        _ => unreachable!(),
-    };
+    let user_info =
+        oauth_exchange_and_fetch_user(&state, &body.provider, body.code).await?;
 
     sqlx::query(
         r#"INSERT INTO oauth_accounts (user_id, provider, provider_user_id)

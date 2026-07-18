@@ -138,16 +138,45 @@ impl Default for WorkerConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            server: ServerConfig { host: "0.0.0.0".into(), port: 3000, public_url: "http://localhost:3000".into(), cors_origins: vec!["http://localhost:5173".into()] },
-            auth: AuthConfig { jwt_secret: String::new(), access_token_ttl: 900, refresh_token_ttl: 2_592_000, oauth_github_client_id: None, oauth_github_client_secret: None, oauth_google_client_id: None, oauth_google_client_secret: None },
+            server: ServerConfig {
+                host: "0.0.0.0".into(),
+                port: 3000,
+                public_url: "http://localhost:3000".into(),
+                cors_origins: vec!["http://localhost:5173".into()],
+            },
+            auth: AuthConfig {
+                jwt_secret: String::new(),
+                access_token_ttl: 900,
+                refresh_token_ttl: 2_592_000,
+                oauth_github_client_id: None,
+                oauth_github_client_secret: None,
+                oauth_google_client_id: None,
+                oauth_google_client_secret: None,
+            },
             storage: StorageConfig {
                 default_backend: "local".into(),
                 local_base_path: PathBuf::from("./storage-local"),
                 rustfs: None,
             },
-            database: DatabaseConfig { url: "postgres://pichost:pichost@localhost:5432/pichost".into(), max_connections: 10 },
+            database: DatabaseConfig {
+                url: "postgres://pichost:pichost@localhost:5432/pichost".into(),
+                max_connections: 10,
+            },
             redis: RedisConfig { url: "redis://localhost:6379".into(), pool_size: 20 },
-            upload: UploadConfig { max_file_size_admin: 52_428_800, max_file_size_user: 10_485_760, allowed_mimes: vec!["image/png".into(), "image/jpeg".into(), "image/gif".into(), "image/webp".into(), "image/svg+xml".into(), "image/avif".into(), "image/bmp".into()], storage_quota_default: 1_073_741_824 },
+            upload: UploadConfig {
+                max_file_size_admin: 52_428_800,
+                max_file_size_user: 10_485_760,
+                allowed_mimes: vec![
+                    "image/png".into(),
+                    "image/jpeg".into(),
+                    "image/gif".into(),
+                    "image/webp".into(),
+                    "image/svg+xml".into(),
+                    "image/avif".into(),
+                    "image/bmp".into(),
+                ],
+                storage_quota_default: 1_073_741_824,
+            },
             logging: LoggingConfig { level: "info".into(), format: "json".into() },
             worker: WorkerConfig::default(),
         }

@@ -16,7 +16,7 @@ use tracing;
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::cache;
+use crate::cache::{self, Cache};
 use pichost_core::config::AppConfig;
 
 // ---- Request / Response types ----
@@ -131,40 +131,24 @@ fn error_response(status: StatusCode, message: &str) -> (StatusCode, Json<serde_
     (status, Json(serde_json::json!({"error": message})))
 }
 
-// ---- Handlers ----
-
-pub async fn register(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<RegisterRequest>,
-) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
-    if payload.password.len() < 6 {
-        return Err(error_response(
-            StatusCode::BAD_REQUEST,
-            "password must be at least 6 characters",
-        ));
-    }
-
-    // Check if this is the first user (admin)
-    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-        .fetch_one(&state.pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("User count query failed: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
-        })?;
-
-    let is_first_user = user_count == 0;
-
-    // Require and verify invite code if users already exist
+async fn check_invite_code(
+    state: &AppState,
+    invite_code: Option<&str>,
+    is_first_user: bool,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     if !is_first_user {
-        let code = payload.invite_code.as_deref().ok_or_else(|| {
+        let code = invite_code.ok_or_else(|| {
             error_response(StatusCode::BAD_REQUEST, "invite code is required")
         })?;
 
-        match state.cache.verify_invite_code(code).await.map_err(|e| {
-            tracing::warn!("Invite code verification failed: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
-        })? {
+        match state
+            .cache
+            .verify_invite_code(code)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Invite code verification failed: {e}");
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+            })? {
             cache::InviteVerifyResult::Valid => {}
             cache::InviteVerifyResult::Used => {
                 return Err(error_response(
@@ -186,32 +170,58 @@ pub async fn register(
             }
         }
     }
+    Ok(())
+}
 
-    // Hash password
+fn hash_password(
+    password: &str,
+) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
     let salt = SaltString::generate(&mut OsRng);
-    let hash = Argon2::default()
-        .hash_password(payload.password.as_bytes(), &salt)
+    Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map(|h| h.to_string())
         .map_err(|e| {
             tracing::warn!("Password hashing failed: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
-        })?
-        .to_string();
+        })
+}
 
-    // Compute storage quota for new user
-    let storage_quota = if state.config.upload.storage_quota_default > 0 {
-        Some(state.config.upload.storage_quota_default as i64)
-    } else {
-        None
-    };
+async fn revoke_old_tokens(cache: &Cache, claims: &RefreshTokenClaims, now: usize) {
+    let refresh_ttl = claims.exp.saturating_sub(now);
+    let _ = cache
+        .set_ex(&format!("bl:{}", claims.jti), "revoked", refresh_ttl as u64)
+        .await;
 
-    // Insert user (first user becomes admin)
-    let user_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO users (username, email, password_hash, is_admin, storage_quota) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    let access_ttl = claims.access_exp.saturating_sub(now);
+    if access_ttl > 0 {
+        let _ = cache
+            .set_ex(
+                &format!("bl:{}", claims.access_jti),
+                "revoked",
+                access_ttl as u64,
+            )
+            .await;
+    }
+}
+
+// ---- Handlers ----
+
+async fn insert_user(
+    state: &AppState,
+    username: &str,
+    email: &Option<String>,
+    hash: &str,
+    is_admin: bool,
+    storage_quota: Option<i64>,
+) -> Result<Uuid, (StatusCode, Json<serde_json::Value>)> {
+    sqlx::query_scalar(
+        "INSERT INTO users (username, email, password_hash, is_admin, storage_quota) \
+         VALUES ($1, $2, $3, $4, $5) RETURNING id",
     )
-    .bind(&payload.username)
-    .bind(&payload.email)
-    .bind(&hash)
-    .bind(is_first_user)
+    .bind(username)
+    .bind(email)
+    .bind(hash)
+    .bind(is_admin)
     .bind(storage_quota)
     .fetch_one(&state.pool)
     .await
@@ -228,34 +238,66 @@ pub async fn register(
         }
         tracing::warn!("User registration db error: {e}");
         error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
-    })?;
+    })
+}
 
-    // Consume invite code if not first user
+pub async fn register(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<RegisterRequest>,
+) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
+    if payload.password.len() < 6 {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "password must be at least 6 characters",
+        ));
+    }
+
+    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("User count query failed: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        })?;
+    let is_first_user = user_count == 0;
+
+    check_invite_code(&state, payload.invite_code.as_deref(), is_first_user).await?;
+    let hash = hash_password(&payload.password)?;
+
+    let storage_quota = if state.config.upload.storage_quota_default > 0 {
+        Some(state.config.upload.storage_quota_default as i64)
+    } else {
+        None
+    };
+
+    let user_id: Uuid = insert_user(
+        &state, &payload.username, &payload.email, &hash, is_first_user, storage_quota,
+    )
+    .await?;
+
     if !is_first_user {
         if let Some(code) = &payload.invite_code {
             let _ = state.cache.consume_invite_code(code, &user_id).await;
         }
     }
 
-    let (access_token, refresh_token, _access_claims, _refresh_claims) =
+    let (access_token, refresh_token, _ac, _rc) =
         generate_tokens(user_id, is_first_user, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         })?;
 
-    let response = AuthResponse {
-        access_token,
-        refresh_token,
-        user: UserInfo {
-            id: user_id,
-            username: payload.username,
-            email: payload.email,
-            is_admin: is_first_user,
-            storage_quota,
-        },
-    };
-
-    Ok((StatusCode::CREATED, Json(response)))
+    Ok((
+        StatusCode::CREATED,
+        Json(AuthResponse {
+            access_token,
+            refresh_token,
+            user: UserInfo {
+                id: user_id, username: payload.username, email: payload.email,
+                is_admin: is_first_user, storage_quota,
+            },
+        }),
+    ))
 }
 
 pub async fn login(
@@ -308,6 +350,20 @@ pub async fn login(
     Ok((StatusCode::OK, Json(response)))
 }
 
+async fn lookup_user(state: &AppState, user_id: Uuid) -> Result<(String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)> {
+    sqlx::query_as::<_, (String, Option<String>, bool, Option<i64>)>(
+        "SELECT username, email, is_admin, storage_quota FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("User lookup failed: {e}");
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+    })?
+    .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "user not found"))
+}
+
 pub async fn refresh(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<RefreshRequest>,
@@ -338,46 +394,18 @@ pub async fn refresh(
         ));
     }
 
-    let user_id: Uuid = claims
-        .sub
-        .parse()
+    let user_id: Uuid = claims.sub.parse()
         .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid token subject"))?;
+    let (username, email, is_admin, storage_quota) = lookup_user(&state, user_id).await?;
 
-    let row = sqlx::query_as::<_, (String, Option<String>, bool, Option<i64>)>(
-        "SELECT username, email, is_admin, storage_quota FROM users WHERE id = $1",
-    )
-    .bind(user_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("Refresh user lookup failed: {e}");
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
-    })?
-    .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "user not found"))?;
-    let (username, email, is_admin, storage_quota) = row;
-
-    let (new_access, new_refresh, _new_access_claims, _new_refresh_claims) =
+    let (new_access, new_refresh, _ac, _rc) =
         generate_tokens(user_id, is_admin, config).map_err(|e| {
             tracing::warn!("Refresh token generation failed: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "token generation failed")
         })?;
 
     let now = Utc::now().timestamp() as usize;
-
-    let refresh_ttl = claims.exp.saturating_sub(now);
-    let _ = state
-        .cache
-        .set_ex(&bl_refresh_key, "revoked", refresh_ttl as u64)
-        .await;
-
-    let bl_access_key = format!("bl:{}", claims.access_jti);
-    let access_ttl = claims.access_exp.saturating_sub(now);
-    if access_ttl > 0 {
-        let _ = state
-            .cache
-            .set_ex(&bl_access_key, "revoked", access_ttl as u64)
-            .await;
-    }
+    revoke_old_tokens(&state.cache, &claims, now).await;
 
     tracing::info!(user = %user_id, "tokens refreshed (rotation)");
 
@@ -387,11 +415,7 @@ pub async fn refresh(
             access_token: new_access,
             refresh_token: new_refresh,
             user: UserInfo {
-                id: user_id,
-                username,
-                email,
-                is_admin,
-                storage_quota,
+                id: user_id, username, email, is_admin, storage_quota,
             },
         }),
     ))
