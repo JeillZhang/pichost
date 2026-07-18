@@ -29,6 +29,70 @@ pub async fn process_task(
     config: &AppConfig,
     task: &TaskPayload,
 ) -> Result<(), PipelineError> {
+    let (img, fmt, _bytes) = read_source_image(router, task).await?;
+    let (width, height) = (img.width() as i32, img.height() as i32);
+    let thumb_key = format!("{}/thumb.{}", task.user_id, task.image_id);
+    let webp_key = format!("{}/webp.{}", task.user_id, task.image_id);
+    let source_backend = router.for_backend(&task.storage_backend);
+
+    let (thumb_written, webp_written) = process_image_variants(
+        &img, fmt, source_backend.as_ref(), &thumb_key, &webp_key, config,
+    )
+    .await?;
+
+    let public_url = config.server.public_url.trim_end_matches('/');
+    update_image_record(
+        pool, task, width, height, &thumb_key, &webp_key,
+        thumb_written, webp_written, public_url,
+    )
+    .await?;
+
+    tracing::info!(
+        image_id = %task.image_id, width, height,
+        thumb = thumb_written, webp = webp_written,
+        backend = task.storage_backend,
+        "processing complete"
+    );
+    Ok(())
+}
+
+async fn process_image_variants(
+    img: &image::DynamicImage,
+    fmt: image::ImageFormat,
+    source_backend: &(dyn pichost_core::storage::StorageBackend + '_),
+    thumb_key: &str,
+    webp_key: &str,
+    config: &AppConfig,
+) -> Result<(bool, bool), PipelineError> {
+    let (thumb_written, _) = processor::generate_thumbnail(
+        img,
+        fmt,
+        source_backend,
+        thumb_key,
+        config.worker.processing.thumbnail_size,
+        config.worker.processing.thumbnail_quality,
+    )
+    .await
+    .map_err(PipelineError::Thumbnail)?;
+
+    let (webp_written, _) = processor::convert_to_webp(
+        img,
+        fmt,
+        source_backend,
+        webp_key,
+        config.worker.processing.webp_quality,
+    )
+    .await
+    .map_err(PipelineError::Webp)?;
+
+    Ok((thumb_written, webp_written))
+}
+
+/// Read and decode the source image from the configured storage backend.
+async fn read_source_image(
+    router: &StorageRouter,
+    task: &TaskPayload,
+) -> Result<(image::DynamicImage, image::ImageFormat, Vec<u8>), PipelineError> {
     let source_backend = router.for_backend(&task.storage_backend);
 
     let bytes = source_backend
@@ -42,36 +106,26 @@ pub async fn process_task(
         .decode()
         .map_err(|e| PipelineError::Decode(e.to_string()))?;
 
-    let (width, height) = (img.width() as i32, img.height() as i32);
     let fmt = image::guess_format(&bytes).map_err(|e| PipelineError::Decode(e.to_string()))?;
 
-    let thumb_key = format!("{}/thumb.{}", task.user_id, task.image_id);
-    let webp_key = format!("{}/webp.{}", task.user_id, task.image_id);
-    let public_url = config.server.public_url.trim_end_matches('/');
+    Ok((img, fmt, bytes))
+}
+
+/// Persist processing results into the images table.
+#[allow(clippy::too_many_arguments)]
+async fn update_image_record(
+    pool: &PgPool,
+    task: &TaskPayload,
+    width: i32,
+    height: i32,
+    thumb_key: &str,
+    webp_key: &str,
+    thumb_written: bool,
+    webp_written: bool,
+    public_url: &str,
+) -> Result<(), PipelineError> {
     let thumb_url = format!("{}/u/thumb-{}", public_url, task.image_id);
     let webp_url = format!("{}/u/webp-{}", public_url, task.image_id);
-
-    let (thumb_written, _thumb_mime) = processor::generate_thumbnail(
-        &img,
-        fmt,
-        source_backend.as_ref(),
-        &thumb_key,
-        config.worker.processing.thumbnail_size,
-        config.worker.processing.thumbnail_quality,
-    )
-    .await
-    .map_err(PipelineError::Thumbnail)?;
-
-    let (webp_written, _webp_mime) = processor::convert_to_webp(
-        &img,
-        fmt,
-        source_backend.as_ref(),
-        &webp_key,
-        config.worker.processing.webp_quality,
-    )
-    .await
-    .map_err(PipelineError::Webp)?;
-
     sqlx::query(
         r#"UPDATE images SET
             width = $1, height = $2,
@@ -82,37 +136,17 @@ pub async fn process_task(
     )
     .bind(width)
     .bind(height)
-    .bind(if thumb_written {
-        Some(&thumb_key)
-    } else {
-        None::<&String>
-    })
-    .bind(if thumb_written {
-        Some(&thumb_url)
-    } else {
-        None::<&String>
-    })
-    .bind(if webp_written {
-        Some(&webp_key)
-    } else {
-        None::<&String>
-    })
-    .bind(if webp_written {
-        Some(&webp_url)
-    } else {
-        None::<&String>
-    })
+    .bind(some_if(thumb_written, thumb_key))
+    .bind(some_if(thumb_written, thumb_url.as_str()))
+    .bind(some_if(webp_written, webp_key))
+    .bind(some_if(webp_written, webp_url.as_str()))
     .bind(task.image_id)
     .execute(pool)
     .await
     .map_err(|e| PipelineError::Database(e.to_string()))?;
-
-    tracing::info!(
-        image_id = %task.image_id, width, height,
-        thumb = thumb_written, webp = webp_written,
-        backend = task.storage_backend,
-        "processing complete"
-    );
-
     Ok(())
+}
+
+fn some_if(flag: bool, val: &str) -> Option<&str> {
+    if flag { Some(val) } else { None }
 }

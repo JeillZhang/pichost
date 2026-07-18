@@ -206,6 +206,18 @@ async fn revoke_old_tokens(cache: &Cache, claims: &RefreshTokenClaims, now: usiz
 
 // ---- Handlers ----
 
+async fn count_existing_users(
+    pool: &sqlx::PgPool,
+) -> Result<i64, (StatusCode, Json<serde_json::Value>)> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("User count query failed: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        })
+}
+
 async fn insert_user(
     state: &AppState,
     username: &str,
@@ -251,42 +263,29 @@ pub async fn register(
             "password must be at least 6 characters",
         ));
     }
-
-    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-        .fetch_one(&state.pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("User count query failed: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
-        })?;
+    let user_count = count_existing_users(&state.pool).await?;
     let is_first_user = user_count == 0;
-
     check_invite_code(&state, payload.invite_code.as_deref(), is_first_user).await?;
     let hash = hash_password(&payload.password)?;
-
     let storage_quota = if state.config.upload.storage_quota_default > 0 {
         Some(state.config.upload.storage_quota_default as i64)
     } else {
         None
     };
-
     let user_id: Uuid = insert_user(
         &state, &payload.username, &payload.email, &hash, is_first_user, storage_quota,
     )
     .await?;
-
     if !is_first_user {
         if let Some(code) = &payload.invite_code {
             let _ = state.cache.consume_invite_code(code, &user_id).await;
         }
     }
-
     let (access_token, refresh_token, _ac, _rc) =
         generate_tokens(user_id, is_first_user, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         })?;
-
     Ok((
         StatusCode::CREATED,
         Json(AuthResponse {
@@ -350,18 +349,25 @@ pub async fn login(
     Ok((StatusCode::OK, Json(response)))
 }
 
-async fn lookup_user(state: &AppState, user_id: Uuid) -> Result<(String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)> {
-    sqlx::query_as::<_, (String, Option<String>, bool, Option<i64>)>(
+async fn lookup_user_for_refresh(
+    pool: &sqlx::PgPool,
+    sub: &str,
+) -> Result<(Uuid, String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)> {
+    let user_id: Uuid = sub
+        .parse()
+        .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid token subject"))?;
+    let row = sqlx::query_as::<_, (String, Option<String>, bool, Option<i64>)>(
         "SELECT username, email, is_admin, storage_quota FROM users WHERE id = $1",
     )
     .bind(user_id)
-    .fetch_optional(&state.pool)
+    .fetch_optional(pool)
     .await
     .map_err(|e| {
         tracing::warn!("User lookup failed: {e}");
         error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
     })?
-    .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "user not found"))
+    .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "user not found"))?;
+    Ok((user_id, row.0, row.1, row.2, row.3))
 }
 
 pub async fn refresh(
@@ -372,20 +378,12 @@ pub async fn refresh(
     let key = DecodingKey::from_secret(config.auth.jwt_secret.as_bytes());
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
-
     let token_data = decode::<RefreshTokenClaims>(&payload.refresh_token, &key, &validation)
-        .map_err(|_| {
-            error_response(StatusCode::UNAUTHORIZED, "invalid or expired refresh token")
-        })?;
+        .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid or expired refresh token"))?;
     let claims = token_data.claims;
-
     if claims.typ != "refresh" {
-        return Err(error_response(
-            StatusCode::UNAUTHORIZED,
-            "invalid token type",
-        ));
+        return Err(error_response(StatusCode::UNAUTHORIZED, "invalid token type"));
     }
-
     let bl_refresh_key = format!("bl:{}", claims.jti);
     if state.cache.exists(&bl_refresh_key).await.unwrap_or(true) {
         return Err(error_response(
@@ -393,32 +391,21 @@ pub async fn refresh(
             "refresh token has been revoked",
         ));
     }
-
-    let user_id: Uuid = claims.sub.parse()
-        .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid token subject"))?;
-    let (username, email, is_admin, storage_quota) = lookup_user(&state, user_id).await?;
-
-    let (new_access, new_refresh, _ac, _rc) =
-        generate_tokens(user_id, is_admin, config).map_err(|e| {
+    let (user_id, username, email, is_admin, storage_quota) =
+        lookup_user_for_refresh(&state.pool, &claims.sub).await?;
+    let (new_access, new_refresh, _ac, _rc) = generate_tokens(user_id, is_admin, config)
+        .map_err(|e| {
             tracing::warn!("Refresh token generation failed: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "token generation failed")
         })?;
-
     let now = Utc::now().timestamp() as usize;
     revoke_old_tokens(&state.cache, &claims, now).await;
-
     tracing::info!(user = %user_id, "tokens refreshed (rotation)");
-
-    Ok((
-        StatusCode::OK,
-        Json(RefreshResponse {
-            access_token: new_access,
-            refresh_token: new_refresh,
-            user: UserInfo {
-                id: user_id, username, email, is_admin, storage_quota,
-            },
-        }),
-    ))
+    Ok((StatusCode::OK, Json(RefreshResponse {
+        access_token: new_access,
+        refresh_token: new_refresh,
+        user: UserInfo { id: user_id, username, email, is_admin, storage_quota },
+    })))
 }
 
 pub async fn logout(

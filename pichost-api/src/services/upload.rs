@@ -13,6 +13,7 @@ use crate::cache::CachePool;
 use crate::middleware::auth::AuthUser;
 use crate::services::html_escape;
 use deadpool_redis::redis::AsyncCommands;
+use pichost_core::StorageRouter;
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -348,7 +349,83 @@ fn image_dimensions(bytes: &[u8]) -> (Option<i32>, Option<i32>) {
     }
 }
 
-/// Writes bytes to storage, builds the public URL, and INSERTs into the DB.
+/// Writes bytes to storage and builds the public URL.
+/// Returns `(storage_key, url)`.
+async fn write_to_storage(
+    router: &StorageRouter,
+    public_url: &str,
+    user_id: Uuid,
+    public_key: &str,
+    bytes: &[u8],
+    mime_type: &str,
+) -> Result<(String, String), ApiError> {
+    let storage_key = format!("{}/{}", user_id, public_key);
+    let storage = router.default_backend();
+    storage
+        .put(&storage_key, bytes, mime_type)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Storage write failed on {}: {e}", storage.backend_name());
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "storage write failed"})),
+            )
+        })?;
+    let url = if storage.backend_name() == "local" {
+        format!("{}/u/{}", public_url.trim_end_matches('/'), public_key)
+    } else {
+        storage.public_url(&storage_key)
+    };
+    Ok((storage_key, url))
+}
+
+/// Inserts a new image record into the database.
+/// Returns the generated image `id`.
+#[allow(clippy::too_many_arguments)]
+async fn insert_image_record(
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+    public_key: &str,
+    original_name: &str,
+    storage_key: &str,
+    storage_backend: &str,
+    mime_type: &str,
+    file_size: i64,
+    width: Option<i32>,
+    height: Option<i32>,
+    sha256: &str,
+    url: &str,
+) -> Result<Uuid, ApiError> {
+    sqlx::query_scalar(
+        r#"INSERT INTO images
+           (user_id, public_key, original_name, storage_key, storage_backend,
+            mime_type, file_size, width, height, sha256, url, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'active')
+           RETURNING id"#,
+    )
+    .bind(user_id)
+    .bind(public_key)
+    .bind(original_name)
+    .bind(storage_key)
+    .bind(storage_backend)
+    .bind(mime_type)
+    .bind(file_size)
+    .bind(width)
+    .bind(height)
+    .bind(sha256)
+    .bind(url)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Image insert failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "failed to save image metadata"})),
+        )
+    })
+}
+
+/// Orchestrates storage write, URL construction, and DB insert.
 /// Returns `(image_id, storage_key)`.
 #[allow(clippy::too_many_arguments)]
 async fn persist_image(
@@ -362,57 +439,31 @@ async fn persist_image(
     height: Option<i32>,
     sha256: &str,
 ) -> Result<(Uuid, String), ApiError> {
-    let storage_key = format!("{}/{}", user.id, public_key);
-
-    let storage = state.router.default_backend();
-    storage
-        .put(&storage_key, bytes, mime_type)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Storage write failed on {}: {e}", storage.backend_name());
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "storage write failed"})),
-            )
-        })?;
-
-    let url = if storage.backend_name() == "local" {
-        format!(
-            "{}/u/{}",
-            state.config.server.public_url.trim_end_matches('/'),
-            public_key
-        )
-    } else {
-        storage.public_url(&storage_key)
-    };
-
-    let image_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO images
-           (user_id, public_key, original_name, storage_key, storage_backend,
-            mime_type, file_size, width, height, sha256, url, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'active')
-           RETURNING id"#,
+    let (storage_key, url) = write_to_storage(
+        &state.router,
+        &state.config.server.public_url,
+        user.id,
+        public_key,
+        bytes,
+        mime_type,
     )
-    .bind(user.id)
-    .bind(public_key)
-    .bind(original_name)
-    .bind(&storage_key)
-    .bind("local")
-    .bind(mime_type)
-    .bind(bytes.len() as i64)
-    .bind(width)
-    .bind(height)
-    .bind(sha256)
-    .bind(&url)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("Image insert failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "failed to save image metadata"})),
-        )
-    })?;
+    .await?;
+
+    let image_id = insert_image_record(
+        &state.pool,
+        user.id,
+        public_key,
+        original_name,
+        &storage_key,
+        "local",
+        mime_type,
+        bytes.len() as i64,
+        width,
+        height,
+        sha256,
+        &url,
+    )
+    .await?;
 
     Ok((image_id, storage_key))
 }

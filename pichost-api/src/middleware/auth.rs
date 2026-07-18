@@ -12,6 +12,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::routes::auth::AccessTokenClaims;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AuthUser {
@@ -25,7 +26,19 @@ pub async fn require_auth(
     mut req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    // Extract Authorization header
+    let token = extract_bearer_token(&req)?;
+    let claims = decode_and_validate_jwt(token, state.config.auth.jwt_secret.as_bytes())?;
+    let auth_user = check_blacklist_and_quota(&state, &claims).await?;
+
+    req.extensions_mut().insert(auth_user);
+    req.extensions_mut().insert(state);
+
+    Ok(next.run(req).await)
+}
+
+fn extract_bearer_token(
+    req: &Request,
+) -> Result<&str, (StatusCode, Json<serde_json::Value>)> {
     let auth_header = req
         .headers()
         .get("Authorization")
@@ -37,72 +50,57 @@ pub async fn require_auth(
             )
         })?;
 
-    let token = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
+    auth_header.strip_prefix("Bearer ").ok_or_else(|| {
         (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "invalid authorization format"})),
         )
-    })?;
+    })
+}
 
-    // Decode JWT
-    let key = DecodingKey::from_secret(state.config.auth.jwt_secret.as_bytes());
+fn decode_and_validate_jwt(
+    token: &str,
+    secret: &[u8],
+) -> Result<AccessTokenClaims, (StatusCode, Json<serde_json::Value>)> {
+    let key = DecodingKey::from_secret(secret);
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
     let token_data =
-        decode::<super::super::routes::auth::AccessTokenClaims>(token, &key, &validation).map_err(
-            |e| {
-                tracing::warn!("JWT decode failed: {e}");
-                (
-                    StatusCode::UNAUTHORIZED,
-                    Json(serde_json::json!({"error": "invalid or expired token"})),
-                )
-            },
-        )?;
+        decode::<AccessTokenClaims>(token, &key, &validation).map_err(|e| {
+            tracing::warn!("JWT decode failed: {e}");
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "invalid or expired token"})),
+            )
+        })?;
+    Ok(token_data.claims)
+}
 
-    let claims = token_data.claims;
-
-    // Check Redis blacklist (fail closed if Redis is down)
-    let bl_key = format!("bl:{}", claims.jti);
-    let is_revoked = state.cache.exists(&bl_key).await.unwrap_or(true);
-
-    if is_revoked {
+async fn check_blacklist_and_quota(
+    state: &AppState,
+    claims: &AccessTokenClaims,
+) -> Result<AuthUser, (StatusCode, Json<serde_json::Value>)> {
+    if state.cache.exists(&format!("bl:{}", claims.jti)).await.unwrap_or(true) {
         return Err((
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "token has been revoked"})),
         ));
     }
-
-    // Parse user ID and inject into extensions
     let user_id: Uuid = claims.sub.parse().map_err(|_| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "invalid token subject"})),
-        )
+        (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "invalid token subject"})))
     })?;
-
-    let storage_quota: Option<i64> =
-        sqlx::query_scalar("SELECT storage_quota FROM users WHERE id = $1")
-            .bind(user_id)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|e| {
-                tracing::warn!("Auth quota lookup failed: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "internal server error"})),
-                )
-            })?
-            .flatten();
-
-    let auth_user = AuthUser {
-        id: user_id,
-        is_admin: claims.is_admin,
-        storage_quota,
-    };
-    req.extensions_mut().insert(auth_user);
-    req.extensions_mut().insert(state);
-
-    Ok(next.run(req).await)
+    let quota: Option<i64> = sqlx::query_scalar(
+        "SELECT storage_quota FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Auth quota lookup failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal server error"})))
+    })?
+    .flatten();
+    Ok(AuthUser { id: user_id, is_admin: claims.is_admin, storage_quota: quota })
 }
 
 /// Middleware that rejects non-admin users with 403 Forbidden.

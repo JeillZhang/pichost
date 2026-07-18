@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::{Config, Pool, Runtime};
 use serde::Serialize;
@@ -324,66 +326,68 @@ impl Cache {
 
         for code in &members {
             let key = format!("pichost:invite:{}", code);
-            let fields: std::collections::HashMap<String, String> =
+            let fields: HashMap<String, String> =
                 deadpool_redis::redis::cmd("HGETALL")
                     .arg(&key)
                     .query_async(&mut *conn)
                     .await?;
 
-            if fields.is_empty() {
-                stale.push(code.clone());
-                continue;
+            match parse_invite_fields(code, &fields, now) {
+                Some(info) => codes.push(info),
+                None => stale.push(code.clone()),
             }
-
-            let used_by = fields.get("used_by").and_then(|v| {
-                if v.is_empty() {
-                    None
-                } else {
-                    Uuid::parse_str(v).ok()
-                }
-            });
-            let expires_at = fields
-                .get("expires_at")
-                .and_then(|v| v.parse::<i64>().ok())
-                .unwrap_or(0);
-            let created_at = fields
-                .get("created_at")
-                .and_then(|v| v.parse::<i64>().ok())
-                .unwrap_or(0);
-            let created_by = fields
-                .get("created_by")
-                .and_then(|v| Uuid::parse_str(v).ok())
-                .unwrap_or(Uuid::nil());
-
-            // Skip expired or consumed
-            if now > expires_at || used_by.is_some() {
-                stale.push(code.clone());
-                continue;
-            }
-
-            codes.push(InviteCodeInfo {
-                code: code.clone(),
-                created_by,
-                expires_at,
-                used_by,
-                created_at,
-            });
         }
 
-        // Sort by created_at desc
         codes.sort_by_key(|b| std::cmp::Reverse(b.created_at));
 
-        // Clean stale entries from set
-        if !stale.is_empty() {
-            let mut pipe = deadpool_redis::redis::pipe();
-            for s in &stale {
-                pipe.cmd("SREM").arg("pichost:invites").arg(s).ignore();
-            }
-            pipe.query_async::<_, ()>(&mut *conn).await?;
-        }
+        clean_stale_invites(&mut *conn, &stale).await?;
 
         Ok(codes)
     }
+}
+
+fn parse_invite_fields(
+    code: &str,
+    fields: &HashMap<String, String>,
+    now: i64,
+) -> Option<InviteCodeInfo> {
+    if fields.is_empty() {
+        return None;
+    }
+    let used_by = fields
+        .get("used_by")
+        .and_then(|v| if v.is_empty() { None } else { Uuid::parse_str(v).ok() });
+    let expires_at = fields
+        .get("expires_at")
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0);
+    if now > expires_at || used_by.is_some() {
+        return None;
+    }
+    let created_at = fields
+        .get("created_at")
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0);
+    let created_by = fields
+        .get("created_by")
+        .and_then(|v| Uuid::parse_str(v).ok())
+        .unwrap_or(Uuid::nil());
+    Some(InviteCodeInfo { code: code.to_string(), created_by, expires_at, used_by, created_at })
+}
+
+async fn clean_stale_invites<C: deadpool_redis::redis::aio::ConnectionLike>(
+    conn: &mut C,
+    stale: &[String],
+) -> Result<(), deadpool_redis::redis::RedisError> {
+    if stale.is_empty() {
+        return Ok(());
+    }
+    let mut pipe = deadpool_redis::redis::pipe();
+    for s in stale {
+        pipe.cmd("SREM").arg("pichost:invites").arg(s).ignore();
+    }
+    pipe.query_async::<_, ()>(conn).await?;
+    Ok(())
 }
 
 // ── Invite Code Types ──

@@ -225,18 +225,16 @@ pub async fn recover_stale_tasks(
 
         // Check updated_at timestamp
         let updated_at_str: Option<String> = conn.hget(&key, "updated_at").await?;
-        let updated_at = match updated_at_str {
-            Some(s) => match chrono::DateTime::parse_from_rfc3339(&s) {
-                Ok(dt) => dt.with_timezone(&Utc),
-                Err(_) => {
-                    tracing::warn!("invalid timestamp for task {}: {}", task_id, s);
-                    continue;
-                }
-            },
+        let updated_at_str = match updated_at_str {
+            Some(s) => s,
             None => {
                 tracing::warn!("no updated_at for task {}", task_id);
                 continue;
             }
+        };
+        let updated_at = match parse_task_updated_at(&updated_at_str, task_id) {
+            Some(ts) => ts,
+            None => continue,
         };
 
         if updated_at >= cutoff {
@@ -244,40 +242,80 @@ pub async fn recover_stale_tasks(
             continue;
         }
 
-        // Read the task data
-        let json: Option<String> = conn.hget(&key, "data").await?;
-        let task: TaskPayload = match json {
-            Some(j) => match serde_json::from_str(&j) {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::warn!("invalid task data for {}: {}", task_id, e);
-                    continue;
-                }
-            },
-            None => {
-                tracing::warn!("no task data for {}", task_id);
-                continue;
-            }
-        };
-
-        // Remove from processing and re-enqueue
-        conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, id_str).await?;
-
-        let now = Utc::now().to_rfc3339();
-        conn.hset::<_, _, _, ()>(&key, "status", "pending").await?;
-        conn.hset::<_, _, _, ()>(&key, "updated_at", &now).await?;
-        conn.hset::<_, _, _, ()>(&key, "error", "recovered: stale")
-            .await?;
-        conn.lpush::<_, _, ()>(KEY_PENDING, id_str).await?;
-
-        tracing::info!(
-            task_id = %task.task_id,
-            image_id = %task.image_id,
-            "recovered stale task from processing queue"
-        );
-
-        recovered.push(task);
+        // Recover the stale task
+        if let Some(task) = recover_single_task(&mut *conn, task_id, id_str).await? {
+            recovered.push(task);
+        }
     }
 
     Ok(recovered)
+}
+
+/// Parse a RFC 3339 timestamp string from Redis into a UTC DateTime.
+///
+/// Returns `None` (and logs a warning) if the string is not a valid timestamp.
+fn parse_task_updated_at(
+    updated_at_str: &str,
+    task_id: Uuid,
+) -> Option<chrono::DateTime<Utc>> {
+    match chrono::DateTime::parse_from_rfc3339(updated_at_str) {
+        Ok(dt) => Some(dt.with_timezone(&Utc)),
+        Err(_) => {
+            tracing::warn!(
+                "invalid timestamp for task {}: {}",
+                task_id,
+                updated_at_str
+            );
+            None
+        }
+    }
+}
+
+/// Read, remove, and re-enqueue a single stale task.
+///
+/// Reads the task data hash, removes the task ID from the processing queue,
+/// resets its status to `pending`, and pushes it back onto the pending queue.
+///
+/// Returns `Some(task)` on success, `None` if the task data is missing or corrupt,
+/// or an error if a Redis operation fails.
+async fn recover_single_task(
+    conn: &mut impl AsyncCommands,
+    task_id: Uuid,
+    id_str: &str,
+) -> Result<Option<TaskPayload>, QueueError> {
+    let key = task_key(task_id);
+
+    // Read the task data
+    let json: Option<String> = conn.hget(&key, "data").await?;
+    let task: TaskPayload = match json {
+        Some(j) => match serde_json::from_str(&j) {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!("invalid task data for {}: {}", task_id, e);
+                return Ok(None);
+            }
+        },
+        None => {
+            tracing::warn!("no task data for {}", task_id);
+            return Ok(None);
+        }
+    };
+
+    // Remove from processing and re-enqueue
+    conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, id_str).await?;
+
+    let now = Utc::now().to_rfc3339();
+    conn.hset::<_, _, _, ()>(&key, "status", "pending").await?;
+    conn.hset::<_, _, _, ()>(&key, "updated_at", &now).await?;
+    conn.hset::<_, _, _, ()>(&key, "error", "recovered: stale")
+        .await?;
+    conn.lpush::<_, _, ()>(KEY_PENDING, id_str).await?;
+
+    tracing::info!(
+        task_id = %task.task_id,
+        image_id = %task.image_id,
+        "recovered stale task from processing queue"
+    );
+
+    Ok(Some(task))
 }

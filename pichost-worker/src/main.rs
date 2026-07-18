@@ -6,12 +6,21 @@ use pichost_core::storage::local::LocalStorage;
 use pichost_core::storage::s3::RustfsStorage;
 use pichost_core::storage::StorageBackend;
 use pichost_core::StorageRouter;
+use tokio::task::JoinHandle;
 
 mod config;
 mod db;
 mod pipeline;
 mod processor;
 mod queue;
+
+/// Bundled state shared across all worker tasks.
+struct WorkerState {
+    pool: sqlx::PgPool,
+    redis: RedisPool,
+    config: Arc<pichost_core::config::AppConfig>,
+    router: Arc<StorageRouter>,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -45,22 +54,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .create_pool(Some(Runtime::Tokio1))
         .expect("failed to create Redis pool");
 
-    // 4. Startup recovery: re-enqueue stale tasks from processing queue
-    let recovered = queue::recover_stale_tasks(&redis_pool, app_config.worker.task_timeout).await?;
+    // 4. Init full worker state (recovery + storage router)
+    let state = init_worker_state(pool, redis_pool, Arc::new(app_config)).await?;
+
+    // 5. Spawn workers and wait forever
+    let handles = spawn_workers(state);
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
+}
+
+/// Recover stale tasks and initialise the StorageRouter for all configured backends.
+async fn init_worker_state(
+    pool: sqlx::PgPool,
+    redis: RedisPool,
+    config: Arc<pichost_core::config::AppConfig>,
+) -> Result<WorkerState, Box<dyn std::error::Error>> {
+    // Startup recovery: re-enqueue stale tasks from processing queue
+    let recovered =
+        queue::recover_stale_tasks(&redis, config.worker.task_timeout).await?;
     if !recovered.is_empty() {
         tracing::info!(count = recovered.len(), "recovered stale tasks");
     }
 
-    // 5. Init StorageRouter
+    // Init StorageRouter
     let mut backends: HashMap<String, Arc<dyn StorageBackend>> = HashMap::new();
 
     let local = LocalStorage::new(
-        app_config.storage.local_base_path.clone(),
-        app_config.server.public_url.clone(),
+        config.storage.local_base_path.clone(),
+        config.server.public_url.clone(),
     );
     backends.insert("local".into(), Arc::new(local));
 
-    if let Some(rustfs_config) = &app_config.storage.rustfs {
+    if let Some(rustfs_config) = &config.storage.rustfs {
         let rustfs = RustfsStorage::new(rustfs_config).await;
         tracing::info!(endpoint = %rustfs_config.endpoint, "Rustfs storage initialized");
         backends.insert("rustfs".into(), Arc::new(rustfs));
@@ -68,20 +96,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let router = Arc::new(StorageRouter::new(
         backends,
-        app_config.storage.default_backend.clone(),
+        config.storage.default_backend.clone(),
     ));
 
-    // 6. Wrap config in Arc for sharing across tasks
-    let config = Arc::new(app_config);
-    let concurrency = config.worker.concurrency;
+    Ok(WorkerState {
+        pool,
+        redis,
+        config,
+        router,
+    })
+}
 
-    // 7. Spawn worker loop for each concurrency slot
+/// Spawn one `worker_loop` task per configured concurrency slot.
+fn spawn_workers(state: WorkerState) -> Vec<JoinHandle<()>> {
+    let concurrency = state.config.worker.concurrency;
     let mut handles = Vec::with_capacity(concurrency);
     for i in 0..concurrency {
-        let pool = pool.clone();
-        let redis = redis_pool.clone();
-        let config = config.clone();
-        let router = router.clone();
+        let pool = state.pool.clone();
+        let redis = state.redis.clone();
+        let config = state.config.clone();
+        let router = state.router.clone();
 
         let handle = tokio::spawn(async move {
             tracing::info!(worker_id = i, "worker started");
@@ -89,13 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
         handles.push(handle);
     }
-
-    // 8. Wait for all workers (they run forever unless shutdown signal)
-    for handle in handles {
-        let _ = handle.await;
-    }
-
-    Ok(())
+    handles
 }
 
 async fn worker_loop(
@@ -133,64 +161,75 @@ async fn worker_loop(
         )
         .await;
 
-        match process_result {
-            Ok(Ok(())) => {
-                // Success — acknowledge
-                if let Err(e) = queue::ack_task(&redis, task_id).await {
-                    tracing::error!(worker_id, %task_id, error = %e, "ack failed");
-                }
-                tracing::info!(worker_id, %task_id, "task completed");
-            }
-            Ok(Err(e)) => {
-                // Processing failed — nack (retry or dead-letter)
-                tracing::warn!(worker_id, %task_id, error = %e, "task processing failed");
-                match queue::nack_task(&redis, &task, &e.to_string()).await {
-                    Ok(action) => match action {
-                        queue::NackAction::Retry => {
-                            tracing::info!(
-                                worker_id,
-                                %task_id,
-                                retry = task.retry_count + 1,
-                                "task retrying"
-                            );
-                        }
-                        queue::NackAction::DeadLetter => {
-                            tracing::error!(worker_id, %task_id, "task dead-lettered");
+        handle_task_result(worker_id, &pool, &redis, task, process_result, &config).await;
+    }
+}
 
-                            // Update upload_tasks table with failure
-                            let now = chrono::Utc::now();
-                            let _ = sqlx::query(
-                                r#"INSERT INTO upload_tasks
-                                   (image_id, task_type, status, error, retry_count, max_retries, completed_at)
-                                   VALUES ($1, 'all', 'failed', $2, $3, $4, $5)"#,
-                            )
-                            .bind(task.image_id)
-                            .bind(e.to_string())
-                            .bind(task.retry_count + 1)
-                            .bind(task.max_retries)
-                            .bind(now)
-                            .execute(&pool)
-                            .await;
-
-                            // Mark image as failed
-                            let _ =
-                                sqlx::query("UPDATE images SET status = 'failed' WHERE id = $1")
-                                    .bind(task.image_id)
-                                    .execute(&pool)
-                                    .await;
-                        }
-                    },
-                    Err(e) => {
-                        tracing::error!(worker_id, %task_id, error = %e, "nack failed");
-                    }
-                }
+/// Handle the result of a single task processing attempt.
+async fn handle_task_result(
+    worker_id: usize, pool: &sqlx::PgPool, redis: &RedisPool,
+    task: queue::TaskPayload,
+    result: Result<Result<(), pipeline::PipelineError>, tokio::time::error::Elapsed>,
+    config: &pichost_core::config::AppConfig,
+) {
+    let task_id = task.task_id;
+    match result {
+        Ok(Ok(())) => {
+            if let Err(e) = queue::ack_task(redis, task_id).await {
+                tracing::error!(worker_id, %task_id, error = %e, "ack failed");
             }
-            Err(_elapsed) => {
-                // Timeout — nack as retry
-                tracing::warn!(worker_id, %task_id, "task timed out");
-                let timeout_err = format!("timed out after {}s", config.worker.task_timeout);
-                let _ = queue::nack_task(&redis, &task, &timeout_err).await;
+            tracing::info!(worker_id, %task_id, "task completed");
+        }
+        Ok(Err(e)) => {
+            tracing::warn!(worker_id, %task_id, error = %e, "task processing failed");
+            match queue::nack_task(redis, &task, &e.to_string()).await {
+                Ok(queue::NackAction::Retry) => tracing::info!(
+                    worker_id, %task_id, retry = task.retry_count + 1, "task retrying"
+                ),
+                Ok(queue::NackAction::DeadLetter) => {
+                    tracing::error!(worker_id, %task_id, "task dead-lettered");
+                    handle_dead_letter(
+                        pool, task.image_id, task.retry_count + 1,
+                        task.max_retries, &e.to_string(),
+                    )
+                    .await;
+                }
+                Err(e) => tracing::error!(worker_id, %task_id, error = %e, "nack failed"),
             }
         }
+        Err(_elapsed) => {
+            tracing::warn!(worker_id, %task_id, "task timed out");
+            let timeout_err = format!("timed out after {}s", config.worker.task_timeout);
+            let _ = queue::nack_task(redis, &task, &timeout_err).await;
+        }
     }
+}
+
+/// Persist dead-letter task failure in the database.
+async fn handle_dead_letter(
+    pool: &sqlx::PgPool,
+    image_id: uuid::Uuid,
+    retry_count: i32,
+    max_retries: i32,
+    error: &str,
+) {
+    let now = chrono::Utc::now();
+    let _ = sqlx::query(
+        r#"INSERT INTO upload_tasks
+           (image_id, task_type, status, error, retry_count, max_retries, completed_at)
+           VALUES ($1, 'all', 'failed', $2, $3, $4, $5)"#,
+    )
+    .bind(image_id)
+    .bind(error)
+    .bind(retry_count)
+    .bind(max_retries)
+    .bind(now)
+    .execute(pool)
+    .await;
+
+    // Mark image as failed
+    let _ = sqlx::query("UPDATE images SET status = 'failed' WHERE id = $1")
+        .bind(image_id)
+        .execute(pool)
+        .await;
 }
