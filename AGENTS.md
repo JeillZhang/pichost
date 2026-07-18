@@ -3,98 +3,135 @@
 ## Workspace
 
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
-- `pichost-worker` is **placeholder only** (`fn main() { println!(...) }`). Ignore for P0 work.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
-- No `rust-analyzer` / LSP override needed — standard setup works.
+- Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
+- Version: `0.14.0` — P2 complete. Bump patch for fixes, minor for features.
 
 ## Key Commands
 
 | Action | Command | Notes |
 |---|---|---|
 | Build all | `cargo build --workspace` | |
-| Run API server | `cargo run -p pichost-api` | Requires DB + Redis, see setup below |
-| Test all | `cargo test --workspace` | Only `pichost-core` has tests (3 integration tests in `tests/storage_test.rs`) |
-| Frontend dev | `cd web-ui && npm run dev` | Vite proxies `/api` and `/u` → `localhost:3000` |
-| Frontend build | `cd web-ui && npm run build` | Runs `tsc -b && vite build` (type-check first, then bundle) |
-| Docker full stack | `docker compose up --build -d` | Postgres + Redis + API |
+| Check only api | `cargo check -p pichost-api` | Fast compile-check |
+| Test all | `cargo test --workspace` | 14 pass, 10 ignored (need DB/Redis/S3) |
+| Lint | `cargo clippy --workspace -- -D warnings` | Zero warnings required |
+| Run API server | `cargo run -p pichost-api` | Requires PostgreSQL + Redis |
+| Frontend dev | `cd web-ui && npm run dev` | Vite proxies `/api`, `/u` → `localhost:3000` |
+| Frontend build | `cd web-ui && npm run build` | `tsc -b && vite build` |
+| Docker stack | `docker compose up --build -d` | Nginx :80, API×2, Worker×2, PG, Redis |
+| Docker stop | `docker compose down` | Add `-v` to wipe volumes |
 
 ## Setup Gotchas
 
-- **Copy `.env.example → .env`, then edit `PICHOST_AUTH_JWT_SECRET`.** `.env` is gitignored.
-- **Two DB URL env vars exist:** `DATABASE_URL` (sqlx CLI helper, not consumed by app) and `PICHOST_DATABASE_URL` (consumed by figment config). Both must be set for docker-compose; for local dev only `PICHOST_DATABASE_URL` matters at runtime.
-- **sqlx queries are runtime-only** (uses `query_as`, `query_scalar` — no `query!` macro). No compile-time DB needed, no `sqlx prepare` step.
-- `storage-local/` is gitignored and created at runtime by LocalStorage. No manual setup needed.
+- **Copy `.env.example` → `.env`, edit `PICHOST_AUTH_JWT_SECRET`** (min 32 chars).
+- **Two DB URL vars**: `DATABASE_URL` (sqlx CLI helper, not consumed by app) and `PICHOST_DATABASE_URL` (consumed by figment config). For local dev only `PICHOST_DATABASE_URL` matters.
+- **sqlx queries are runtime-only** (uses `query_as`, `query_scalar` — no `query!` macro). No compile-time DB needed, no `sqlx prepare`.
+- **Migrations auto-apply** at API startup via `sqlx::migrate!()`. 7 migrations: `0001`-`0007`.
+- `storage-local/` is gitignored, created at runtime by LocalStorage.
 - Prerequisites: Rust 1.96+, Node.js 22+, PostgreSQL 18, Redis 8.
 
 ## Config System
 
-- Uses `figment` crate: defaults → `config.toml` (optional file) → `PICHOST_*` env vars override.
-- All env vars use prefix `PICHOST_` (e.g. `PICHOST_DATABASE_URL`, `PICHOST_AUTH_JWT_SECRET`).
-- Config struct defined in `pichost-core/src/config.rs` — has `Default` impl with dev defaults.
-- No `config.toml` exists in the repo; env vars are the intended override mechanism.
-
-## Architecture Notes
-
-- **Auth**: JWT HS256 via `jsonwebtoken`. Access token TTL = 900s (15 min), refresh token TTL = 2,592,000s (30 days).
-- **Redis**: Token blacklist uses key format `bl:{user_id}`. Blacklist check **fails closed** (`unwrap_or(true)`) — if Redis is down, auth always fails.
-- **Upload flow**: Multipart → magic byte check (`infer::is_image`) → SHA256 hash → per-user dedup check → random 6-char hex public key (collision loop) → write to LocalStorage at `{base_path}/{user_id}/{public_key}` → INSERT with status `'active'`.
-- **Dedup**: Per-user, per-SHA256. Same user uploading identical content → returns existing image metadata with 200 (not an error). Different users uploading the same content → separate entries.
-- **Public serving**: `GET /u/{public_key}` with `Cache-Control: public, max-age=31536000, immutable`. Checks `status = 'active'` — images with other statuses return 404.
-- **Image status quirk**: DB default is `'pending'`, but upload INSERT hardcodes `'active'`. The `ImageStatus` enum has `Pending/Processing/Ready/Failed` variants but the code checks against the string `"active"`. If you add status transitions, reconcile this.
+- Uses `figment` crate: defaults → `config.toml` (optional) → `PICHOST_*` env vars.
+- Config struct in `pichost-core/src/config.rs` — has `Default` impl with dev defaults.
+- All env vars use `PICHOST_` prefix. Key vars:
+  - `PICHOST_DATABASE_URL`, `PICHOST_REDIS_URL` — runtime connections
+  - `PICHOST_AUTH_JWT_SECRET` — JWT signing key
+  - `PICHOST_SERVER_PUBLIC_URL` — for OAuth callbacks and link generation
+  - OAuth: `PICHOST_AUTH_OAUTH_GITHUB_CLIENT_ID`, `..._SECRET`, same for Google
+  - `PICHOST_STORAGE_LOCAL_BASE_PATH`, `PICHOST_STORAGE_RUSTFS_*` — storage config
+- No `config.toml` in repo — env vars are the intended override mechanism.
 
 ## CRATE BOUNDARIES
 
-- **pichost-core** (`pichost_core`): Domain models, config, error types, `StorageBackend` trait + `LocalStorage` impl. No web/framework deps.
+- **pichost-core** (`pichost_core`): Domain models, config, error types, `StorageBackend` trait + `LocalStorage`/`RustfsStorage` impls + `StorageRouter`. No web/framework deps.
 - **pichost-api** (`pichost_api`): Axum server — routes, middleware, services, DB pool, Redis cache. Depends on `pichost-core`.
-- **pichost-worker**: Placeholder binary. Depends on `pichost-core`.
+- **pichost-worker**: Background image processing binary — thumbnail/WebP generation via Redis queue. Depends on `pichost-core`.
+
+## Architecture Notes
+
+### Auth
+- JWT HS256 via `jsonwebtoken`. Access TTL = 900s, refresh TTL = 30 days.
+- Redis blacklist: `bl:{jti}` for logout. Blacklist check **fails closed** (`unwrap_or(true)`) — Redis down = all auth fails.
+- OAuth: GitHub/Google OAuth2 via `oauth2` crate. Users must register via invite code first, then link OAuth in Settings. Callback URLs: `{public_url}/api/v1/auth/oauth/{provider}/callback`.
+
+### Upload
+- Multipart → magic byte check (`infer::is_image`) → SHA256 hash → per-user dedup → random 6-char hex public key → write storage → INSERT (status=`'active'`) → enqueue worker task.
+- Dedup: per-user, per-SHA256. Same user, same content → 200 with existing metadata.
+- Storage quota: enforced before write. `SUM(file_size)` per user, 413 on exceed. NULL = unlimited, default 1 GB.
+- Multi-file: frontend `useUploadQueue` hook, MAX_CONCURRENT=3, per-file UploadCard progress.
+
+### Public serving
+- `GET /u/{public_key}` → `Cache-Control: public, max-age=31536000, immutable`.
+- Nginx proxy_cache on `/u/` and `/t/` (IMAGE_CACHE 50MB/1h).
+- Status check: only `'active'` or `'ready'` images served — others return 404.
+
+### Image status quirk
+- DB default is `'pending'`, but upload INSERT hardcodes `'active'`. The `ImageStatus` enum has `Pending/Processing/Ready/Failed` but code checks string `"active"`. If adding status transitions, reconcile this.
+
+### Rate limiting
+- 4 strategies in Redis middleware: auth (5/min/IP), upload (30/min/user), general (60/min/user), public images (200/min/IP).
+- Nginx layer: additional `limit_req` zones (60r/m API, 200r/m public).
+
+### Deployment
+- Nginx :80 → API upstream `least_conn` (2 replicas).
+- Worker: 2 replicas, independent Redis `BRPOP` consumers.
+- API is stateless (state in PostgreSQL + Redis) — scale horizontally.
+- Postgres/Redis ports not exposed to host — internal Docker network only.
+
+## API Endpoints Summary
+
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| POST | `/auth/register` | No | Invite code required (unless first user → auto-admin) |
+| POST | `/auth/login` | No | |
+| POST | `/auth/refresh` | Refresh | |
+| POST | `/auth/logout` | JWT | |
+| GET | `/auth/oauth/{github,google}` | No | Redirect to provider |
+| GET | `/auth/oauth/{provider}/callback` | No | Returns JWT |
+| POST | `/images` | JWT | Multipart upload |
+| GET | `/images` | JWT | Paginated: `page`, `per_page` (default 20, max 100), `sort` (created_at/file_size/original_name), `order` (asc/desc), `search` (ILIKE) |
+| GET | `/images/:id` | JWT | |
+| DELETE | `/images/:id` | JWT | |
+| POST | `/images/batch-delete` | JWT | `{ ids: UUID[] }`, max 100 |
+| GET | `/u/:public_key` | No | Public image serve |
+| GET | `/u/thumb/:id` | No | Thumbnail |
+| GET | `/u/webp/:id` | No | WebP |
+| GET | `/users/me/stats` | JWT | Includes `storage_quota` |
+| POST | `/users/oauth/link` | JWT | `{ provider, code }` |
+| GET | `/admin/stats` | JWT+Admin | |
+| GET/POST | `/admin/invites` | JWT+Admin | |
+| GET | `/admin/users` | JWT+Admin | Paginated, includes quota |
+| PATCH | `/admin/users/:id` | JWT+Admin | Fields + `storage_quota` |
+| DELETE | `/admin/users/:id` | JWT+Admin | Cascades |
+| GET | `/metrics` | No | Prometheus text format |
+| GET | `/health` | No | Nginx health check; also `/api/health` (JSON) |
 
 ## Testing
 
-- Only `pichost-core` has tests: 3 integration tests under `tests/storage_test.rs` using `tempfile::TempDir`.
-- No unit tests, no `pichost-api` tests, no web-ui tests.
-- Integration tests need `tokio` features `["rt", "macros"]` (configured in dev-dependencies).
-- Adding tests to api/routes would require DB + Redis.
+- **Unit tests** (14 pass): `storage_test.rs` (4), `gallery_test.rs` (4), `admin_test.rs` (6 ignored — need DB/Redis), `health_test.rs` (1 ignored), `rustfs_test.rs` (2 pass + 3 ignored — need S3).
+- **Run focused**: `cargo test -p pichost-api test_image_list` — matches test name prefix.
+- **pichost-core tests** need `tokio` features `["rt", "macros"]`.
+- Integration tests in `pichost-api/tests/` require PostgreSQL + Redis (ignored by default).
+- No frontend tests.
 
 ## Frontend (web-ui/)
 
-- React 19, Vite 6, Tailwind CSS 4, TypeScript 7.
-- State: Zustand (client state) + TanStack Query (server state).
-- HTTP client: `ky` (not axios, not fetch).
-- Routing: react-router-dom v7.
-- Upload: react-dropzone.
-- Toasts: sonner.
-- Entrypoint: `src/main.tsx` → `App.tsx`.
-- Dev server on `:5173` with proxy to `:3000`.
-
-## Projects that are NOT present
-
-- No CI workflows (no `.github/workflows/`).
-- No pre-commit hooks.
-- No lint/staging config.
-- No `deny.toml` (no cargo-deny).
-- No Makefile or Justfile.
-- No `opencode.json`.
+- React 19, Vite 8, Tailwind CSS 4, TypeScript 7.
+- State: Zustand (client) + TanStack Query v5 (server).
+- HTTP: `ky`. Routing: `react-router-dom` v7. Upload: `react-dropzone`. Toasts: `sonner`.
+- Entry: `src/main.tsx` → `App.tsx`. Dev server :5173, proxy to :3000.
+- **CSS variables**: Design system uses `var(--color-*)` tokens for theming. Glass effects via `backdrop-blur-sm`, `bg-[var(--glass-bg)]`, `border-[var(--color-border)]`.
+- **Hooks**: `useUploadQueue` (multi-file upload with concurrency pool), `useInfiniteQuery` (Gallery scroll).
 
 ## Rules
 
-- 当一个阶段Plan开发完成时，自动清理生成的临时文件（如 log 文件等）、临时Docker容器等，避免垃圾残留。
-- 当一条命令卡主超过120s时，自动取消重试，避免任务进度阻塞。
-- docs 目录下的文件也是当前代码仓的重要交付件，自动纳入版本控制管理。
-- 编写的 Rust 代码需要符合 Rust 编码规范，如果有规范，请进行修复，确保清零。
-- Rust 代码开发遵循 TDD（测试驱动开发），先编写完整单元测试 UT 用例后，再进行开发，确保用例通过。
-- 所有代码编程完成以后，需进行系统集成冒烟测试，确保业务符合功能设计。
-- 每完成一个Plan的开发，整理更新 `docs\superpowers\specs\2026-07-11-pichost-design.md` **开发优先级** 部分的 `TODO` 项，
-  避免每次重复分析待开发功能。
-- commit 时，描述信息及标题统一使用英文，`docs\superpowers\specs` 下的文档统一使用中文。
-- 当要创建PR时，只需要创建并反馈链接即可，实际创建合入过程交给我就行。
-- 每次规划需求活开发新特性前，先阅读一下 `.omo\summary\summary_and_next.md`、`docs\superpowers` 下的文档。
-- 设计新需求实现计划时，请使用 `UML`、`mermaid` 图。
-- 每完成一个开发，就将版本号递增，例如 `0.1.0` -> `0.2.0`，每完成一次Bug修复，也需要更新版本号，例如 `0.1.0` -> `0.1.1`。
-
-## Summary
-
-每次需求计划完成开发时，对本次开发内容进行总结，并更新项目跟路径下的 `.omo\summary\summary_and_next.md` ，主要包括如下信息：
-
-- 当前项目涉及哪些特性开发。可参考 `docs\superpowers\specs` 下的文档更新当前项目所要开发的特性。
-- 本次开发完成了哪些特性的开发，有没有遗留问题。
-- 还剩余哪些特性需要开发，优先级是什么？建议下一步开发什么。
+- Commit messages in English. `docs/superpowers/specs/` docs in Chinese.
+- Docs under `docs/` are tracked deliverables — commit them.
+- Bump version on every feature (`0.1.0` → `0.2.0`) and bugfix (`0.1.0` → `0.1.1`).
+- Before planning/developing, read `.omo/summary/summary_and_next.md` and `docs/superpowers/` first.
+- Update `docs/superpowers/specs/2026-07-11-pichost-design.md` TODO list after each phase.
+- After each plan completes, update `.omo/summary/summary_and_next.md`.
+- Clean up temp files, Docker containers after each development phase.
+- When a command hangs >120s, cancel and retry.
+- PR creation: create the PR and share the link — the user handles merge.
