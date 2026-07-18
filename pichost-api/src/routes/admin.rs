@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::app::AppState;
 use crate::cache::InviteCodeInfo;
+use crate::metrics::{TOTAL_IMAGES, TOTAL_STORAGE_BYTES, TOTAL_USERS};
 use crate::middleware::auth::AuthUser;
 use crate::routes::auth::UserInfo;
 
@@ -389,6 +390,10 @@ pub async fn get_admin_stats(
             backends.insert("local".to_string(), local);
             backends.insert("rustfs".to_string(), rustfs);
 
+            TOTAL_USERS.set(total_users);
+            TOTAL_IMAGES.set(total_images);
+            TOTAL_STORAGE_BYTES.set(total_size);
+
             return Ok(Json(AdminStats {
                 total_users,
                 total_images,
@@ -510,6 +515,10 @@ pub async fn get_admin_stats(
         .cache
         .incr_user_stat(&nil_uuid, "rustfs_size", rustfs_row.1)
         .await;
+
+    TOTAL_USERS.set(stats.total_users);
+    TOTAL_IMAGES.set(stats.total_images);
+    TOTAL_STORAGE_BYTES.set(stats.total_size);
 
     Ok(Json(stats))
 }
