@@ -44,10 +44,15 @@
 - **管理后台页面**: "Invites" 标签页，支持创建/复制/列表邀请码
 - **验证**: `cargo clippy --workspace -D warnings` ✅, `cargo test --workspace` ✅(10 passed), `npm run build` ✅
 
+### P2: 图片库增强 ✅ (本次完成)
+- **后端**: `ImageListQuery`/`ImageListResponse` 类型, `GET /images` 支持 `page`/`per_page`/`sort`/`order`/`search` 参数, sort 白名单防注入, `idx_images_user_filename` 索引加速文件名搜索
+- **前端**: `PaginatedListParams`/`PaginatedResponse<T>` 类型, `SearchBar` (300ms debounce), `SortDropdown` (日期/大小/文件名 + asc/desc), Gallery 使用 `useInfiniteQuery` + IntersectionObserver 无限滚动, `keepPreviousData` 防滤镜切换闪烁
+- **验证**: `cargo clippy` ✅, `cargo test` ✅(14 pass), `npm run build` ✅
+
 ## 剩余待开发特性
 
 - **P2 (remaining)**: OAuth 登录, 图片库增强(分页/搜索), 多文件并发拖拽上传,
   用户存储配额, 批量管理, /metrics Prometheus 端点, CDN 集成, 水平扩展
 
 ## 建议下一步开发
-OAuth 登录 (GitHub/Google) 或 图片库增强 (分页/无限滚动/搜索)。
+多文件并发拖拽上传 或 用户存储配额。

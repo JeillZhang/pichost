@@ -33,6 +33,41 @@ pub struct UploadResult {
     pub created_at: DateTime<Utc>,
 }
 
+/// Query parameters for GET /api/v1/images
+#[derive(Debug, Deserialize)]
+pub struct ImageListQuery {
+    /// Page number (1-based, default 1)
+    #[serde(default = "default_page")]
+    pub page: u32,
+    /// Items per page (default 20, max 100)
+    #[serde(default = "default_per_page")]
+    pub per_page: u32,
+    /// Sort field: "created_at", "file_size", "original_name"
+    #[serde(default = "default_sort")]
+    pub sort: String,
+    /// Sort order: "asc" or "desc"
+    #[serde(default = "default_order")]
+    pub order: String,
+    /// Optional search term (ILIKE match against original_name)
+    #[serde(default)]
+    pub search: String,
+}
+
+fn default_page() -> u32 { 1 }
+fn default_per_page() -> u32 { 20 }
+fn default_sort() -> String { "created_at".to_string() }
+fn default_order() -> String { "desc".to_string() }
+
+/// Paginated response envelope
+#[derive(Debug, Serialize)]
+pub struct ImageListResponse {
+    pub items: Vec<UploadResult>,
+    pub total: i64,
+    pub page: u32,
+    pub per_page: u32,
+    pub total_pages: u32,
+}
+
 async fn enqueue_processing_task(
     redis_pool: &CachePool,
     image_id: Uuid,

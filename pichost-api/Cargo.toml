@@ -26,6 +26,9 @@ tower-http.workspace = true
 infer.workspace = true
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
 
+[dev-dependencies]
+serde_urlencoded = "0.7"
+
 [[bin]]
 name = "pichost-api"
 path = "src/main.rs"
