@@ -25,6 +25,8 @@ tower.workspace = true
 tower-http.workspace = true
 infer.workspace = true
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
+prometheus = "0.13"
+lazy_static = "1.5"
 
 [dev-dependencies]
 serde_urlencoded = "0.7"
