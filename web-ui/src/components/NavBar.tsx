@@ -1,6 +1,7 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { LogOut } from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
+import ThemeToggle from './ThemeToggle'
 
 export default function NavBar() {
   const user = useAuthStore((s) => s.user)
@@ -13,10 +14,20 @@ export default function NavBar() {
   }
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm">
+    <nav
+      className="sticky top-0 z-50 border-b backdrop-blur-sm"
+      style={{
+        backgroundColor: 'var(--glass-bg)',
+        borderColor: 'var(--glass-border)',
+      }}
+    >
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
         {/* Brand */}
-        <Link to="/dashboard" className="text-lg font-bold text-white">
+        <Link
+          to="/dashboard"
+          className="text-lg font-bold"
+          style={{ color: 'var(--color-text-primary)' }}
+        >
           PicHost
         </Link>
 
@@ -25,30 +36,63 @@ export default function NavBar() {
           <NavLink
             to="/dashboard"
             className={({ isActive }) =>
-              isActive ? 'text-white' : 'text-gray-400 hover:text-gray-200'
+              isActive ? '' : 'hover:opacity-75'
             }
+            style={({ isActive }) => ({
+              color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+            })}
           >
             Dashboard
           </NavLink>
           <NavLink
             to="/gallery"
             className={({ isActive }) =>
-              isActive ? 'text-white' : 'text-gray-400 hover:text-gray-200'
+              isActive ? '' : 'hover:opacity-75'
             }
+            style={({ isActive }) => ({
+              color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+            })}
           >
             Gallery
           </NavLink>
+          {user?.is_admin && (
+            <NavLink
+              to="/admin"
+              className={({ isActive }) =>
+                isActive ? '' : 'hover:opacity-75'
+              }
+              style={({ isActive }) => ({
+                color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+              })}
+            >
+              Admin
+            </NavLink>
+          )}
         </div>
 
         {/* User */}
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500">
+          <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
             Logged in as{' '}
-            <span className="text-gray-300">{user?.username}</span>
+            <span style={{ color: 'var(--color-text-secondary)' }}>
+              {user?.username}
+            </span>
           </span>
+          <ThemeToggle />
           <button
             onClick={handleLogout}
-            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm"
+            style={{
+              color: 'var(--color-text-muted)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--color-surface)'
+              e.currentTarget.style.color = 'var(--color-text-secondary)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent'
+              e.currentTarget.style.color = 'var(--color-text-muted)'
+            }}
           >
             <LogOut className="h-4 w-4" />
             Logout

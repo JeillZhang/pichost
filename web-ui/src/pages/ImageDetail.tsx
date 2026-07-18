@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import NavBar from '../components/NavBar'
 import { getImage, deleteImage } from '../api/client'
 import LinkCard from '../components/LinkCard'
 
@@ -52,13 +51,13 @@ export default function ImageDetail() {
       case 'failed':
         return 'bg-red-900/50 text-red-400 border-red-700'
       default:
-        return 'bg-gray-800 text-gray-400 border-gray-600'
+        return 'bg-[var(--color-surface)] text-[var(--color-text-secondary)] border-[var(--color-border)]'
     }
   }
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-gray-500">
+      <div className="flex min-h-screen items-center justify-center text-[var(--color-text-muted)]">
         Loading…
       </div>
     )
@@ -66,7 +65,7 @@ export default function ImageDetail() {
 
   if (!img) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-gray-600">
+      <div className="flex min-h-screen items-center justify-center text-[var(--color-text-muted)]">
         Image not found.
       </div>
     )
@@ -74,19 +73,18 @@ export default function ImageDetail() {
 
   return (
     <>
-      <NavBar />
       <div className="mx-auto max-w-2xl p-4">
       {/* Back button */}
       <button
         onClick={() => navigate(-1)}
-        className="mb-4 flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200"
+        className="mb-4 flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
       >
         <ArrowLeft className="h-4 w-4" />
         Back
       </button>
 
       {/* Image preview */}
-      <div className="overflow-hidden rounded-xl border border-gray-800 bg-gray-900/50">
+      <div className="overflow-hidden rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)]" style={{ backdropFilter: 'blur(var(--glass-blur))', boxShadow: 'var(--glass-shadow)' }}>
         <img
           src={img.url}
           alt={img.original_name}
@@ -95,10 +93,10 @@ export default function ImageDetail() {
       </div>
 
       {/* Info */}
-      <div className="mt-4 space-y-1 text-sm text-gray-400">
+      <div className="mt-4 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] p-4 space-y-1 text-sm text-[var(--color-text-secondary)]" style={{ backdropFilter: 'blur(var(--glass-blur))', boxShadow: 'var(--glass-shadow)' }}>
         <p>
           Name:{' '}
-          <span className="text-gray-200">{img.original_name}</span>
+          <span className="text-[var(--color-text-primary)]">{img.original_name}</span>
         </p>
         <p className="flex items-center gap-2">
           Status:{' '}
@@ -111,24 +109,24 @@ export default function ImageDetail() {
         {img.width && img.height && (
           <p>
             Dimensions:{' '}
-            <span className="text-gray-200">
+            <span className="text-[var(--color-text-primary)]">
               {img.width} × {img.height}px
             </span>
           </p>
         )}
         <p>
           Type:{' '}
-          <span className="text-gray-200">{img.mime_type}</span>
+          <span className="text-[var(--color-text-primary)]">{img.mime_type}</span>
         </p>
         <p>
           Size:{' '}
-          <span className="text-gray-200">
+          <span className="text-[var(--color-text-primary)]">
             {(img.file_size / 1024).toFixed(1)} KB
           </span>
         </p>
         <p>
           Uploaded:{' '}
-          <span className="text-gray-200">
+          <span className="text-[var(--color-text-primary)]">
             {new Date(img.created_at).toLocaleString()}
           </span>
         </p>
@@ -137,7 +135,7 @@ export default function ImageDetail() {
       {/* Additional links */}
       {(img.thumbnail_url || img.webp_url) && (
         <div className="mt-4 space-y-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+          <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
             Generated Assets
           </p>
           {img.thumbnail_url && (
@@ -158,7 +156,7 @@ export default function ImageDetail() {
       </div>
 
       {/* Delete */}
-      <div className="mt-6 border-t border-gray-800 pt-4">
+      <div className="mt-6 border-t border-[var(--color-border)] pt-4">
         {confirmDelete ? (
           <div className="flex items-center gap-3">
             <button
@@ -171,7 +169,7 @@ export default function ImageDetail() {
             </button>
             <button
               onClick={() => setConfirmDelete(false)}
-              className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+              className="rounded-lg px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)]"
             >
               Cancel
             </button>
@@ -179,7 +177,7 @@ export default function ImageDetail() {
         ) : (
           <button
             onClick={handleDelete}
-            className="flex items-center gap-1.5 rounded-lg border border-gray-700 px-4 py-2 text-sm text-red-400 hover:bg-red-900/30 hover:text-red-300"
+            className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm text-[var(--color-danger)] hover:bg-[var(--color-danger-subtle)] hover:text-[var(--color-danger-hover)]"
           >
             <Trash2 className="h-4 w-4" />
             Delete Image

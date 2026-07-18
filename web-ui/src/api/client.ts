@@ -4,6 +4,7 @@ import type { KyInstance } from 'ky'
 export interface UserInfo {
   id: string
   username: string
+  email?: string | null
   is_admin: boolean
   created_at: string
 }

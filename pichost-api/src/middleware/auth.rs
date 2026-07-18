@@ -93,3 +93,30 @@ pub async fn require_auth(
 
     Ok(next.run(req).await)
 }
+
+/// Middleware that rejects non-admin users with 403 Forbidden.
+/// MUST be placed after `require_auth` — requires `AuthUser` in extensions.
+pub async fn require_admin(
+    req: Request,
+    next: Next,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let auth_user = req
+        .extensions()
+        .get::<AuthUser>()
+        .ok_or_else(|| {
+            tracing::warn!("require_admin called without AuthUser in extensions");
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "authentication required"})),
+            )
+        })?;
+
+    if !auth_user.is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "admin access required"})),
+        ));
+    }
+
+    Ok(next.run(req).await)
+}
