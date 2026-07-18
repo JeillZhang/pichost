@@ -87,7 +87,7 @@ pub struct AuthResponse {
 
 // ---- Helpers ----
 
-fn generate_tokens(
+pub(crate) fn generate_tokens(
     user_id: Uuid,
     is_admin: bool,
     config: &AppConfig,

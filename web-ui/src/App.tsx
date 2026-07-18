@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard'
 import Gallery from './pages/Gallery'
 import ImageDetail from './pages/ImageDetail'
 import Admin from './pages/Admin'
+import Settings from './pages/Settings'
 import ProtectedRoute from './components/ProtectedRoute'
 import AdminRoute from './components/AdminRoute'
 
@@ -60,6 +61,16 @@ export default function App() {
             <ProtectedRoute>
               <Layout>
                 <Gallery />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Settings />
               </Layout>
             </ProtectedRoute>
           }

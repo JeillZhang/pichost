@@ -58,9 +58,14 @@
 - **Backend**: `prometheus` + `lazy_static` crates, metrics registry (CounterVec, HistogramVec, Counter, IntGauge), HTTP middleware tracking all requests, `GET /metrics` public endpoint (Prometheus text format)
 - **Business gauges**: uploads_total, upload_errors_total, users_total, images_total, storage_bytes_total
 
+### P2: OAuth 登录 ✅ (本次完成)
+- **Backend**: `oauth_accounts` 表, `oauth2` + `reqwest` crates, `GET /auth/oauth/{github,google}` redirect + callback, `POST /users/oauth/link` 账户关联
+- **Frontend**: Login 页 GitHub/Google 社交登录按钮, Settings 页 OAuth 关联入口
+- **验证**: `cargo clippy` ✅, `cargo test` ✅(14 pass), `npm run build` ✅
+
 ## 建议下一步开发
-OAuth 登录 或 CDN 集成
+CDN 集成 或 水平扩展
 
 ## 剩余待开发特性
 
-- **P2 (remaining)**: OAuth 登录, CDN 集成, 水平扩展
+- **P2 (remaining)**: CDN 集成, 水平扩展

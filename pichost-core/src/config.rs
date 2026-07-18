@@ -27,6 +27,14 @@ pub struct AuthConfig {
     pub jwt_secret: String,
     pub access_token_ttl: u64,
     pub refresh_token_ttl: u64,
+    #[serde(default)]
+    pub oauth_github_client_id: Option<String>,
+    #[serde(default)]
+    pub oauth_github_client_secret: Option<String>,
+    #[serde(default)]
+    pub oauth_google_client_id: Option<String>,
+    #[serde(default)]
+    pub oauth_google_client_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -131,7 +139,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             server: ServerConfig { host: "0.0.0.0".into(), port: 3000, public_url: "http://localhost:3000".into(), cors_origins: vec!["http://localhost:5173".into()] },
-            auth: AuthConfig { jwt_secret: String::new(), access_token_ttl: 900, refresh_token_ttl: 2_592_000 },
+            auth: AuthConfig { jwt_secret: String::new(), access_token_ttl: 900, refresh_token_ttl: 2_592_000, oauth_github_client_id: None, oauth_github_client_secret: None, oauth_google_client_id: None, oauth_google_client_secret: None },
             storage: StorageConfig {
                 default_backend: "local".into(),
                 local_base_path: PathBuf::from("./storage-local"),

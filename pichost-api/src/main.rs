@@ -80,6 +80,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/login", post(routes::auth::login))
         .route("/refresh", post(routes::auth::refresh))
         .route("/logout", post(routes::auth::logout))
+        .route("/oauth/github", get(routes::oauth::github_redirect))
+        .route("/oauth/github/callback", get(routes::oauth::github_callback))
+        .route("/oauth/google", get(routes::oauth::google_redirect))
+        .route("/oauth/google/callback", get(routes::oauth::google_callback))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit::rate_limit_auth,
@@ -111,6 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // User routes — rate limit by user + auth
     let user_routes = Router::new()
         .route("/me/stats", get(routes::users::get_my_stats))
+        .route("/oauth/link", post(routes::oauth::oauth_link))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit::rate_limit_general,

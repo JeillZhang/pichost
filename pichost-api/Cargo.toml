@@ -27,6 +27,8 @@ infer.workspace = true
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
 prometheus = "0.13"
 lazy_static = "1.5"
+oauth2 = "5"
+reqwest = { version = "0.12", features = ["json"] }
 
 [dev-dependencies]
 serde_urlencoded = "0.7"
