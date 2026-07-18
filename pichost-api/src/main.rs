@@ -128,8 +128,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.clone(),
             rate_limit::rate_limit_general,
         ))
-        .route_layer(protected.clone())
-        .route_layer(admin_protected);
+        .route_layer(admin_protected)
+        .route_layer(protected.clone());
 
     // Public routes — rate limit by IP, 200 req/min
     let public_routes = Router::new()
