@@ -4,9 +4,16 @@ import { Shield, Trash2 } from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
 import DropZone from '../components/DropZone'
 import UploadCard from '../components/UploadCard'
-import { listImages } from '../api/client'
+import { listImages, getUserStats } from '../api/client'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useUploadQueue } from '../hooks/useUploadQueue'
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
 
 export default function Dashboard() {
   const user = useAuthStore((s) => s.user)
@@ -19,6 +26,11 @@ export default function Dashboard() {
     queryFn: () => listImages({ per_page: 50 }),
   })
   const images = data?.items
+
+  const { data: stats } = useQuery({
+    queryKey: ['user-stats'],
+    queryFn: () => getUserStats(),
+  })
 
   // Invalidate when any upload completes
   const prevDoneCount = useRef(0)
@@ -87,6 +99,31 @@ export default function Dashboard() {
           {queue.map((task) => (
             <UploadCard key={task.id} task={task} />
           ))}
+        </div>
+      )}
+
+      {/* Storage usage bar */}
+      {stats && stats.storage_quota != null && (
+        <div className="mt-4 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-3 backdrop-blur-sm">
+          <div className="mb-1 flex items-center justify-between text-xs">
+            <span className="text-[var(--color-text-muted)]">Storage</span>
+            <span className="text-[var(--color-text-secondary)]">
+              {formatBytes(stats.total_size)} / {formatBytes(stats.storage_quota)}
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-[var(--color-border)]">
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${Math.min(100, (stats.total_size / stats.storage_quota) * 100)}%`,
+                backgroundColor: stats.total_size / stats.storage_quota > 0.9
+                  ? 'var(--color-error, #ef4444)'
+                  : stats.total_size / stats.storage_quota > 0.7
+                    ? 'var(--color-warning, #f59e0b)'
+                    : 'var(--color-accent)',
+              }}
+            />
+          </div>
         </div>
       )}
 
