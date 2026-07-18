@@ -511,3 +511,87 @@ pub async fn delete_image(
     tracing::info!(image_id = %id, user_id = %user.id, "image deleted");
     Ok(Json(json!({"message": "image deleted", "id": id})))
 }
+
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+pub struct BatchDeleteRequest {
+    pub ids: Vec<Uuid>,
+}
+
+/// POST /api/v1/images/batch-delete — delete multiple images (protected)
+pub async fn batch_delete(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+    Json(body): Json<BatchDeleteRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if body.ids.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "no image ids provided"})),
+        ));
+    }
+    if body.ids.len() > 100 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "batch limit is 100 images"})),
+        ));
+    }
+
+    let rows: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
+        r#"SELECT storage_key, storage_backend, thumbnail_key, webp_key
+           FROM images WHERE id = ANY($1) AND (user_id = $2 OR $3)"#,
+    )
+    .bind(&body.ids)
+    .bind(user.id)
+    .bind(user.is_admin)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Batch delete query failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "internal server error"})),
+        )
+    })?;
+
+    for (storage_key, storage_backend, thumb_key, webp_key) in &rows {
+        let backend = state.router.for_backend(storage_backend);
+        let _ = backend.delete(storage_key).await;
+        if let Some(ref tk) = thumb_key {
+            let _ = backend.delete(tk).await;
+        }
+        if let Some(ref wk) = webp_key {
+            let _ = backend.delete(wk).await;
+        }
+    }
+
+    let deleted = sqlx::query("DELETE FROM images WHERE id = ANY($1)")
+        .bind(&body.ids)
+        .execute(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Batch delete DB failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "failed to delete images"})),
+            )
+        })?
+        .rows_affected() as usize;
+
+    let failed = body.ids.len().saturating_sub(deleted);
+
+    tracing::info!(
+        user_id = %user.id,
+        requested = body.ids.len(),
+        deleted,
+        failed,
+        "batch delete"
+    );
+
+    Ok(Json(json!({
+        "message": "batch delete completed",
+        "deleted": deleted,
+        "failed": failed
+    })))
+}

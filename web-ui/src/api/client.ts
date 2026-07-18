@@ -190,4 +190,14 @@ export async function listInviteCodes(): Promise<InviteCodeInfo[]> {
   return api.get('admin/invites').json<InviteCodeInfo[]>()
 }
 
+export interface BatchDeleteResult {
+  message: string
+  deleted: number
+  failed: number
+}
+
+export async function batchDeleteImages(ids: string[]): Promise<BatchDeleteResult> {
+  return api.post('images/batch-delete', { json: { ids } }).json<BatchDeleteResult>()
+}
+
 export default api
