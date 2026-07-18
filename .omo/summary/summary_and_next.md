@@ -49,10 +49,13 @@
 - **前端**: `PaginatedListParams`/`PaginatedResponse<T>` 类型, `SearchBar` (300ms debounce), `SortDropdown` (日期/大小/文件名 + asc/desc), Gallery 使用 `useInfiniteQuery` + IntersectionObserver 无限滚动, `keepPreviousData` 防滤镜切换闪烁
 - **验证**: `cargo clippy` ✅, `cargo test` ✅(14 pass), `npm run build` ✅
 
-## 剩余待开发特性
-
-- **P2 (remaining)**: OAuth 登录, 图片库增强(分页/搜索), 多文件并发拖拽上传,
-  用户存储配额, 批量管理, /metrics Prometheus 端点, CDN 集成, 水平扩展
+### P2: 多文件并发拖拽上传 ✅ (本次完成)
+- **前端**: `useUploadQueue` hook 管理并发上传池 (MAX_CONCURRENT=3), `UploadCard` 组件显示单文件进度 (pending→uploading→done/error), DropZone 支持多文件选择, Dashboard 集成队列展示 + 批量清理, `useEffect` 驱动的 TanStack Query 自动刷新
+- **验证**: `cargo clippy` ✅, `cargo test` ✅(14 pass), `npm run build` ✅
 
 ## 建议下一步开发
-多文件并发拖拽上传 或 用户存储配额。
+用户存储配额 或 OAuth 登录
+
+## 剩余待开发特性
+
+- **P2 (remaining)**: OAuth 登录, 用户存储配额, 批量管理, /metrics Prometheus, CDN 集成, 水平扩展
