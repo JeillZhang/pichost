@@ -1556,6 +1556,6 @@ cd web-ui && npm run build               # 打包验证
 - [x] 批量管理 (multi-select, batch delete via POST /images/batch-delete, toolbar + confirmation dialog)
 - [x] 邀请码注册系统 (Redis 存储, 首个用户自动 admin, 管理后台创建/列表)
 - [x] 用户存储配额 (storage_quota BIGINT NULL, default 1GB, upload enforcement, admin management, Dashboard usage bar)
-- /metrics Prometheus 端点
+- [x] /metrics Prometheus 端点 (prometheus crate, HTTP counters/latency histograms, business gauges: uploads/users/images/storage)
 - OAuth 登录
 - CDN 集成 (Cloudflare/七牛云)

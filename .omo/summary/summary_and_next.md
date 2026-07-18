@@ -54,14 +54,13 @@
 - **后端**: `AuthUser`/`UserInfo`/`UserStats` 携带 quota, `process_upload` 配额检查 (413 + quota_bytes/used_bytes/file_bytes), admin 可读写 quota
 - **前端**: Dashboard 用量条 (绿/黄/红三级), Admin 用户编辑对话框 quota 输入
 
-### P2: 批量管理 ✅ (本次完成)
-- **后端**: `POST /api/v1/images/batch-delete` (max 100 IDs, ownership/admin check, best-effort storage cleanup, DB batch delete)
-- **前端**: Gallery 多选模式 (checkbox overlay + 工具栏 + 全选/反选), 确认对话框, accent ring 选中标识
-- **验证**: `cargo clippy` ✅, `cargo test` ✅(14 pass), `npm run build` ✅
+### P2: Prometheus /metrics ✅ (本次完成)
+- **Backend**: `prometheus` + `lazy_static` crates, metrics registry (CounterVec, HistogramVec, Counter, IntGauge), HTTP middleware tracking all requests, `GET /metrics` public endpoint (Prometheus text format)
+- **Business gauges**: uploads_total, upload_errors_total, users_total, images_total, storage_bytes_total
 
 ## 建议下一步开发
-OAuth 登录 或 /metrics Prometheus 端点
+OAuth 登录 或 CDN 集成
 
 ## 剩余待开发特性
 
-- **P2 (remaining)**: OAuth 登录, /metrics Prometheus, CDN 集成, 水平扩展
+- **P2 (remaining)**: OAuth 登录, CDN 集成, 水平扩展
