@@ -1,7 +1,7 @@
 # Plan B: Frontend Visual Polish + Admin Panel
 
 > **Date**: 2026-07-12
-> **Project**: `pichost-rust`
+> **Project**: `pichost`
 > **Branch**: `feat/planb-visual-admin`
 > **Pre-plan Analysis**: Metis consulted — no shadcn/ui, no CVA, separate admin middleware
 

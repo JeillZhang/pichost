@@ -19,7 +19,7 @@ Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S
 
 ```bash
 # 1. Clone and enter the repo
-git clone https://github.com/JeillZhang/pichost.git && cd pichost-rust
+git clone https://github.com/JeillZhang/pichost.git && cd pichost
 
 # 2. Create your .env file
 cp .env.example .env
