@@ -6,7 +6,15 @@ export interface UserInfo {
   username: string
   email?: string | null
   is_admin: boolean
+  storage_quota: number | null
   created_at: string
+}
+
+export interface UserStats {
+  total_images: number
+  total_size: number
+  backend: string
+  storage_quota: number | null
 }
 
 export interface AuthResponse {
@@ -166,6 +174,10 @@ export async function listImages(
 
 export async function getImage(id: string): Promise<ImageInfo> {
   return api.get(`images/${id}`).json<ImageInfo>()
+}
+
+export async function getUserStats(): Promise<UserStats> {
+  return api.get('users/me/stats').json<UserStats>()
 }
 
 export async function createInviteCode(ttlDays?: number): Promise<CreateInviteResponse> {
