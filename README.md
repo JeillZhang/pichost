@@ -115,6 +115,8 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 | `PICHOST_AUTH_OAUTH_GOOGLE_CLIENT_ID` | OAuth | — | Google OAuth client ID |
 | `PICHOST_AUTH_OAUTH_GOOGLE_CLIENT_SECRET` | OAuth | — | Google OAuth client secret |
 | `PICHOST_STORAGE_LOCAL_BASE_PATH` | Local storage | `./storage-local` | File storage directory |
+| `PICHOST_STORAGE_MAX_USER_CONFIGS` | — | `5` | Max Git storage configs per user |
+| `PICHOST_AUTH_TOKEN_ENCRYPTION_KEY` | Git storage | — | AES-256-GCM key for Git token encryption |
 | `DATABASE_URL` | Docker only | — | sqlx CLI helper (not consumed by app) |
 
 **Important**: `DATABASE_URL` and `PICHOST_DATABASE_URL` are separate vars. Only `PICHOST_DATABASE_URL` is consumed at runtime. Both are set in docker-compose for convenience.
@@ -136,7 +138,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | POST | `/api/v1/images` | JWT | Multipart upload, auto-thumbnails |
-| GET | `/api/v1/images` | JWT | Paginated: `?page=&per_page=&sort=&order=&search=` |
+| GET | `/api/v1/images` | JWT | Paginated: `?page=&per_page=&sort=&order=&search=&storage_config_id=` |
 | GET | `/api/v1/images/:id` | JWT | |
 | DELETE | `/api/v1/images/:id` | JWT | |
 | POST | `/api/v1/images/batch-delete` | JWT | `{ ids: UUID[] }`, max 100 |
@@ -148,6 +150,8 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | GET | `/api/v1/users/me/stats` | JWT | Storage usage + quota |
+| GET/POST | `/api/v1/users/me/storage-configs` | JWT | Git storage config management, GET all / POST create |
+| GET/PATCH/DELETE | `/api/v1/users/me/storage-configs/:id` | JWT | Single config: GET details, PATCH update, DELETE |
 | POST | `/api/v1/users/oauth/link` | JWT | Link OAuth after invite-code registration |
 | GET | `/api/v1/admin/stats` | JWT+Admin | System-wide stats |
 | GET/POST | `/api/v1/admin/invites` | JWT+Admin | Invite code management |
@@ -179,19 +183,22 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 - [x] **Horizontal scaling** — API×2, Worker×2 in docker-compose
 - [x] **Prometheus /metrics** — counters (uploads, registrations), gauges (users, images)
 - [x] RustFS storage backend — S3-compatible object storage (optional)
+- [x] **Git storage backend** — GitHub/GitCode via REST API, AES-256-GCM token encryption, CRUD management UI
+- [x] **Multi-backend upload** — select storage target per upload, parallel dual-backend write
 
 ## Project Structure
 
 ```
 ├── pichost-core/            Domain models, config, StorageBackend trait,
-│                            LocalStorage, RustfsStorage, StorageRouter
+│                            LocalStorage, RustfsStorage, GitStorage,
+│                            StorageRouter, AES-256-GCM crypto
 ├── pichost-api/             Axum server — routes, middleware, services,
-│                            DB pool, Redis, rate limiting
+│                            DB pool, Redis, rate limiting, storage config CRUD
 ├── pichost-worker/          Background processing — thumbnails, WebP via Redis queue
 ├── web-ui/                  React SPA — Zustand, TanStack Query, Tailwind CSS 4
 ├── nginx/
 │   └── nginx.conf           Reverse proxy + cache + rate limiting
-├── migrations/              7 SQL migrations (0001–0007)
+├── migrations/              8 SQL migrations (0001–0008)
 ├── Dockerfile.api           Multi-stage Rust build for API
 ├── Dockerfile.worker        Multi-stage Rust build for Worker
 ├── docker-compose.yml       Full stack: Nginx, API×2, Worker×2, PostgreSQL, Redis
