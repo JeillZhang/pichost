@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "ecc@ecc": false,
+    "cloud-sql-postgresql@claude-plugins-official": true
+  }
+}
