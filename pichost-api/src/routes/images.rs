@@ -113,6 +113,7 @@ async fn count_user_images(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn fetch_user_images(
     pool: &DbPool, user_id: Uuid, sort_col: &str, order_dir: &str,
     search_term: &str, limit: i64, offset: i64,

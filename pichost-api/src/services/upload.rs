@@ -136,6 +136,7 @@ pub struct ImageListResponse {
 
 // ── Enqueue helper ─────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 async fn enqueue_processing_task(
     redis_pool: &CachePool,
     image_id: Uuid,
@@ -144,6 +145,7 @@ async fn enqueue_processing_task(
     mime_type: &str,
     storage_backend: &str,
     storage_config_id: Option<Uuid>,
+    storage_backend_name: &str,
 ) {
     let task_id = Uuid::new_v4();
     let mut payload = serde_json::json!({
@@ -155,6 +157,7 @@ async fn enqueue_processing_task(
         "source_mime": mime_type,
         "retry_count": 0,
         "max_retries": 3,
+        "storage_backend_name": storage_backend_name,
     });
     if let Some(cid) = storage_config_id {
         payload["storage_config_id"] = serde_json::Value::String(cid.to_string());
@@ -723,6 +726,7 @@ async fn upload_to_single_backend(
         mime_type,
         &backend_name,
         config_id,
+        &backend_name,
     )
     .await;
 
@@ -881,6 +885,7 @@ async fn count_user_images(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn fetch_user_images(
     pool: &PgPool, user_id: Uuid, sort_col: &str, order_dir: &str,
     search_term: &str, limit: i64, offset: i64,

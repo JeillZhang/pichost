@@ -1,4 +1,9 @@
+use std::sync::Arc;
+
 use pichost_core::config::AppConfig;
+use pichost_core::crypto::decode_key;
+use pichost_core::models::UserStorageConfig;
+use pichost_core::storage::StorageBackend;
 use pichost_core::StorageRouter;
 use sqlx::PgPool;
 
@@ -19,6 +24,8 @@ pub enum PipelineError {
     Webp(String),
     #[error("database update failed: {0}")]
     Database(String),
+    #[error("backend resolution failed: {0}")]
+    BackendResolution(String),
 }
 
 use crate::queue::TaskPayload;
@@ -29,14 +36,15 @@ pub async fn process_task(
     config: &AppConfig,
     task: &TaskPayload,
 ) -> Result<(), PipelineError> {
-    let (img, fmt, _bytes) = read_source_image(router, task).await?;
+    let backend = resolve_backend(pool, router, config, task).await?;
+
+    let (img, fmt, _bytes) = read_source_image(backend.as_ref(), task).await?;
     let (width, height) = (img.width() as i32, img.height() as i32);
     let thumb_key = format!("{}/thumb.{}", task.user_id, task.image_id);
     let webp_key = format!("{}/webp.{}", task.user_id, task.image_id);
-    let source_backend = router.for_backend(&task.storage_backend);
 
     let (thumb_written, webp_written) = process_image_variants(
-        &img, fmt, source_backend.as_ref(), &thumb_key, &webp_key, config,
+        &img, fmt, backend.as_ref(), &thumb_key, &webp_key, config,
     )
     .await?;
 
@@ -51,15 +59,72 @@ pub async fn process_task(
         image_id = %task.image_id, width, height,
         thumb = thumb_written, webp = webp_written,
         backend = task.storage_backend,
+        backend_name = task.storage_backend_name,
         "processing complete"
     );
     Ok(())
 }
 
+/// Resolve the storage backend for this task.
+///
+/// If the task references a storage config (git backends), the config is
+/// fetched from the database and a dynamic backend is created via
+/// `router.for_config()`. Otherwise falls back to `router.for_backend()`.
+async fn resolve_backend(
+    pool: &PgPool,
+    router: &StorageRouter,
+    config: &AppConfig,
+    task: &TaskPayload,
+) -> Result<Arc<dyn StorageBackend>, PipelineError> {
+    if let Some(config_id) = &task.storage_config_id {
+        let storage_config = fetch_storage_config(pool, config_id).await?;
+        let enc_key = resolve_encryption_key(config);
+        router
+            .for_config(&storage_config, &enc_key)
+            .map_err(|e| PipelineError::BackendResolution(e.to_string()))
+    } else {
+        Ok(router.for_backend(&task.storage_backend))
+    }
+}
+
+/// Fetch a user storage config by ID from the database.
+async fn fetch_storage_config(
+    pool: &PgPool,
+    config_id: &uuid::Uuid,
+) -> Result<UserStorageConfig, PipelineError> {
+    sqlx::query_as::<_, UserStorageConfig>(
+        "SELECT id, user_id, name, provider, is_default, \
+         config, created_at, updated_at \
+         FROM user_storage_configs WHERE id = $1",
+    )
+    .bind(config_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        PipelineError::BackendResolution(format!("config db query failed: {e}"))
+    })?
+    .ok_or_else(|| {
+        PipelineError::BackendResolution(format!(
+            "storage config {} not found",
+            config_id
+        ))
+    })
+}
+
+/// Decode the token encryption key from config, falling back to a zeroed key
+/// if none is configured.
+fn resolve_encryption_key(config: &AppConfig) -> [u8; 32] {
+    config
+        .token_encryption_key
+        .as_ref()
+        .and_then(|k| decode_key(k).ok())
+        .unwrap_or([0u8; 32])
+}
+
 async fn process_image_variants(
     img: &image::DynamicImage,
     fmt: image::ImageFormat,
-    source_backend: &(dyn pichost_core::storage::StorageBackend + '_),
+    source_backend: &(dyn StorageBackend + '_),
     thumb_key: &str,
     webp_key: &str,
     config: &AppConfig,
@@ -88,14 +153,12 @@ async fn process_image_variants(
     Ok((thumb_written, webp_written))
 }
 
-/// Read and decode the source image from the configured storage backend.
+/// Read and decode the source image from the given storage backend.
 async fn read_source_image(
-    router: &StorageRouter,
+    backend: &(dyn StorageBackend + '_),
     task: &TaskPayload,
 ) -> Result<(image::DynamicImage, image::ImageFormat, Vec<u8>), PipelineError> {
-    let source_backend = router.for_backend(&task.storage_backend);
-
-    let bytes = source_backend
+    let bytes = backend
         .get(&task.source_key)
         .await
         .map_err(|e| PipelineError::StorageRead(e.to_string()))?;
