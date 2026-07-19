@@ -260,32 +260,47 @@ docker compose down
 - Skip Phase 4 but log a warning: "Integration tests skipped — Docker not available. Only unit tests verified."
 - The unit tests (`cargo test --workspace` without DB) already serve as the primary correctness gate.
 
-### Phase 5: Finish
+### Phase 5: Final Verification
+
+**Run ALL checks — if any fails, DO NOT proceed until fixed:**
+
+```bash
+cargo clippy --workspace -- -D warnings   # Zero warnings required
+cargo test --workspace                     # All non-ignored must pass
+cd web-ui && npm run build                 # if web-ui/ changed
+```
+
+**Version bump check**: if frontend changed, verify `web-ui/package.json` version matches `Cargo.toml` workspace version. If not bumped, update both now: patch for fixes, minor for features.
+
+### Phase 6: Auto-Sync Documentation (BEFORE PR/Create Options)
+
+Run this **before** presenting any finish options. The doc sync commits must be included in the branch so the PR captures them.
+
+1. Update `AGENTS.md` — sync version, migrations count, new API routes, architecture notes, config vars, crate boundaries — any structural change introduced in the phase.
+2. Update `README.md` — sync version tagline, Features checklist, Project Structure tree, API endpoint tables, migrations count, config var table — any user-facing change introduced in the phase.
+3. Update `.omo/summary/summary_and_next.md` — add a new "## {phase}: {title} ✅ (本次完成)" section documenting what was built, verification results, and updating the "## 待实施" table if needed.
+4. Commit the three files together as `docs: auto-sync AGENTS.md, README.md, summary after {phase} completion`.
+5. Do NOT skip this step. It is mandatory before proceeding to finish options.
+
+### Phase 7: Finish — Present Options
 
 Invoke `superpowers:finishing-a-development-branch` skill.
 
-**Before presenting options, run final verification:**
-- `cargo clippy --workspace -- -D warnings` ✅
-- `cargo test --workspace` ✅ (all non-ignored tests pass)
-- `npm run build` (if frontend changed) ✅
-- **Version bump check**: if frontend changed, verify `web-ui/package.json` version matches `Cargo.toml` workspace version. If not bumped, update both now.
-- **E2E browser test**: if frontend changed, verify Phase 4 E2E smoke test passed (Playwright + Chromium, no console errors).
+**Verify working directory is clean** — all changes (including doc sync) must be committed:
+
+```bash
+GIT_MASTER=1 git status  # expect: "nothing to commit, working tree clean"
+```
+
+**E2E browser test**: if frontend changed, verify Phase 4 E2E smoke test passed (Playwright + Chromium, no console errors).
 
 **Present the 4 options:**
 1. **Merge** — merge into base branch, delete the feature branch (`git branch -d feat/<plan-name>`).
-2. **Create PR** — push branch, create GitHub PR, share link.
-3. **Keep as-is** — leave branch and worktree for later.
+2. **Create PR** — push branch (if not pushed), create GitHub PR, share link. **PR will include doc sync commits from Phase 6.**
+3. **Keep as-is** — leave branch for later.
 4. **Discard** — delete branch (requires explicit "discard" confirmation).
 
-### Phase 6: Post-Completion — Auto-Sync Documentation
-
-After the feature is merged or the PR is created, automatically execute the mandatory post-phase step from `AGENTS.md` Rules:
-
-1. Update `AGENTS.md` — sync version, migrations count, new API routes, architecture notes, config vars, crate boundaries.
-2. Update `README.md` — sync version tagline, Features checklist, Project Structure tree, API endpoint tables, migrations count, config var table.
-3. Update `.omo/summary/summary_and_next.md` — add a new "## {phase}: {title} ✅ (本次完成)" section documenting what was built, verification results, and updating the "## 待实施" table.
-4. Commit the three files together as `docs: auto-sync AGENTS.md, README.md, summary after {phase} completion`.
-5. Do NOT wait for the user to request this — it is mandatory.
+**CRITICAL**: Do NOT offer "Create PR" if the working directory is dirty or doc sync hasn't been committed yet. Go back and complete Phase 6 first.
 
 ---
 
