@@ -257,7 +257,7 @@ async fn check_upload_quotas(
 
     if let Some(quota) = user.storage_quota {
         let current_usage: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(file_size), 0) FROM images WHERE user_id = $1",
+            "SELECT COALESCE(SUM(file_size)::BIGINT, 0) FROM images WHERE user_id = $1",
         )
         .bind(user.id)
         .fetch_one(&state.pool)

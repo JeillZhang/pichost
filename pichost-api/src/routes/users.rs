@@ -95,8 +95,8 @@ async fn query_user_stats(
     user_id: Uuid,
 ) -> Result<(i64, i64), (StatusCode, Json<serde_json::Value>)> {
     let row = sqlx::query_as::<_, (i64, Option<i64>)>(
-        r#"SELECT COUNT(*) as total_images,
-                  COALESCE(SUM(file_size), 0) as total_size
+        r#"SELECT COUNT(*)::BIGINT as total_images,
+                  COALESCE(SUM(file_size), 0)::BIGINT as total_size
            FROM images WHERE user_id = $1"#,
     )
     .bind(user_id)
