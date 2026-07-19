@@ -192,6 +192,22 @@ export async function uploadImage(
   return api.post('images', { body: formData }).json<UploadResult>()
 }
 
+export interface UrlUploadRequest {
+  url: string
+  storage_config_ids?: string[]
+}
+
+export async function uploadFromUrl(
+  url: string,
+  storageConfigIds?: string[],
+): Promise<UploadResult> {
+  const body: UrlUploadRequest = { url }
+  if (storageConfigIds?.length) {
+    body.storage_config_ids = storageConfigIds
+  }
+  return api.post('images/upload-url', { json: body }).json<UploadResult>()
+}
+
 export async function listImages(
   params: PaginatedListParams = {},
 ): Promise<PaginatedResponse<ImageInfo>> {

@@ -1,13 +1,15 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Shield, Trash2, ChevronDown, Plus, X } from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
 import DropZone from '../components/DropZone'
 import UploadCard from '../components/UploadCard'
-import { listImages, getUserStats, listStorageConfigs } from '../api/client'
+import { listImages, getUserStats, listStorageConfigs, uploadFromUrl } from '../api/client'
 import type { UserStorageConfig } from '../api/client'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useUploadQueue } from '../hooks/useUploadQueue'
+import { useClipboardPaste } from '../hooks/useClipboardPaste'
+import UrlUploadInput from '../components/UrlUploadInput'
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -49,6 +51,25 @@ export default function Dashboard() {
   const handleUpload = (files: File[]) => {
     addFiles(files, selectedConfigIds.length > 0 ? selectedConfigIds : undefined)
   }
+
+  const handlePaste = useCallback(
+    (files: File[]) => {
+      addFiles(files, selectedConfigIds.length > 0 ? selectedConfigIds : undefined)
+    },
+    [addFiles, selectedConfigIds],
+  )
+  useClipboardPaste(handlePaste)
+
+  const handleUrlUpload = useCallback(
+    async (url: string) => {
+      await uploadFromUrl(
+        url,
+        selectedConfigIds.length > 0 ? selectedConfigIds : undefined,
+      )
+      queryClient.invalidateQueries({ queryKey: ['images'] })
+    },
+    [selectedConfigIds, queryClient],
+  )
 
   const availableForSlot = (slotIndex: number): UserStorageConfig[] =>
     (storageConfigs || []).filter(
@@ -172,6 +193,10 @@ export default function Dashboard() {
 
       {/* DropZone — always active, accepts multiple files */}
       <DropZone onUpload={handleUpload} />
+
+      <div className="mt-3">
+        <UrlUploadInput onUpload={handleUrlUpload} />
+      </div>
 
       {/* Upload queue */}
       {queue.length > 0 && (
