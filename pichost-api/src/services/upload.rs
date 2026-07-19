@@ -43,40 +43,42 @@ pub struct UploadResult {
     pub status: String,
     pub thumbnail_url: Option<String>,
     pub webp_url: Option<String>,
+    pub category_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub storage_config: Option<StorageConfigInfo>,
 }
 
-/// Full image-row tuple used by list_images / get_image queries.
-/// Fields: id, public_key, original_name, url, mime_type, file_size,
-///         sha256, width, height, status, thumbnail_url, webp_url, created_at,
-///         storage_config_id, config_name, config_provider
-pub(crate) type ImageRow = (
-    Uuid,
-    String,
-    String,
-    String,
-    String,
-    i64,
-    String,
-    Option<i32>,
-    Option<i32>,
-    String,
-    Option<String>,
-    Option<String>,
-    DateTime<Utc>,
-    Option<Uuid>,
-    Option<String>,
-    Option<String>,
-);
+/// Full image-row struct used by list_images / get_image queries.
+/// The `name` and `provider` fields come from LEFT JOIN on user_storage_configs
+/// and are None when the query does not include that join.
+#[derive(Debug, sqlx::FromRow)]
+pub(crate) struct ImageRow {
+    pub id: Uuid,
+    pub public_key: String,
+    pub original_name: String,
+    pub url: String,
+    pub mime_type: String,
+    pub file_size: i64,
+    pub sha256: String,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub status: String,
+    pub thumbnail_url: Option<String>,
+    pub webp_url: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub category_id: Option<Uuid>,
+    pub storage_config_id: Option<Uuid>,
+    /// From LEFT JOIN user_storage_configs (column name: "name")
+    pub name: Option<String>,
+    /// From LEFT JOIN user_storage_configs (column name: "provider")
+    pub provider: Option<String>,
+}
 
 impl UploadResult {
-    /// Build an UploadResult from a DB row tuple. Generates markdown, HTML and
+    /// Build an UploadResult from a DB row. Generates markdown, HTML and
     /// bbcode link formats from original_name + url.
     pub(crate) fn from_row(row: ImageRow) -> Self {
-        let (id, pk, name, url, mime, size, sha256, w, h, status, thumb, webp,
-             created, cfg_id, cfg_name, cfg_provider) = row;
-        let storage_config = match (cfg_id, cfg_name, cfg_provider) {
+        let storage_config = match (row.storage_config_id, row.name, row.provider) {
             (Some(id), Some(name), Some(provider)) => Some(StorageConfigInfo {
                 id,
                 name,
@@ -85,22 +87,23 @@ impl UploadResult {
             _ => None,
         };
         Self {
-            id,
-            public_key: pk,
-            original_name: name,
-            url,
+            id: row.id,
+            public_key: row.public_key,
+            original_name: row.original_name,
+            url: row.url,
             markdown: String::new(),
             html: String::new(),
             bbcode: String::new(),
-            sha256,
-            file_size: size,
-            mime_type: mime,
-            width: w,
-            height: h,
-            status,
-            thumbnail_url: thumb,
-            webp_url: webp,
-            created_at: created,
+            sha256: row.sha256,
+            file_size: row.file_size,
+            mime_type: row.mime_type,
+            width: row.width,
+            height: row.height,
+            status: row.status,
+            thumbnail_url: row.thumbnail_url,
+            webp_url: row.webp_url,
+            category_id: row.category_id,
+            created_at: row.created_at,
             storage_config,
         }
     }
@@ -127,6 +130,9 @@ pub struct ImageListQuery {
     /// Optional storage config ID filter
     #[serde(default)]
     pub storage_config_id: Option<Uuid>,
+    /// Optional category ID filter
+    #[serde(default)]
+    pub category_id: Option<Uuid>,
 }
 
 fn default_page() -> u32 { 1 }
@@ -314,7 +320,7 @@ async fn try_dedup(
     let row = sqlx::query_as::<_, ImageRow>(
         "SELECT id, public_key, original_name, url, mime_type, file_size, \
          sha256, width, height, status, thumbnail_url, webp_url, \
-         created_at, storage_config_id \
+         created_at, category_id, storage_config_id \
          FROM images \
          WHERE user_id = $1 AND sha256 = $2 \
            AND storage_config_id IS NOT DISTINCT FROM $3",
@@ -689,6 +695,7 @@ fn build_result(
         status: "active".to_string(),
         thumbnail_url: None,
         webp_url: None,
+        category_id: None,
         created_at: Utc::now(),
         storage_config,
     }
@@ -838,10 +845,10 @@ pub async fn list_user_images(
     };
 
     let search_term = query.search.trim();
-    let total = count_user_images(pool, user_id, search_term, query.storage_config_id).await?;
+    let total = count_user_images(pool, user_id, search_term, query.storage_config_id, query.category_id).await?;
     let rows = fetch_user_images(
         pool, user_id, sort_col, order_dir, search_term, limit, offset,
-        query.storage_config_id,
+        query.storage_config_id, query.category_id,
     )
     .await?;
     let items: Vec<UploadResult> = rows.into_iter().map(UploadResult::from_row).collect();
@@ -866,6 +873,7 @@ async fn count_user_images(
     user_id: Uuid,
     search_term: &str,
     config_id: Option<Uuid>,
+    category_id: Option<Uuid>,
 ) -> Result<i64, ApiError> {
     let log_err = |e: sqlx::Error| {
         tracing::warn!("Image count query failed: {e}");
@@ -875,7 +883,22 @@ async fn count_user_images(
         )
     };
     if let Some(cid) = config_id {
-        if search_term.is_empty() {
+        if let Some(cat_id) = category_id {
+            if search_term.is_empty() {
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM images WHERE user_id = $1 \
+                     AND storage_config_id = $2 AND category_id = $3",
+                ).bind(user_id).bind(cid).bind(cat_id)
+                .fetch_one(pool).await.map_err(log_err)
+            } else {
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM images WHERE user_id = $1 \
+                     AND original_name ILIKE $2 AND storage_config_id = $3 \
+                     AND category_id = $4",
+                ).bind(user_id).bind(format!("%{}%", search_term)).bind(cid).bind(cat_id)
+                .fetch_one(pool).await.map_err(log_err)
+            }
+        } else if search_term.is_empty() {
             sqlx::query_scalar::<_, i64>(
                 "SELECT COUNT(*) FROM images WHERE user_id = $1 AND storage_config_id = $2",
             )
@@ -895,6 +918,19 @@ async fn count_user_images(
             .fetch_one(pool)
             .await
             .map_err(log_err)
+        }
+    } else if let Some(cat_id) = category_id {
+        if search_term.is_empty() {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM images WHERE user_id = $1 AND category_id = $2",
+            ).bind(user_id).bind(cat_id)
+            .fetch_one(pool).await.map_err(log_err)
+        } else {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM images WHERE user_id = $1 \
+                 AND original_name ILIKE $2 AND category_id = $3",
+            ).bind(user_id).bind(format!("%{}%", search_term)).bind(cat_id)
+            .fetch_one(pool).await.map_err(log_err)
         }
     } else if search_term.is_empty() {
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM images WHERE user_id = $1")
@@ -919,6 +955,7 @@ async fn fetch_user_images(
     pool: &PgPool, user_id: Uuid, sort_col: &str, order_dir: &str,
     search_term: &str, limit: i64, offset: i64,
     config_id: Option<Uuid>,
+    category_id: Option<Uuid>,
 ) -> Result<Vec<ImageRow>, ApiError> {
     let map_err = |e: sqlx::Error| {
         tracing::warn!("Image list query failed: {e}");
@@ -929,9 +966,30 @@ async fn fetch_user_images(
     };
     let base = "SELECT id,public_key,original_name,url,mime_type,file_size,\
                 sha256,width,height,status,thumbnail_url,webp_url,\
-                created_at,storage_config_id FROM images";
+                created_at,category_id,storage_config_id FROM images";
     if let Some(cid) = config_id {
-        if search_term.is_empty() {
+        if let Some(cat_id) = category_id {
+            if search_term.is_empty() {
+                let sql = format!(
+                    "{base} WHERE user_id = $1 AND storage_config_id = $2 \
+                     AND category_id = $3 \
+                     ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5"
+                );
+                sqlx::query_as::<_, ImageRow>(&sql)
+                    .bind(user_id).bind(cid).bind(cat_id).bind(limit).bind(offset)
+                    .fetch_all(pool).await.map_err(map_err)
+            } else {
+                let sql = format!(
+                    "{base} WHERE user_id = $1 AND original_name ILIKE $2 \
+                     AND storage_config_id = $3 AND category_id = $4 \
+                     ORDER BY {sort_col} {order_dir} LIMIT $5 OFFSET $6"
+                );
+                sqlx::query_as::<_, ImageRow>(&sql)
+                    .bind(user_id).bind(format!("%{}%", search_term))
+                    .bind(cid).bind(cat_id).bind(limit).bind(offset)
+                    .fetch_all(pool).await.map_err(map_err)
+            }
+        } else if search_term.is_empty() {
             let sql = format!(
                 "{base} WHERE user_id = $1 AND storage_config_id = $2 \
                  ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4"
@@ -948,6 +1006,26 @@ async fn fetch_user_images(
             sqlx::query_as::<_, ImageRow>(&sql)
                 .bind(user_id).bind(format!("%{}%", search_term))
                 .bind(cid).bind(limit).bind(offset)
+                .fetch_all(pool).await.map_err(map_err)
+        }
+    } else if let Some(cat_id) = category_id {
+        if search_term.is_empty() {
+            let sql = format!(
+                "{base} WHERE user_id = $1 AND category_id = $2 \
+                 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4"
+            );
+            sqlx::query_as::<_, ImageRow>(&sql)
+                .bind(user_id).bind(cat_id).bind(limit).bind(offset)
+                .fetch_all(pool).await.map_err(map_err)
+        } else {
+            let sql = format!(
+                "{base} WHERE user_id = $1 AND original_name ILIKE $2 \
+                 AND category_id = $3 \
+                 ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5"
+            );
+            sqlx::query_as::<_, ImageRow>(&sql)
+                .bind(user_id).bind(format!("%{}%", search_term))
+                .bind(cat_id).bind(limit).bind(offset)
                 .fetch_all(pool).await.map_err(map_err)
         }
     } else if search_term.is_empty() {
@@ -979,7 +1057,7 @@ pub async fn get_user_image(
     sqlx::query_as::<_, ImageRow>(
         "SELECT id, public_key, original_name, url, mime_type, file_size, \
          sha256, width, height, status, thumbnail_url, webp_url, \
-         created_at, storage_config_id \
+         created_at, category_id, storage_config_id \
          FROM images WHERE id = $1 AND user_id = $2",
     )
     .bind(image_id)

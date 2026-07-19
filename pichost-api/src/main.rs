@@ -81,11 +81,13 @@ fn image_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(routes::images::list_images))
         .route("/batch-delete", post(routes::images::batch_delete))
+        .route("/batch-move", post(routes::images::batch_move_images))
         .route("/{id}/links", get(routes::images::get_image_links))
         .route(
             "/{id}",
             get(routes::images::get_image).delete(routes::images::delete_image),
         )
+        .route("/{id}/move", post(routes::images::move_image))
         .route_layer(middleware::from_fn_with_state(
             state,
             rate_limit::rate_limit_general,

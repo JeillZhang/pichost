@@ -1,8 +1,20 @@
 use pichost_api::services::upload::{ImageListQuery, ImageListResponse};
+use serde::Deserialize;
+use uuid::Uuid;
+
+#[derive(Debug, Deserialize)]
+struct MoveImageRequest {
+    category_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+struct BatchMoveRequest {
+    image_ids: Vec<Uuid>,
+    category_id: Uuid,
+}
 
 #[test]
 fn test_image_list_query_defaults() {
-    // Simulate query param parsing via serde
     let query: ImageListQuery = serde_urlencoded::from_str("").unwrap();
     assert_eq!(query.page, 1);
     assert_eq!(query.per_page, 20);
@@ -25,18 +37,46 @@ fn test_image_list_query_parse_all_params() {
 
 #[test]
 fn test_image_list_query_rejects_invalid_sort() {
-    // Invalid sort field should still parse but be caught at handler level
     let query: ImageListQuery = serde_urlencoded::from_str("sort=malicious;DROP TABLE").unwrap();
-    assert_eq!(query.sort, "malicious;DROP TABLE"); // handler must validate
+    assert_eq!(query.sort, "malicious;DROP TABLE");
 }
 
 #[test]
 fn test_image_list_response_total_pages_calculation() {
-    // total_pages = ceil(total / per_page)
-    // 23 items, 10 per page = 3 pages
     let resp = ImageListResponse { items: vec![], total: 23, page: 1, per_page: 10, total_pages: 3 };
     assert_eq!(resp.total_pages, 3);
-    // 0 items, 20 per page = 1 page (always at least 1)
     let resp2 = ImageListResponse { items: vec![], total: 0, page: 1, per_page: 20, total_pages: 1 };
     assert_eq!(resp2.total_pages, 1);
+}
+
+#[test]
+fn test_move_image_request_serde() {
+    let expected = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    let json = r#"{"category_id":"00000000-0000-0000-0000-000000000001"}"#;
+    let req: MoveImageRequest = serde_json::from_str(json).unwrap();
+    assert_eq!(req.category_id, expected);
+}
+
+#[test]
+fn test_batch_move_request_serde() {
+    let json = r#"{"image_ids":["00000000-0000-0000-0000-000000000001","00000000-0000-0000-0000-000000000002"],"category_id":"00000000-0000-0000-0000-000000000003"}"#;
+    let req: BatchMoveRequest = serde_json::from_str(json).unwrap();
+    assert_eq!(req.image_ids.len(), 2);
+}
+
+#[test]
+fn test_image_list_query_with_category_id() {
+    let expected = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    let query = "page=1&per_page=20&category_id=00000000-0000-0000-0000-000000000001";
+    let params: ImageListQuery =
+        serde_urlencoded::from_str(query).unwrap();
+    assert_eq!(params.category_id, Some(expected));
+}
+
+#[test]
+fn test_image_list_query_without_category_id() {
+    let query = "page=1&per_page=20";
+    let params: ImageListQuery =
+        serde_urlencoded::from_str(query).unwrap();
+    assert_eq!(params.category_id, None);
 }
