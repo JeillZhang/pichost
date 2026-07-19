@@ -151,19 +151,9 @@ export default function Gallery() {
     }
   }
 
-  const [showCategoryModal, setShowCategoryModal] = useState(false)
-  const [_categoryModalParentId, setCategoryModalParentId] = useState<string | null>(null)
-
   const handleBatchMove = async () => {
     alert(`Move ${selected.size} images — category selector coming in a future update`)
   }
-
-  const handleAddCategory = (parentId: string | null) => {
-    setCategoryModalParentId(parentId)
-    setShowCategoryModal(true)
-  }
-  const handleEditCategory = (_id: string, _name: string) => {}
-  const handleDeleteCategory = (_id: string) => {}
 
   const selectCls =
     'rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-glass)] px-2 py-2 text-sm text-[var(--color-text-primary)] backdrop-blur-sm focus:border-[var(--color-accent)] focus:outline-none'
@@ -176,9 +166,6 @@ export default function Gallery() {
           <CategoryTree
             selectedId={categoryFilter}
             onSelect={setCategoryFilter}
-            onAddCategory={handleAddCategory}
-            onEditCategory={handleEditCategory}
-            onDeleteCategory={handleDeleteCategory}
           />
         </div>
       </aside>
@@ -315,18 +302,6 @@ export default function Gallery() {
         )}
       </div>
 
-      {/* Category create modal (will be fleshed out in T7) */}
-      {showCategoryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCategoryModal(false)}>
-          <div className="w-80 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-elevated)] p-4 shadow-xl" onClick={e => e.stopPropagation()}>
-            <h3 className="mb-3 text-sm font-medium">New Category</h3>
-            <p className="text-xs text-[var(--color-text-muted)]">Category creation will be available in the next update.</p>
-            <div className="mt-4 flex justify-end">
-              <button onClick={() => setShowCategoryModal(false)} className="rounded-lg px-3 py-1.5 text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-surface)]">Close</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
