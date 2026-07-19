@@ -84,3 +84,68 @@
 10. ✅ (plan docs + guides)
 
 版本: `0.14.0` — PicHost P2 阶段完成 🎉
+
+## P4-A: Git 存储后端 + 多后端上传选择 ✅ (本次完成)
+
+参考 `docs/superpowers/specs/2026-07-19-pichost-p4-design.md` §2。
+
+### Git 存储后端
+- **GitStorage**: 单一 `StorageBackend` trait 实现，通过 `GitProvider` 枚举区分 GitHub 和 GitCode
+- **API 直写**: 通过 GitHub/GitCode Contents REST API 操作文件，不走 clone-commit-push
+- **文件路径**: `{prefix}/{YYYY}/{MM}/{DD}/{key}.{ext}`，日期取自服务端时钟，扩展名从 MIME 推导
+- **速率限制**: GitHub 5,000/h、GitCode 400/min，429 时返回 retry-after
+- **大小限制**: GitCode 超 20MB 返回 413，GitHub 100MB 上限（PicHost 本身 50MB 上限）
+- **Token 加密**: AES-256-GCM 加密存储，独立密钥 `PICHOST_AUTH_TOKEN_ENCRYPTION_KEY`
+
+### 存储配置管理
+- **数据库**: `user_storage_configs` 表（`0008` 迁移），`images.storage_config_id` 外键
+- **Rust 模型**: `UserStorageConfig`、`GitConfigDetail`、`UserStorageConfigResponse`
+- **API**: 6 个 CRUD 端点 (`/api/v1/users/me/storage-configs`)，含仓库可达性验证、409 删除保护、Token 掩码返回
+- **配置上限**: `PICHOST_STORAGE_MAX_USER_CONFIGS` 可配（默认 5）
+
+### StorageRouter 改造
+- `RwLock<HashMap>` 替代 `HashMap`，支持动态注册 Git 后端
+- `for_config()` 按配置 ID 路由，`get_or_create_git()` 按需创建+缓存，`evict()` 清理过期
+
+### 多后端上传
+- **管线**: `process_upload()` 接收 `storage_config_ids`，循环写入每个后端，每个后端各生成一条 `images` 记录
+- **去重**: 扩展为 `(user_id, sha256, storage_config_id)` 三元组
+- **双后端并行**: `tokio::join!` 并行写入
+- **约束**: 最多 2 个后端，至少 1 个为 `local`
+
+### Gallery 过滤
+- `?storage_config_id=uuid` 查询参数，注入 `fetch_user_images`/`count_user_images` SQL
+- 前端 Gallery 筛选栏新增后端下拉，图片卡片右上角 provider 图标
+
+### Worker 适配
+- `TaskPayload` 扩展 `storage_config_id` + `storage_backend_name`
+- `resolve_backend()` 优先使用 `for_config()` 路由 Git 后端
+
+### 前端
+- **Settings**: `StorageConfigSection` 组件，表单创建/编辑/删除/设为默认，provider 图标
+- **Dashboard**: DropZone 上方多后端选择器（2 个下拉，互斥，最多 2 个）
+- **UploadCard**: 显示后端名称
+- **Gallery**: 后端过滤下拉 + 图片卡片 provider 标识
+
+### 验证
+- `cargo clippy --workspace -D warnings` ✅
+- `cargo test --workspace` ✅ (18 pass, 10 ignored)
+- `npx tsc --noEmit` ✅
+- `npm run build` ✅
+- 版本: `0.14.0` → **`0.15.0`**
+
+## 待实施
+
+| 阶段 | 主题 | 依赖 |
+|------|------|------|
+| P4-B | 剪贴板粘贴 + URL 上传 | P4-A ✅ |
+| P4-C | 图库分类/目录 | 无 |
+| P4-D | 服务端水印 | 无 |
+| P4-E | 客户端图片预处理 | 无 |
+| P4-F | 文件名保留 + 重命名 | 无 |
+| P4-G | 设置入口优化 | 无 |
+| P4-H | 软件打包 + 自动化发布 | 无 |
+| P4-I | 系统配置管理 | 无 |
+
+**B–I 互不依赖**，可在 P4-A 完成后并行开发。
+**下一步**: P4-B 或 P4-C 任选其一。
