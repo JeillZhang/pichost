@@ -1,21 +1,26 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { LogIn, Loader2 } from 'lucide-react'
+import { UserPlus, Loader2, KeyRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuthStore } from '../stores/auth'
 
-export default function Login() {
+export default function Register() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const { login, isLoading, error } = useAuthStore()
+  const [inviteCode, setInviteCode] = useState('')
+  const { register, isLoading, error } = useAuthStore()
   const navigate = useNavigate()
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    await login(username, password)
+    await register(username, password, inviteCode || undefined)
     const state = useAuthStore.getState()
     if (state.isAuthenticated) {
-      toast.success('Logged in!')
+      if (state.user?.is_admin) {
+        toast.success('Admin account created! You are now the administrator.', { duration: 6000 })
+      } else {
+        toast.success('Registered!')
+      }
       navigate('/dashboard', { replace: true })
     }
   }
@@ -31,7 +36,7 @@ export default function Login() {
             PicHost
           </h1>
           <p className="mt-1 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            Self-hosted image hosting
+            Create your account
           </p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4 rounded-xl p-6"
@@ -61,15 +66,28 @@ export default function Login() {
               style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
               placeholder="••••••••" />
           </div>
+          <div>
+            <label htmlFor="inviteCode" className="block text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>Invite Code</label>
+            <div className="relative mt-1">
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                <KeyRound className="h-4 w-4" style={{ color: 'var(--color-text-muted)' }} />
+              </div>
+              <input id="inviteCode" type="text" value={inviteCode}
+                onChange={e => setInviteCode(e.target.value)}
+                className="block w-full rounded-lg py-2 pl-10 pr-3 placeholder-gray-500 focus:outline-none focus:ring-1"
+                style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
+                placeholder="optional invite code" />
+            </div>
+          </div>
           <button type="submit" disabled={isLoading}
             className="flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-accent)' }}>
-            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
-            Sign In
+            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+            Register
           </button>
           <p className="text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            Don't have an account?{' '}
-            <Link to="/register" style={{ color: 'var(--color-accent)' }} className="hover:opacity-80">Register</Link>
+            Already have an account?{' '}
+            <Link to="/login" style={{ color: 'var(--color-accent)' }} className="hover:opacity-80">Sign in</Link>
           </p>
         </form>
       </div>
