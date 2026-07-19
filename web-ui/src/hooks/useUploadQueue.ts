@@ -10,6 +10,7 @@ export interface UploadTask {
   progress: number // 0-100
   result: UploadResult | null
   error: string | null
+  storageConfigIds?: string[]
 }
 
 const MAX_CONCURRENT = 3
@@ -54,7 +55,7 @@ export function useUploadQueue() {
       }
       activeRef.current += 1
       updateTask(id, { status: 'uploading', progress: 0 })
-      uploadImage(task.file)
+      uploadImage(task.file, task.storageConfigIds)
         .then((result) => {
           if (mountedRef.current) {
             updateTask(id, { status: 'done', progress: 100, result })
@@ -76,7 +77,7 @@ export function useUploadQueue() {
   }, [updateTask])
 
   const addFiles = useCallback(
-    (files: File[]) => {
+    (files: File[], storageConfigIds?: string[]) => {
       if (files.length === 0) return
       const ids: string[] = []
       setTasks((prev) => {
@@ -91,6 +92,7 @@ export function useUploadQueue() {
             progress: 0,
             result: null,
             error: null,
+            storageConfigIds,
           })
         }
         return next
