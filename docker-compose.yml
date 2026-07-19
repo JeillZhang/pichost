@@ -24,6 +24,11 @@ services:
     image: redis:8-alpine
     restart: unless-stopped
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   # ── API (2 replicas, stateless) ──
   api:
@@ -37,7 +42,7 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./storage-local:/app/storage-local
     environment:
@@ -46,7 +51,7 @@ services:
       PICHOST_REDIS_URL: redis://redis:6379
       PICHOST_AUTH_JWT_SECRET: ${PICHOST_AUTH_JWT_SECRET:-dev-secret-change-me-in-production}
       PICHOST_STORAGE_LOCAL_BASE_PATH: /app/storage-local
-      PICHOST_SERVER_PUBLIC_URL: ${PICHOST_SERVER_PUBLIC_URL:-http://localhost}
+      PICHOST_SERVER_PUBLIC_URL: ${PICHOST_SERVER_PUBLIC_URL:-http://localhost:8080}
 
   # ── Worker (2 replicas, independent consumers) ──
   worker:
@@ -60,7 +65,7 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./storage-local:/app/storage-local
     environment:
@@ -69,14 +74,14 @@ services:
       PICHOST_REDIS_URL: redis://redis:6379
       PICHOST_AUTH_JWT_SECRET: ${PICHOST_AUTH_JWT_SECRET:-dev-secret-change-me-in-production}
       PICHOST_STORAGE_LOCAL_BASE_PATH: /app/storage-local
-      PICHOST_SERVER_PUBLIC_URL: ${PICHOST_SERVER_PUBLIC_URL:-http://localhost}
+      PICHOST_SERVER_PUBLIC_URL: ${PICHOST_SERVER_PUBLIC_URL:-http://localhost:8080}
 
   # ── Nginx — reverse proxy + CDN cache + static files ──
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8080:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./web-ui/dist:/usr/share/nginx/html:ro
