@@ -158,6 +158,7 @@ pub async fn get_my_profile(
                 is_admin,
                 created_at,
                 updated_at,
+                watermark_config: None,
             }))
         }
         None => Err((
@@ -280,6 +281,7 @@ pub async fn update_my_profile(
         storage_backend: row.3, storage_prefix: row.4,
         storage_quota: row.5, is_admin: row.6,
         created_at: row.7, updated_at: row.8,
+        watermark_config: None,
     }))
 }
 
