@@ -114,6 +114,9 @@ pub struct ImageListQuery {
     /// Optional search term (ILIKE match against original_name)
     #[serde(default)]
     pub search: String,
+    /// Optional storage config ID filter
+    #[serde(default)]
+    pub storage_config_id: Option<Uuid>,
 }
 
 fn default_page() -> u32 { 1 }
@@ -802,9 +805,10 @@ pub async fn list_user_images(
     };
 
     let search_term = query.search.trim();
-    let total = count_user_images(pool, user_id, search_term).await?;
+    let total = count_user_images(pool, user_id, search_term, query.storage_config_id).await?;
     let rows = fetch_user_images(
         pool, user_id, sort_col, order_dir, search_term, limit, offset,
+        query.storage_config_id,
     )
     .await?;
     let items: Vec<UploadResult> = rows.into_iter().map(UploadResult::from_row).collect();
@@ -828,6 +832,7 @@ async fn count_user_images(
     pool: &PgPool,
     user_id: Uuid,
     search_term: &str,
+    config_id: Option<Uuid>,
 ) -> Result<i64, ApiError> {
     let log_err = |e: sqlx::Error| {
         tracing::warn!("Image count query failed: {e}");
@@ -836,7 +841,29 @@ async fn count_user_images(
             Json(serde_json::json!({"error": "internal server error"})),
         )
     };
-    if search_term.is_empty() {
+    if let Some(cid) = config_id {
+        if search_term.is_empty() {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM images WHERE user_id = $1 AND storage_config_id = $2",
+            )
+            .bind(user_id)
+            .bind(cid)
+            .fetch_one(pool)
+            .await
+            .map_err(log_err)
+        } else {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM images WHERE user_id = $1 \
+                 AND original_name ILIKE $2 AND storage_config_id = $3",
+            )
+            .bind(user_id)
+            .bind(format!("%{}%", search_term))
+            .bind(cid)
+            .fetch_one(pool)
+            .await
+            .map_err(log_err)
+        }
+    } else if search_term.is_empty() {
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM images WHERE user_id = $1")
             .bind(user_id)
             .fetch_one(pool)
@@ -857,6 +884,7 @@ async fn count_user_images(
 async fn fetch_user_images(
     pool: &PgPool, user_id: Uuid, sort_col: &str, order_dir: &str,
     search_term: &str, limit: i64, offset: i64,
+    config_id: Option<Uuid>,
 ) -> Result<Vec<ImageRow>, ApiError> {
     let map_err = |e: sqlx::Error| {
         tracing::warn!("Image list query failed: {e}");
@@ -868,7 +896,27 @@ async fn fetch_user_images(
     let base = "SELECT id,public_key,original_name,url,mime_type,file_size,\
                 sha256,width,height,status,thumbnail_url,webp_url,\
                 created_at,storage_config_id FROM images";
-    if search_term.is_empty() {
+    if let Some(cid) = config_id {
+        if search_term.is_empty() {
+            let sql = format!(
+                "{base} WHERE user_id = $1 AND storage_config_id = $2 \
+                 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4"
+            );
+            sqlx::query_as::<_, ImageRow>(&sql)
+                .bind(user_id).bind(cid).bind(limit).bind(offset)
+                .fetch_all(pool).await.map_err(map_err)
+        } else {
+            let sql = format!(
+                "{base} WHERE user_id = $1 AND original_name ILIKE $2 \
+                 AND storage_config_id = $3 \
+                 ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5"
+            );
+            sqlx::query_as::<_, ImageRow>(&sql)
+                .bind(user_id).bind(format!("%{}%", search_term))
+                .bind(cid).bind(limit).bind(offset)
+                .fetch_all(pool).await.map_err(map_err)
+        }
+    } else if search_term.is_empty() {
         let sql = format!(
             "{base} WHERE user_id = $1 ORDER BY {sort_col} {order_dir} \
              LIMIT $2 OFFSET $3"
