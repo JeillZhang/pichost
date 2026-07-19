@@ -133,13 +133,14 @@ async fn enqueue_processing_task(
     user_id: Uuid,
     storage_key: &str,
     mime_type: &str,
+    storage_backend: &str,
 ) {
     let task_id = Uuid::new_v4();
     let payload = serde_json::json!({
         "task_id": task_id.to_string(),
         "image_id": image_id.to_string(),
         "user_id": user_id.to_string(),
-        "storage_backend": "local",
+        "storage_backend": storage_backend,
         "source_key": storage_key,
         "source_mime": mime_type,
         "retry_count": 0,
@@ -358,9 +359,10 @@ async fn write_to_storage(
     public_key: &str,
     bytes: &[u8],
     mime_type: &str,
+    storage_backend: &str,
 ) -> Result<(String, String), ApiError> {
     let storage_key = format!("{}/{}", user_id, public_key);
-    let storage = router.default_backend();
+    let storage = router.for_user(storage_backend);
     storage
         .put(&storage_key, bytes, mime_type)
         .await
@@ -438,6 +440,7 @@ async fn persist_image(
     width: Option<i32>,
     height: Option<i32>,
     sha256: &str,
+    storage_backend: &str,
 ) -> Result<(Uuid, String), ApiError> {
     let (storage_key, url) = write_to_storage(
         &state.router,
@@ -446,6 +449,7 @@ async fn persist_image(
         public_key,
         bytes,
         mime_type,
+        storage_backend,
     )
     .await?;
 
@@ -455,7 +459,7 @@ async fn persist_image(
         public_key,
         original_name,
         &storage_key,
-        "local",
+        storage_backend,
         mime_type,
         bytes.len() as i64,
         width,
@@ -535,18 +539,33 @@ pub async fn process_upload(
         return Ok(existing);
     }
 
+    let storage_backend: String = sqlx::query_scalar(
+        "SELECT storage_backend FROM users WHERE id = $1",
+    )
+    .bind(user.id)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Failed to fetch user storage_backend: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "internal server error"})),
+        )
+    })?;
+
     let public_key = generate_public_key(&state).await?;
     let mime_type = detect_mime(&bytes);
     let (width, height) = image_dimensions(&bytes);
 
     let (image_id, storage_key) = persist_image(
         &state, &user, &public_key, &file_name, &bytes, &mime_type,
-        width, height, &sha256,
+        width, height, &sha256, &storage_backend,
     )
     .await?;
 
     enqueue_processing_task(
         &state.cache.get_pool(), image_id, user.id, &storage_key, &mime_type,
+        &storage_backend,
     )
     .await;
 
