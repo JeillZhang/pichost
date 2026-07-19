@@ -7,6 +7,8 @@ services:
   postgres:
     image: bitnami/postgresql:latest
     restart: unless-stopped
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER: pichost
       POSTGRES_PASSWORD: pichost
@@ -23,6 +25,8 @@ services:
   redis:
     image: redis:8-alpine
     restart: unless-stopped
+    ports:
+      - "6379:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
