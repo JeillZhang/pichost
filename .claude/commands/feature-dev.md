@@ -195,13 +195,60 @@ curl -sf http://localhost/metrics | grep -q "pichost"
 test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost/u/nonexistent)" = "404"
 ```
 
-#### Step 4: Teardown
+#### Step 4: Browser E2E Smoke Test (if web-ui/ changed)
+
+If the feature touches frontend code, run an automated browser test to verify UI pages load, render, and navigate without errors. This uses Playwright to drive a real Chrome instance.
+
+```bash
+# Install Playwright if not already available
+cd web-ui
+npx playwright install chromium 2>&1 | tail -5
+
+# Write a smoke test file (auto-generated, deleted after run)
+cat > e2e-smoke.spec.ts << 'TEST'
+import { test, expect } from '@playwright/test';
+
+const BASE = 'http://localhost';
+
+test.describe('UI smoke test', () => {
+  test('login page loads without console errors', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()); });
+    page.on('pageerror', err => errors.push(err.message));
+    await page.goto(BASE, { waitUntil: 'networkidle' });
+    // Should see login/register — app is not authenticated
+    await expect(page.locator('body')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test('public image page returns 404 gracefully', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()); });
+    page.on('pageerror', err => errors.push(err.message));
+    await page.goto(BASE + '/u/nonexistent', { waitUntil: 'networkidle' });
+    // Should show a 404 page, not a blank crash
+    await expect(page.locator('body')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+});
+TEST
+
+# Run the smoke tests
+npx playwright test e2e-smoke.spec.ts --browser=chromium --reporter=list 2>&1
+
+# Clean up
+rm -f e2e-smoke.spec.ts
+```
+
+**Failure handling**: If any E2E test fails, treat it as a CRITICAL finding. Diagnose console errors or page crashes, fix the root cause, and re-run. Do NOT proceed to Phase 5.
+
+#### Step 5: Teardown
 
 ```bash
 docker compose down
 ```
 
-#### Step 5: Failure handling
+#### Step 6: Failure handling
 
 **If any integration test fails:**
 1. Diagnose the failure. Check logs: `docker compose logs api`, `docker compose logs worker`.
@@ -221,6 +268,8 @@ Invoke `superpowers:finishing-a-development-branch` skill.
 - `cargo clippy --workspace -- -D warnings` ✅
 - `cargo test --workspace` ✅ (all non-ignored tests pass)
 - `npm run build` (if frontend changed) ✅
+- **Version bump check**: if frontend changed, verify `web-ui/package.json` version matches `Cargo.toml` workspace version. If not bumped, update both now.
+- **E2E browser test**: if frontend changed, verify Phase 4 E2E smoke test passed (Playwright + Chromium, no console errors).
 
 **Present the 4 options:**
 1. **Merge** — merge into base branch, delete the feature branch (`git branch -d feat/<plan-name>`).
@@ -243,10 +292,10 @@ After the feature is merged or the PR is created, automatically execute the mand
 ## Size-Based Execution Strategy
 
 | Tier | Git Isolation | TDD | Execution | Review | Integration Testing |
-|------|-------------|-----|-----------|--------|---------------------|
+|------|--------------|-----|-----------|--------|---------------------|
 | trivial | Feat branch on current repo | RED→GREEN→REFACTOR enforced | Inline (no subagent) | Self-review only | Skip (Docker optional) |
-| standard | Feat branch on current repo | RED→GREEN→REFACTOR enforced | Subagent per task (sequential) | 2 reviewers (code-reviewer + language reviewer) | Full: docker compose + integration tests |
-| large | Feat branch on current repo | RED→GREEN→REFACTOR enforced | Subagent per task (parallel independent, sequential dependent) | 3 reviewers (+ security-reviewer) | Full: docker compose + integration tests + smoke tests |
+| standard | Feat branch on current repo | RED→GREEN→REFACTOR enforced | Subagent per task (sequential) | 2 reviewers (code-reviewer + language reviewer) | Full: docker compose + integration tests + E2E browser smoke test (if web-ui/) |
+| large | Feat branch on current repo | RED→GREEN→REFACTOR enforced | Subagent per task (parallel independent, sequential dependent) | 3 reviewers (+ security-reviewer) | Full: docker compose + integration tests + smoke tests + E2E browser smoke test (if web-ui/) |
 
 ---
 
@@ -280,6 +329,14 @@ cargo test --workspace                     # All non-ignored must pass
 
 # Frontend (if web-ui/ changed)
 cd web-ui && npm run build                 # tsc -b && vite build
+
+# Version bump check (if web-ui/ changed)
+# Verify web-ui/package.json version matches Cargo.toml workspace version.
+# If not bumped, bump both: patch for fixes, minor for features.
+
+# E2E browser smoke test (if web-ui/ changed)
+# Runs in Phase 4 via docker compose. Verifies pages load and navigate
+# without console errors using Playwright + Chromium.
 ```
 
 **Integration tests** (11 tests in `pichost-api/tests/` require DB/Redis/S3): these run in Phase 4 via docker compose. Until Phase 4, they are expected to be skipped or fail — do NOT treat them as failures during Phase 2 unit testing.
@@ -295,4 +352,4 @@ Enforce these from `AGENTS.md`:
 - **Config**: use `PICHOST_` prefix env vars via `figment`. Add to `pichost-core/src/config.rs`.
 - **New migrations**: create `migrations/XXXX_description.sql`. Number sequentially from highest existing.
 - **Frontend**: Zustand (client state) + TanStack Query v5 (server state). ky for HTTP. react-router-dom v7.
-- **Version bump**: patch for fixes, minor for features. Update `Cargo.toml` workspace version.
+- **Version bump**: patch for fixes, minor for features. Update `Cargo.toml` workspace version. If the feature touches `web-ui/`, also bump version in `web-ui/package.json` to match.
