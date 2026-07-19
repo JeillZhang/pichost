@@ -1,137 +1,135 @@
-# PicHost P4 — New Feature Design
+# PicHost P4 — 新特性设计文档
 
-> **Status**: Design / Not Implemented
-> **Version**: Target v0.15.0+
-> **Date**: 2026-07-19
-> **Prerequisite**: P3 (gap-fix phase) must be completed before any P4 work begins.
+> **状态**: 设计中 / 未实施
+> **目标版本**: v0.15.0+
+> **日期**: 2026-07-19
+> **前置条件**: P3（差距修复阶段）必须完成后才能开始 P4 开发。
 
-## Table of Contents
+## 目录
 
-1. [Overview](#1-overview)
-2. [P4-A: Git Storage Backends + Multi-Backend Upload](#2-p4-a-git-storage-backends--multi-backend-upload)
-3. [P4-B: Clipboard Paste + URL Upload](#3-p4-b-clipboard-paste--url-upload)
-4. [P4-C: Gallery Categories/Directories](#4-p4-c-gallery-categoriesdirectories)
-5. [P4-D: Watermarking (Server-Side)](#5-p4-d-watermarking-server-side)
-6. [P4-E: Image Preprocessing (Client-Side)](#6-p4-e-image-preprocessing-client-side)
-7. [P4-F: Filename Preservation + Rename](#7-p4-f-filename-preservation--rename)
-8. [Migration Plan](#8-migration-plan)
-9. [Risk Assessment](#9-risk-assessment)
-
----
-
-## 1. Overview
-
-P4 introduces 6 new feature areas grouped into independent phases. Each phase can be developed and deployed independently after P4-A is complete.
-
-| Phase | Theme | Priority | Dependencies |
-|-------|-------|----------|--------------|
-| **P4-A** | Git storage backends + multi-backend upload selection + Gallery filter | **Highest** | P3 complete |
-| **P4-B** | Clipboard paste + URL upload | High | P4-A (shares upload pipeline) |
-| **P4-C** | Gallery categories/directories | High | None |
-| **P4-D** | Server-side watermarking | Medium | None |
-| **P4-E** | Client-side image preprocessing | Medium | None |
-| **P4-F** | Filename preservation + rename | **Low** | None |
-
-**Phases B–F are independent of each other** and can be developed in parallel after P4-A is complete.
+1. [概述](#1-概述)
+2. [P4-A：Git 存储后端 + 多后端上传选择](#2-p4-a-git-存储后端--多后端上传选择)
+3. [P4-B：剪贴板粘贴 + URL 上传](#3-p4-b剪贴板粘贴--url-上传)
+4. [P4-C：图库分类/目录](#4-p4-c图库分类目录)
+5. [P4-D：图片水印（服务端）](#5-p4-d图片水印服务端)
+6. [P4-E：图片预处理（客户端）](#6-p4-e图片预处理客户端)
+7. [P4-F：原文件名保留 + 重命名](#7-p4-f原文件名保留--重命名)
+8. [实施分期](#8-实施分期)
+9. [风险评估](#9-风险评估)
 
 ---
 
-## 2. P4-A: Git Storage Backends + Multi-Backend Upload
+## 1. 概述
 
-### 2.1 Scope
+P4 引入 6 个新特性领域，分为独立阶段。各阶段在 P4-A 完成后可独立开发和部署。
 
-- GitHub and GitCode as image storage backends via their Contents REST APIs
-- Users bring their own repository + Personal Access Token (PAT)
-- Multiple storage configurations per user (up to 5)
-- Per-upload backend selection (max 2 simultaneously, one must be `local`)
-- Gallery filtering by storage backend
-- Worker (thumbnail/WebP) writes to Git backends transparently
+| 阶段 | 主题 | 优先级 | 依赖 |
+|------|------|--------|------|
+| **P4-A** | Git 存储后端 + 多后端上传选择 + Gallery 过滤 | **最高** | P3 完成 |
+| **P4-B** | 剪贴板粘贴 + URL 上传 | 高 | P4-A（共享上传管线） |
+| **P4-C** | 图库分类/目录 | 高 | 无 |
+| **P4-D** | 服务端水印 | 中 | 无 |
+| **P4-E** | 客户端图片预处理 | 中 | 无 |
+| **P4-F** | 文件名保留 + 重命名 | **低** | 无 |
 
-### 2.2 Architecture Decision: API-Only Git Operations
+**B–F 阶段互相独立**，P4-A 完成后可并行开发。
 
-Git operations use direct HTTP API calls (GitHub Contents API / GitCode Contents API) rather than clone-commit-push workflows. Rationale:
+---
 
-| Approach | Pros | Cons |
-|----------|------|------|
-| **API direct** | Lightweight, no local clone, fast, handles individual files | Subject to rate limits, 20MB cap on GitCode |
-| **Clone + commit + push** | No size limit, bulk operations | Requires local clone dirs, slow, complex concurrency |
+## 2. P4-A：Git 存储后端 + 多后端上传选择
 
-**Chosen**: API direct — matches PicHost's stateless architecture and single-file upload pattern.
+### 2.1 范围
 
-### 2.3 Database Schema
+- 支持 GitHub 和 GitCode（CSDN 旗下）作为图片存储后端，通过其 Contents REST API 操作
+- 用户自带仓库 + Personal Access Token（PAT），管理员零存储负担
+- 每用户可配置多个存储后端（上限 5 个）
+- 上传时可按次选择目标后端（最多同时 2 个，其中一个必须为 `local`）
+- Gallery 支持按存储后端过滤
+- Worker（缩略图/WebP）透明写入 Git 后端
 
-#### New Table: `user_storage_configs`
+### 2.2 架构决策：纯 API 操作 Git
+
+使用 HTTP API 直写（GitHub Contents API / GitCode Contents API），不走 clone-commit-push 流程。
+
+| 方案 | 优点 | 缺点 |
+|------|------|------|
+| **API 直写** ✅ | 轻量、无需本地 clone、响应快、适合单文件操作 | 受速率限制、GitCode 有 20MB 单文件上限 |
+| Clone + commit + push | 无大小限制、支持批量操作 | 需本地 clone 目录、慢、并发复杂 |
+
+**选定**: API 直写 — 契合 PicHost 无状态架构和单文件上传模式。
+
+### 2.3 数据库设计
+
+#### 新表：`user_storage_configs`
 
 ```sql
--- Migration 0008
+-- 迁移 0008
 CREATE TABLE user_storage_configs (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    name        VARCHAR(64) NOT NULL,
-    provider    VARCHAR(16) NOT NULL,          -- 'github' | 'gitcode' | 'local'
-    is_default  BOOLEAN NOT NULL DEFAULT false,
-    config      JSONB NOT NULL,                 -- provider-specific, token encrypted
+    name        VARCHAR(64) NOT NULL,          -- 用户自定义名称，如 "我的GitHub图床"
+    provider    VARCHAR(16) NOT NULL,           -- 'github' | 'gitcode' | 'local'
+    is_default  BOOLEAN NOT NULL DEFAULT false, -- 是否为默认后端
+    config      JSONB NOT NULL,                 -- 后端特定配置，token 已加密
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     UNIQUE(user_id, name)
 );
 
--- Ensure at most one default per user
+-- 确保每用户最多一个默认配置
 CREATE UNIQUE INDEX idx_default_per_user
     ON user_storage_configs(user_id) WHERE is_default = true;
 ```
 
-#### Column Added to `images`
+#### `images` 表新增字段
 
 ```sql
--- Migration 0008 (continued)
+-- 迁移 0008（续）
 ALTER TABLE images
     ADD COLUMN storage_config_id UUID
     REFERENCES user_storage_configs(id);
 ```
 
-#### `config` JSONB Structure
+#### `config` JSONB 结构
 
-**GitHub:**
+**GitHub / GitCode:**
 ```json
 {
-    "token_encrypted": "<AES-256-GCM ciphertext, base64>",
+    "token_encrypted": "<AES-256-GCM 密文，base64 编码>",
     "repo": "owner/repo",
     "branch": "main",
     "path_prefix": "pichost"
 }
 ```
 
-**GitCode:** Same structure, but `token_encrypted` is for GitCode PAT.
+**local（本地存储）:** `{}`
 
-**Local:** `{}`
+#### Token 加密密钥
 
-#### Encryption Key
+新增环境变量：
 
-New env var:
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `PICHOST_AUTH_TOKEN_ENCRYPTION_KEY` | 启用 Git 后端时必填 | AES-256-GCM 密钥，用于加密用户 PAT。须 32 字节（base64 或 hex 编码）。与 `PICHOST_AUTH_JWT_SECRET` 独立。 |
 
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `PICHOST_AUTH_TOKEN_ENCRYPTION_KEY` | Yes (if Git backends enabled) | AES-256-GCM key for encrypting user-supplied PATs. Must be 32 bytes (base64 or hex encoded). Independent from `PICHOST_AUTH_JWT_SECRET`. |
+Token 生命周期：
+1. 用户提交明文 PAT → `POST /api/v1/users/me/storage-configs`
+2. 服务端 AES-256-GCM 加密后 `INSERT`
+3. `GitStorage::new()` 创建时解密
+4. GET 接口返回 `token_masked`（如 `ghp_****abcd`）
+5. 明文 token 仅存于服务端内存，永不写入日志
 
-Token lifecycle:
-1. User submits PAT in plaintext via `POST /api/v1/users/me/storage-configs`
-2. Server encrypts with AES-256-GCM before `INSERT`
-3. `GitStorage::new()` decrypts at startup/runtime
-4. GET endpoints return `token_masked` (e.g., `ghp_****abcd`)
-5. Plaintext token never leaves server memory, never logged
-
-### 2.4 Rust Model
+### 2.4 Rust 模型
 
 ```rust
 // pichost-core/src/models.rs
 
-/// A user's storage backend configuration.
+/// 用户的存储后端配置
 pub struct UserStorageConfig {
     pub id: Uuid,
     pub user_id: Uuid,
-    pub name: String,
+    pub name: String,           // "我的GitHub图床"
     pub provider: String,       // "github" | "gitcode" | "local"
     pub is_default: bool,
     pub config: serde_json::Value,
@@ -139,7 +137,7 @@ pub struct UserStorageConfig {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Deserialized form of `config` for Git providers.
+/// config JSON 的反序列化结构（Git 后端）
 pub struct GitConfigDetail {
     pub token_encrypted: String,
     pub repo: String,
@@ -148,11 +146,11 @@ pub struct GitConfigDetail {
 }
 ```
 
-### 2.5 GitStorage Implementation
+### 2.5 GitStorage 实现
 
-**File**: `pichost-core/src/storage/git.rs`
+**文件**: `pichost-core/src/storage/git.rs`
 
-One struct handles both GitHub and GitCode via a `GitProvider` enum.
+单一 `GitStorage` 结构体，通过 `GitProvider` 枚举区分 GitHub 和 GitCode。
 
 ```rust
 pub enum GitProvider { GitHub, GitCode }
@@ -160,64 +158,63 @@ pub enum GitProvider { GitHub, GitCode }
 pub struct GitStorage {
     provider: GitProvider,
     client: reqwest::Client,
-    owner: String,              // parsed from "owner/repo"
+    owner: String,              // 从 "owner/repo" 解析
     repo: String,
     branch: String,
     path_prefix: Option<String>,
-    token: String,              // decrypted at creation time
-    raw_base_url: String,       // "raw.githubusercontent.com" or "raw.gitcode.com"
-    api_base_url: String,       // "https://api.github.com" or "https://api.gitcode.com/api/v5"
+    token: String,              // 创建时解密
+    raw_base_url: String,       // "raw.githubusercontent.com" 或 "raw.gitcode.com"
+    api_base_url: String,       // "https://api.github.com" 或 "https://api.gitcode.com/api/v5"
 }
 ```
 
-#### Trait Methods
+#### Trait 方法实现
 
-| Method | Implementation |
-|--------|---------------|
-| `backend_name()` | Returns `"github"` or `"gitcode"` based on `provider` |
-| `put(key, data, mime)` | `PUT` (GitHub) or `POST` (GitCode) to `.../contents/{path}` with Base64-encoded content + commit message + branch. Falls back to `multipart/file_upload` endpoint for GitCode files >20MB. Returns raw public URL. |
-| `get(key)` | `GET .../raw/{path}?ref={branch}` → raw bytes |
-| `delete(key)` | `GET .../contents/{path}` to obtain SHA → `DELETE .../contents/{path}` |
-| `exists(key)` | `GET .../contents/{path}` → 200 = exists, 404 = not found |
+| 方法 | 实现 |
+|------|------|
+| `backend_name()` | 返回 `"github"` 或 `"gitcode"` |
+| `put(key, data, mime)` | GitHub: `PUT .../contents/{path}`；GitCode: `POST .../contents/{path}`。Base64 编码内容 + commit message + branch。GitCode 文件 ≤20MB 时可用 Contents API，否则回退 `multipart/file_upload`。返回 raw 公开 URL。 |
+| `get(key)` | `GET .../raw/{path}?ref={branch}` → 原始 bytes |
+| `delete(key)` | `GET .../contents/{path}` 获取 SHA → `DELETE .../contents/{path}` |
+| `exists(key)` | `GET .../contents/{path}` → 200 = 存在，404 = 不存在 |
 | `public_url(key)` | `https://{raw_base_url}/{owner}/{repo}/{branch}/{full_path}` |
 
-#### File Path Convention
+#### 文件路径规范
 
 ```
 {path_prefix}/{YYYY}/{MM}/{DD}/{public_key}.{ext}
 ```
 
-Example: `pichost/2026/07/19/a3f8c2.png`
+示例: `pichost/2026/07/19/a3f8c2.png`
 
-- `path_prefix` defaults to `"pichost"` if user provides none
-- Extension derived from `content_type` (MIME → ext mapping)
-- Date from server clock at upload time
-- **`storage_key` in DB stores the full path** (e.g., `pichost/2026/07/19/a3f8c2.png`) for Git backends. This differs from the current local storage format (`{user_id}/{public_key}`) — each backend owns its `storage_key` format. The `StorageBackend::put()` receives a simplified key and returns the full storage key to be persisted.
+- `path_prefix` 默认 `"pichost"`（用户可自定义）
+- 扩展名从 `content_type` 推导（MIME → 扩展名映射表）
+- 日期取自服务端起钟
+- **数据库中 `storage_key` 存储完整路径**（如 `pichost/2026/07/19/a3f8c2.png`），与本地存储的 `{user_id}/{public_key}` 格式不同 — 各后端自行管理 `storage_key` 格式
 
-#### Rate Limiting
+#### 速率限制
 
-| Provider | Limit | Handling |
-|----------|-------|----------|
-| GitHub | 5,000 req/h (authenticated) | Read `X-RateLimit-Remaining` header; if approaching 0, return `StorageError::WriteFailed` with retry-after |
-| GitCode | 400/min, 4,000/h | Read `Retry-After` header on 429; return `StorageError::WriteFailed` |
-| Both | 429 Too Many Requests | Worker retry (3 attempts, existing mechanism) handles transient rate limits |
+| 平台 | 限制 | 处理方式 |
+|------|------|----------|
+| GitHub | 5,000 次/小时（已认证） | 读取 `X-RateLimit-Remaining` 头；接近 0 时返回 `StorageError::WriteFailed` + retry-after |
+| GitCode | 400 次/分钟，4,000 次/小时 | 429 时读取 `Retry-After` 头；返回 `StorageError::WriteFailed` |
+| 两者 | 429 Too Many Requests | Worker 现有重试机制（3 次）处理瞬时限流 |
 
-#### Content Size Limits
+#### 文件大小限制
 
-| Provider | Endpoint | Limit | Fallback |
-|----------|----------|-------|----------|
-| GitHub | Contents API | 100 MB | N/A — PicHost max upload is 50 MB |
-| GitCode | Contents API | 20 MB | `POST .../file/upload` (multipart, 20 MB) |
-| GitCode | File upload | 20 MB | If >20 MB on GitCode: return `413 Payload Too Large` with message suggesting the user switch to local or GitHub storage. No silent fallback — the user made an explicit backend choice; silently changing it would be confusing. |
+| 平台 | 端点 | 限制 | 超限处理 |
+|------|------|------|----------|
+| GitHub | Contents API | 100 MB | 无影响 — PicHost 单文件上限 50 MB |
+| GitCode | Contents API | 20 MB | ≤20MB 用 Contents API；>20MB 返回 `413 Payload Too Large`，提示用户改用本地或 GitHub 存储。**不做静默 fallback** — 用户显式选择了后端，偷偷换掉会令用户困惑。 |
 
-### 2.6 Router Changes
+### 2.6 Router 改动
 
-The `StorageRouter` needs to support per-upload backend selection via `storage_config_id` instead of the current per-user `storage_backend` column.
+`StorageRouter` 需支持按上传选择的 `storage_config_id` 路由，替代现有的按用户 `storage_backend` 字段路由。
 
-**New method**:
+**新增方法**:
 ```rust
 impl StorageRouter {
-    /// Resolve a backend by config ID, not by name string.
+    /// 根据配置 ID 解析后端，非根据名称字符串
     pub fn for_config(
         &self,
         config: &UserStorageConfig,
@@ -225,68 +222,65 @@ impl StorageRouter {
         match config.provider.as_str() {
             "local" => Ok(self.default_backend()),
             "github" | "gitcode" => {
-                // Dynamic GitStorage creation if not pre-registered
-                // (or pre-register all configured backends at startup)
+                // 动态创建 GitStorage 或从缓存获取
                 self.backends.get(&config.id.to_string())
                     .cloned()
-                    .ok_or(StorageError::Config("backend not found".into()))
+                    .ok_or(StorageError::Config("后端未找到".into()))
             }
-            _ => Err(StorageError::Config(format!("unknown provider: {}", config.provider)))
+            _ => Err(StorageError::Config(format!("未知 provider: {}", config.provider)))
         }
     }
 }
 ```
 
-**Registration strategy**: Git backends are NOT pre-registered in `init_storage_backends()` at server startup. They are created dynamically when a user uploads to a Git backend, and cached by `config.id` in the Router's HashMap. Rationale: a user's Git PAT could change at any time; pre-registration at startup would use stale tokens.
+**注册策略**: Git 后端**不**在 `init_storage_backends()` 启动时预注册，而是在用户上传时按需动态创建，按 `config.id` 缓存在 Router 的 HashMap 中。原因：用户 PAT 可能随时更新，启动时注册会用到过期 token。Router 新增 `get_or_create_git(config)` 方法。
 
-**Alternative**: Pre-register a "template" `GitStorage` that takes token at method-call time. This is simpler but requires changing the `StorageBackend` trait. **Decision**: dynamic creation + caching. The `StorageRouter` gains a `get_or_create_git(config)` method.
+### 2.7 上传管线改动
 
-### 2.7 Upload Pipeline Changes
+**文件**: `pichost-api/src/services/upload.rs`
 
-**File**: `pichost-api/src/services/upload.rs`
+`process_upload()` 修改点：
 
-Changes to `process_upload()`:
+1. 接收可选 `storage_config_ids: Option<Vec<Uuid>>` 参数
+2. 未提供 → 使用用户默认配置（查 `user_storage_configs`），兜底 `local`
+3. 已提供 → 校验每个 ID 属于该用户，校验最多 2 个，校验至少 1 个为 `local`
+4. 循环：对每个 `storage_config_id`，通过 `router.get_or_create_git(config)` 获取后端，调用 `put()`，生成 URL
+5. **每个后端各插入一条 `images` 记录**（各有独立 `id`、`public_key`、`url`，但 `sha256`、`original_name` 相同）
+6. 每条 image 记录各入队一个 worker 任务
 
-1. Accept optional `storage_config_ids: Option<Vec<Uuid>>` parameter
-2. If not provided → use user's default config (from `user_storage_configs`), fallback to `local`
-3. If provided → validate each ID belongs to user, validate max 2, validate at least one is `local`
-4. Loop: for each `storage_config_id`, acquire backend via `router.get_or_create_git(config)`, call `put()`, generate URL
-5. Insert one `images` row **per backend** (each gets a unique `id`, `public_key`, `url` — but same `sha256`, `original_name`)
-6. Enqueue one worker task per image row
+**多后端写入**意味着上传到 GitHub + local 产生 **2 条 image 记录**，而非 1 条。前端显示 2 个 UploadCard，文件名相同但 URL 不同。
 
-**Multi-backend insert** means uploading to GitHub + local produces **2 image records**, not 1. The frontend shows 2 UploadCards (one per backend) with the same filename but different URLs.
+**去重行为**: 现有 SHA256 去重按用户进行。多后端上传场景，去重扩展为 `(user_id, sha256, storage_config_id)`：
+- 同一图片上传到 GitHub 两次 → 去重命中（返回已有的 GitHub 记录）
+- 同一图片先上传到 GitHub，再上传到 local → **不去重**（`storage_config_id` 不同 → 新建记录）
+- 去重查询从 `WHERE user_id=$1 AND sha256=$2` 改为 `WHERE user_id=$1 AND sha256=$2 AND storage_config_id=$3`
 
-**Dedup behavior**: The existing SHA256 dedup is per-user. With multi-backend uploads, dedup is extended to `(user_id, sha256, storage_config_id)`. This means:
-- Uploading the same image to GitHub twice → dedup (2nd returns the existing GitHub row)
-- Uploading the same image to GitHub first, then to local → NOT a dedup (different `storage_config_id` → new row created)
-- The dedup query changes from `WHERE user_id=$1 AND sha256=$2` to `WHERE user_id=$1 AND sha256=$2 AND storage_config_id=$3`
+### 2.8 API 端点
 
-### 2.8 API Endpoints
+#### 存储配置 CRUD
 
-#### Storage Config CRUD
+| Method | Path | Auth | 说明 |
+|--------|------|------|------|
+| `GET` | `/api/v1/users/me/storage-configs` | JWT | 列出所有配置（token 掩码返回） |
+| `POST` | `/api/v1/users/me/storage-configs` | JWT | 创建配置。保存前验证 token + 仓库可达性。每用户上限 5 个。 |
+| `GET` | `/api/v1/users/me/storage-configs/:id` | JWT | 单个配置详情（token 掩码） |
+| `PATCH` | `/api/v1/users/me/storage-configs/:id` | JWT | 更新 name、token、repo、branch、path_prefix。若 token/repo 变更则重新验证。 |
+| `DELETE` | `/api/v1/users/me/storage-configs/:id` | JWT | 删除配置。若有图片引用则返回 409。 |
+| `POST` | `/api/v1/users/me/storage-configs/:id/default` | JWT | 设为默认（自动取消上一个默认）。 |
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/api/v1/users/me/storage-configs` | JWT | List all configs (token masked) |
-| `POST` | `/api/v1/users/me/storage-configs` | JWT | Create config. Validates token + repo reachability before saving. Max 5 per user. |
-| `GET` | `/api/v1/users/me/storage-configs/:id` | JWT | Single config detail (token masked) |
-| `PATCH` | `/api/v1/users/me/storage-configs/:id` | JWT | Update name, token, repo, branch, path_prefix. Re-validates if token/repo changed. |
-| `DELETE` | `/api/v1/users/me/storage-configs/:id` | JWT | Delete config. Returns 409 if images reference it. |
-| `POST` | `/api/v1/users/me/storage-configs/:id/default` | JWT | Set as default (unsets previous default). |
+#### 上传接口改动
 
-#### Upload Changes
-
-**`POST /api/v1/images`** — new optional FormData field:
+**`POST /api/v1/images`** — 新增可选 FormData 字段：
 
 ```
-storage_config_ids: "uuid1,uuid2"  (optional, comma-separated, max 2)
+storage_config_ids: "uuid1,uuid2"  （可选，逗号分隔，最多 2 个）
 ```
 
-- Omitted → use default config (local fallback)
-- 1 ID → write to that backend only
-- 2 IDs → write to both (one must be `local`)
+- 不传 → 使用默认配置（兜底 local）
+- 传 1 个 → 只写该后端
+- 传 2 个 → 同时写两个（其中一个必须为 `local`）
 
-Response: `200` with `Vec<UploadResult>` (one per backend). Each `UploadResult` includes the new `storage_config` field:
+响应: `200` + `Vec<UploadResult>`（每个后端一条）。每条 `UploadResult` 包含新的 `storage_config` 字段：
 
 ```json
 {
@@ -298,143 +292,186 @@ Response: `200` with `Vec<UploadResult>` (one per backend). Each `UploadResult` 
         "id": "uuid...",
         "name": "我的GitHub图床",
         "provider": "github"
-    },
-    ...
+    }
 }
 ```
 
-#### Gallery Filtering
+#### Gallery 过滤
 
-**`GET /api/v1/images`** — new optional query parameter:
+**`GET /api/v1/images`** — 新增可选 query 参数：
 
 ```
 ?storage_config_id=uuid
 ```
 
-Adds `AND i.storage_config_id = $N` to the `WHERE` clause in `fetch_user_images()` and `count_user_images()`.
+SQL 增加 `AND i.storage_config_id = $N`，注入到 `fetch_user_images()` 和 `count_user_images()` 的 WHERE 子句。
 
-#### Image Detail
+### 2.9 前端设计
 
-**`GET /api/v1/images/:id`** — response includes `storage_config` object (same structure as UploadResult).
+#### 设置页 — 存储配置管理
 
-### 2.9 Frontend
+Settings 页面新增 **"存储后端"** Section Card，替代当前单一的 `<select>`：
 
-#### Settings Page — Storage Config Management
-
-New section card replacing the current single `<select>` for `storage_backend`:
-
-- List all user's configs as radio-style cards
-- Each card shows: name, provider icon, repo path, default badge
-- `[+ 添加存储后端]` button opens modal
-- Add/Edit modal: name input, provider dropdown (GitHub/GitCode), token input (with show/hide toggle), repo input (`owner/repo`), branch input (default `main`), path prefix input (optional), "Set as default" checkbox, **"Test Connection" button** (required before save)
-- Delete button with confirmation (warns if images reference this config)
-- Default indicator toggle per config
-
-#### Dashboard — Multi-Backend Upload Selector
-
-Above DropZone:
-
-```
-存储到: [我的GitHub图床 ▾]  [+ 添加第2个后端]
-         [本地存储 ▾]  (已选 2/2)
+```text
+┌─ 存储后端 ────────────────────────────────────┐
+│                                                │
+│  ● 本地存储（默认）            [•••] 设为默认  │
+│                                                │
+│  ○ 我的GitHub图床                         [•••]│
+│     github.com/myuser/my-images    [编辑][删除] │
+│                                                │
+│  ○ 我的GitCode图床                         [•••]│
+│     gitcode.com/myuser/images     [编辑][删除] │
+│                                                │
+│  [+ 添加存储后端]                               │
+└────────────────────────────────────────────────┘
 ```
 
-- Default: user's default config pre-selected
-- `[+ 添加第2个后端]` expands a second dropdown
-- Selected backends gray out in the other dropdown
-- Max 2 total
-- DropZone, clipboard paste, and URL upload all use this selector
-
-#### UploadCard Changes
-
-Each card shows which backend(s) the file was written to:
-
+**添加/编辑弹窗**：
+```text
+┌─ 添加存储后端 ─────────────────────────────────┐
+│                                                │
+│  名称: [我的GitHub图床               ]          │
+│  类型: [GitHub ▾]                               │
+│  Token: [ghp_••••••••••••••••••••••]  [显示]    │
+│  仓库: [myuser/my-images            ]           │
+│  分支: [main                         ]          │
+│  路径: [pichost                       ]（可选） │
+│  ☐ 设为默认后端                                  │
+│                                                │
+│  [测试连接]   ✓ 连接成功                        │
+│                                                │
+│              [取消]  [保存]                      │
+└────────────────────────────────────────────────┘
 ```
-✓ photo.jpg (2.3 MB)
+
+- 保存前**必须先点「测试连接」**，后端验证 token + 仓库存在性
+- Token 字段默认隐藏，点击「显示」切换可见
+- 选择 GitCode 时，URL 提示文字变为 `gitcode.com/api/v5`
+
+#### 上传页 — 多后端选择
+
+Dashboard 页面 DropZone 上方新增后端选择器：
+
+```text
+┌─ 上传图片 ───────────────────────────────────────┐
+│                                                   │
+│  存储到: [我的GitHub图床 ▾]  [+ 添加第2个后端]    │
+│          [本地存储 ▾]  （已选 2/2）               │
+│                                                   │
+│  ┌──────────────────────────────────┐            │
+│  │      拖拽图片到此处               │            │
+│  │      或 点击选择文件              │            │
+│  └──────────────────────────────────┘            │
+│                                                   │
+│  或按 Ctrl+V 粘贴  |  输入 URL: [______] [上传]   │
+└───────────────────────────────────────────────────┘
+```
+
+**交互规则**：
+- 默认选中用户的默认后端（1 个）
+- 点击 `[+ 添加第2个后端]` 展开第二个下拉，已选项置灰
+- 最多 2 个，选满后按钮消失
+- 两个选择器的选项互斥
+- 剪贴板粘贴和 URL 上传共用同一套后端选择逻辑
+
+#### UploadCard 改动
+
+完成后新增一行显示存储后端名称：
+
+```text
+✓ photo.jpg（2.3 MB）
   → 我的GitHub图床
   [打开] [复制URL] [复制MD]
 ```
 
-For dual-backend uploads, the frontend receives 2 `UploadResult` objects and renders 2 cards.
+双后端上传时，前端收到 2 条 `UploadResult`，渲染 2 个 Card。
 
-#### Gallery Filtering
+#### Gallery 过滤
 
-Filter bar gains a `storage_config_id` dropdown:
+筛选栏新增后端下拉：
 
-```
+```text
 [全部后端 ▾]  [🔍 搜索...]  [排序 ▾]  [全选]
 ```
 
-Dropdown lists: "全部" + each user's storage config. Selecting one adds `storage_config_id` to the API request and URL search params.
+下拉列出该用户所有 `storage_configs` + "全部"。选中后附加 `?storage_config_id=uuid` 到 API 请求，同时同步到 URL searchParams（刷新保持筛选状态）。
 
-#### Gallery Image Cards
+Gallery 图片卡片右上角显示小型 provider 图标（GitHub/GitCode/local）。
 
-Each image card shows a small provider badge (GitHub/GitCode/local icon) in the corner.
+### 2.10 Worker 改动
 
-### 2.10 Worker Changes
-
-`TaskPayload` gains:
+`TaskPayload` 新增字段：
 ```rust
 pub storage_config_id: Option<Uuid>,
 pub storage_backend_name: String,    // "github" | "gitcode" | "local"
 ```
 
-Worker resolves backend via `router.for_config(config)` at task processing time. All variant writes (thumbnail, WebP) go to the same backend as the source image.
+Worker 在任务处理时通过 `router.for_config(config)` 解析后端。所有变体（缩略图、WebP）写回同一后端。
 
-**No pipeline logic changes** — the `StorageBackend` trait abstraction handles the difference.
+**管线逻辑无变化** — `StorageBackend` trait 抽象已屏蔽差异。
 
-### 2.11 Security Constraints
+### 2.11 安全约束
 
-| Rule | Implementation |
-|------|---------------|
-| Token encrypted at rest | AES-256-GCM with independent key (`PICHOST_AUTH_TOKEN_ENCRYPTION_KEY`) |
-| Token never returned in API responses | GET/PATCH return `token_masked: "ghp_****abcd"` |
-| Repository reachability verified on create | `POST` handler calls `GET /repos/{owner}/{repo}` before INSERT |
-| Delete protection | 409 Conflict if any `images` rows reference the config |
-| Config limit per user | Max 5 (configurable via env var) |
-| At least one local backend in multi-upload | Enforced server-side; 400 if 2 non-local backends selected |
-| Token never logged | Middleware strips `token` field from request body logging |
+| 规则 | 实现 |
+|------|------|
+| Token 静态加密存储 | AES-256-GCM，独立密钥（`PICHOST_AUTH_TOKEN_ENCRYPTION_KEY`） |
+| Token 永不在 API 响应中返回 | GET/PATCH 返回 `token_masked: "ghp_****abcd"` |
+| 创建时验证仓库可达性 | `POST` handler 先调 `GET /repos/{owner}/{repo}` 再 INSERT |
+| 删除保护 | 有 `images` 引用则返回 409 Conflict |
+| 每用户配置上限 | 5 个（可通过环境变量调整） |
+| 多后端上传至少含一个 local | 服务端强制校验，2 个非 local 后端返回 400 |
+| Token 永不记录日志 | 中间件从请求体日志中剥离 `token` 字段 |
+
+### 2.12 GitCode 与 GitHub API 兼容性
+
+| 维度 | GitHub | GitCode | 兼容？ |
+|------|--------|---------|--------|
+| 基础 URL | `https://api.github.com` | `https://api.gitcode.com/api/v5` | 不同（配置区分） |
+| 认证头 | `Authorization: Bearer <token>` | `Authorization: Bearer` 或 `PRIVATE-TOKEN` | ✅ 都支持 Bearer |
+| 创建文件 | `PUT .../contents/{path}` | `POST .../contents/{path}` | HTTP 方法不同 |
+| 获取文件内容 | `GET .../contents/{path}` | `GET .../contents/{path}` | ✅ 一致 |
+| 获取原始内容 | `GET .../raw/{path}` | `GET .../raw/{path}` | ✅ 一致 |
+| 删除文件 | `DELETE .../contents/{path}` | `DELETE .../contents/{path}` | ✅ 一致 |
+| 文件大小上限 | 100 MB（Contents API） | 20 MB（Contents API） | 不同 |
+| 速率限制 | 5,000 次/小时 | 400 次/分钟, 4,000 次/小时 | 相近 |
+| Raw URL 模式 | `raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}` | `raw.gitcode.com/{owner}/{repo}/{branch}/{path}` | 模式相同 |
+
+**结论**: 单一 `GitStorage` 实现 + `GitProvider` 枚举，仅切换基础 URL、HTTP 方法和 raw URL 模板。核心参数结构完全一致。
 
 ---
 
-## 3. P4-B: Clipboard Paste + URL Upload
+## 3. P4-B：剪贴板粘贴 + URL 上传
 
-### 3.1 Scope
+### 3.1 范围
 
-- Paste images from clipboard directly into the upload page
-- Provide an image URL and have the server download + upload it
-- Both use the same backend selection logic from P4-A
+- 在 Dashboard 页面直接粘贴剪贴板中的图片
+- 提供图片 URL，由服务端下载后上传
+- 均使用 P4-A 的后端选择逻辑
 
-### 3.2 Clipboard Paste
+### 3.2 剪贴板粘贴
 
-**Trigger**: `paste` event on the DropZone container (or `window`).
+**触发**: DropZone 容器（或 `window`）上监听 `paste` 事件。
 
-**Detection**: Check `event.clipboardData.items` for items where `type.startsWith('image/')`.
+**检测**: 检查 `event.clipboardData.items` 中 `type.startsWith('image/')` 的项。
 
-**Flow**:
+**流程**:
 ```
-User presses Ctrl+V
-  → paste event fires
+用户 Ctrl+V
+  → paste 事件触发
   → clipboardData.items[n].type === 'image/png'
-  → item.getAsFile() → File object
+  → item.getAsFile() → File 对象
   → addFiles([file], { source: 'paste', storageConfigIds })
-  → useUploadQueue processes normally
+  → useUploadQueue 正常处理
 ```
 
-**Implementation**: `useClipboardPaste` hook or inline handler in Dashboard. Must handle: no image in clipboard (ignore), multiple clipboard items (take first image only).
+**实现**: `useClipboardPaste` hook 或 Dashboard 内联处理。需处理：剪贴板无图片（忽略）、多个剪贴板项（仅取第一张图片）。
 
-### 3.3 URL Upload
+### 3.3 URL 上传
 
-Two implementation options:
+**选定方案**: 服务端下载（避免 CORS，更可靠）。
 
-| Option | Description | Pros | Cons |
-|--------|-------------|------|------|
-| **Client-side fetch** | Frontend fetches URL → Blob → File → standard upload | No new API, uses existing upload | CORS issues, double bandwidth |
-| **Server-side download** | New `POST /images/upload-url` → server fetches URL → processes | No CORS, single bandwidth | New endpoint, server SSRF risk |
-
-**Chosen**: Server-side download — avoids CORS, more reliable. Adds SSRF protection.
-
-**New endpoint**:
+**新增端点**:
 
 ```
 POST /api/v1/images/upload-url
@@ -442,31 +479,31 @@ Body: { "url": "https://example.com/photo.jpg", "storage_config_ids": ["uuid1"] 
 Response: 200 { ... UploadResult }
 ```
 
-**SSRF protection**:
-- DNS resolution check: reject private/reserved IPs (127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, ::1, fc00::/7)
-- URL scheme allowlist: `http` and `https` only
-- Timeout: 30s
-- Max response size: 50 MB
-- Redirect limit: 5 hops
-- Content-Type validation via magic bytes after download
+**SSRF 防护**:
+- DNS 解析检查：拒绝私有/保留 IP（127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, ::1, fc00::/7）
+- URL scheme 白名单：仅 `http` 和 `https`
+- 超时：30 秒
+- 最大响应体：50 MB
+- 重定向限制：5 跳
+- 下载后 magic byte 校验
 
-**Frontend**: URL input + "Upload" button next to DropZone. On submit, calls `uploadImageFromUrl()` → shows progress indicator → appends result to upload queue.
+**前端**: DropZone 旁的 URL 输入框 + "上传"按钮。提交后调 `uploadImageFromUrl()` → 显示进度 → 结果追加到上传队列。
 
 ---
 
-## 4. P4-C: Gallery Categories/Directories
+## 4. P4-C：图库分类/目录
 
-### 4.1 Scope
+### 4.1 范围
 
-- Users can create hierarchical categories (max 2 levels)
-- Images can be assigned to categories
-- Gallery can filter by category
-- Bulk move images between categories
+- 用户可创建层级分类（最多 2 级）
+- 图片可分配到分类
+- Gallery 可按分类过滤
+- 支持批量移动图片到分类
 
-### 4.2 Database Schema
+### 4.2 数据库设计
 
 ```sql
--- Migration 0009
+-- 迁移 0009
 CREATE TABLE categories (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -481,34 +518,34 @@ ALTER TABLE images
     ADD COLUMN category_id UUID REFERENCES categories(id) ON DELETE SET NULL;
 ```
 
-- `parent_id = NULL` means root-level category
-- Max depth enforced at application level (2 levels)
-- Deleting a category cascades to children; sets `images.category_id = NULL`
+- `parent_id = NULL` 表示根级分类
+- 最大深度在应用层强制（2 级）
+- 删除分类级联删除子分类，关联图片的 `category_id` 置为 NULL
 
-### 4.3 API Endpoints
+### 4.3 API 端点
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/api/v1/categories` | JWT | List user's categories. Returns tree structure: `[{ id, name, parent_id, children: [...] }]` |
-| `POST` | `/api/v1/categories` | JWT | Create category. Body: `{ name, parent_id? }`. Validates max depth ≤ 2. |
-| `PATCH` | `/api/v1/categories/:id` | JWT | Rename category |
-| `DELETE` | `/api/v1/categories/:id` | JWT | Delete category (cascades children, unlinks images) |
-| `POST` | `/api/v1/images/:id/move` | JWT | Move image to category. Body: `{ category_id }`. |
-| `POST` | `/api/v1/images/batch-move` | JWT | Bulk move. Body: `{ image_ids: [...], category_id }`. |
+| Method | Path | Auth | 说明 |
+|--------|------|------|------|
+| `GET` | `/api/v1/categories` | JWT | 列出用户分类，返回树结构：`[{ id, name, parent_id, children: [...] }]` |
+| `POST` | `/api/v1/categories` | JWT | 创建分类。Body: `{ name, parent_id? }`。校验最大深度 ≤ 2。 |
+| `PATCH` | `/api/v1/categories/:id` | JWT | 重命名分类 |
+| `DELETE` | `/api/v1/categories/:id` | JWT | 删除分类（级联子分类、解除图片关联） |
+| `POST` | `/api/v1/images/:id/move` | JWT | 移动图片到分类。Body: `{ category_id }`。 |
+| `POST` | `/api/v1/images/batch-move` | JWT | 批量移动。Body: `{ image_ids: [...], category_id }`。 |
 
-Gallery filtering:
+Gallery 过滤：
 
 ```
 GET /api/v1/images?category_id=uuid
 ```
 
-Adds `AND (i.category_id = $N OR ($N IS NULL AND i.category_id IS NULL))` for "uncategorized" support.
+SQL 增加 `AND (i.category_id = $N OR ($N IS NULL AND i.category_id IS NULL))` 支持"未分类"筛选。
 
-### 4.4 Frontend
+### 4.4 前端设计
 
-**Gallery layout change**: Two-panel layout.
+**Gallery 布局改造**: 双栏布局。
 
-```
+```text
 ┌─ 分类 ────┬── 图片网格 ──────────────────────────┐
 │            │                                       │
 │ 📁 全部    │  [🔍] [存储 ▾] [排序 ▾] [全选]       │
@@ -521,41 +558,41 @@ Adds `AND (i.category_id = $N OR ($N IS NULL AND i.category_id IS NULL))` for "u
 └────────────┴───────────────────────────────────────┘
 ```
 
-- Left panel: collapsible tree, max 2 levels
-- Click category → filter gallery, update URL `?category=uuid`
-- Right-click category → Rename / Delete / New sub-category
-- Drag image to category in sidebar → move
-- Batch select → "移动到分类" dropdown button → category picker modal
+- 左侧面板：可折叠树，最多 2 级
+- 点击分类 → 过滤 Gallery，更新 URL `?category=uuid`
+- 右键分类 → 重命名 / 删除 / 新建子分类
+- 拖拽图片到侧栏分类 → 移动
+- 批量选择 → "移动到分类"下拉按钮 → 分类选择弹窗
 
 ---
 
-## 5. P4-D: Watermarking (Server-Side)
+## 5. P4-D：图片水印（服务端）
 
-### 5.1 Architecture Decision: Server-Side vs Client-Side
+### 5.1 架构决策：服务端 vs 客户端
 
-User's original suggestion: put preprocessing on frontend. For watermarking specifically:
+用户原意是将预处理放在前端，但水印场景特殊：
 
-| | Server-Side (Worker) | Client-Side (Canvas) |
+| | 服务端（Worker）✅ | 客户端（Canvas） |
 |---|---|---|
-| Reliability | Always applied | Can be bypassed (curl upload, API direct) |
-| Processing cost | On worker | On user's browser |
-| Image quality | High (image crate, accurate rendering) | Variable (Canvas limitations) |
-| Font support | `imageproc` + `rusttype` (TTF fonts) | Browser fonts only |
-| Consistency | Same result for all users | Browser-dependent |
+| 可靠性 | 必定执行 | 可绕过（curl 上传、API 直调） |
+| 处理开销 | Worker 承担 | 用户浏览器承担 |
+| 图片质量 | 高（image crate，精确渲染） | 可变（Canvas 限制） |
+| 字体支持 | `imageproc` + `rusttype`（TTF 字体） | 仅浏览器字体 |
+| 一致性 | 所有用户结果一致 | 依赖浏览器 |
 
-**Chosen**: Server-side in the worker pipeline. Watermarking is a security/attribution feature — it must not be bypassable. Compromise: watermark added in worker, other preprocessing (compress, resize, EXIF strip) stays on frontend.
+**选定**: 服务端 Worker 管线中实现。水印是安全/归属功能 — 不可绕过。折中：水印在 Worker 中处理，其他预处理（压缩、缩放、EXIF 移除）放前端。
 
-### 5.2 Database
+### 5.2 数据库
 
 ```sql
--- Migration 0010
+-- 迁移 0010
 ALTER TABLE users
     ADD COLUMN watermark_config JSONB;
 ```
 
-Default `NULL` (watermarking disabled).
+默认 `NULL`（水印关闭）。
 
-### 5.3 Watermark Config Schema
+### 5.3 水印配置结构
 
 ```json
 {
@@ -572,34 +609,34 @@ Default `NULL` (watermarking disabled).
 }
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | bool | `false` | Master toggle |
-| `text` | string | `""` | Watermark text |
-| `font` | string | `"NotoSansSC-Regular"` | Font name (from bundled fonts) |
-| `font_size` | u32 | `48` | Base font size (scaled by `scale`) |
-| `color` | string | `"rgba(255,255,255,0.5)"` | Text color with alpha |
-| `rotation` | f64 | `-30.0` | Degrees |
-| `scale` | f64 | `0.15` | Relative to image diagonal |
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `enabled` | bool | `false` | 总开关 |
+| `text` | string | `""` | 水印文字 |
+| `font` | string | `"NotoSansSC-Regular"` | 字体名称（从内置字体选） |
+| `font_size` | u32 | `48` | 基础字号（会按 `scale` 缩放） |
+| `color` | string | `"rgba(255,255,255,0.5)"` | 文字颜色含透明度 |
+| `rotation` | f64 | `-30.0` | 旋转角度（度） |
+| `scale` | f64 | `0.15` | 相对于图片对角线长度的缩放 |
 | `position` | enum | `"bottom-right"` | `top-left|top-right|bottom-left|bottom-right|center|tile` |
-| `margin_x` | u32 | `20` | Pixels from edge |
-| `margin_y` | u32 | `20` | Pixels from edge |
+| `margin_x` | u32 | `20` | 距边缘像素 |
+| `margin_y` | u32 | `20` | 距边缘像素 |
 
-### 5.4 Implementation
+### 5.4 实现
 
-**Crate**: `imageproc` (already in workspace deps or add) + `rusttype` for TTF rendering.
+**依赖 crate**: `imageproc` + `rusttype`（TTF 字体渲染）。
 
-**Bundled fonts**: 5 fonts shipped with the binary (embedded via `include_bytes!`):
-- `NotoSansSC-Regular.ttf` (中文)
-- `NotoSans-Regular.ttf` (Latin)
+**内置字体**: 5 种字体随二进制嵌入（`include_bytes!`）：
+- `NotoSansSC-Regular.ttf`（中文）
+- `NotoSans-Regular.ttf`（拉丁）
 - `Arial.ttf`
 - `DejaVuSans.ttf`
 - `FiraCode-Regular.ttf`
 
-**Hook point**: `pichost-worker/src/pipeline.rs` → `process_image_variants()`. Insert watermark step **after** source image decode, **before** thumbnail/WebP generation. This ensures all variants carry the watermark.
+**挂载点**: `pichost-worker/src/pipeline.rs` → `process_image_variants()`。在源图解码**之后**、缩略图/WebP 生成**之前**插入水印步骤，确保所有变体都带水印。
 
 ```rust
-// New function in processor.rs
+// processor.rs 新增函数
 pub fn apply_watermark(
     img: &DynamicImage,
     config: &WatermarkConfig,
@@ -616,133 +653,132 @@ pub fn apply_watermark(
 
 ### 5.5 API
 
-Watermark config is part of the user profile. Extended `PATCH /api/v1/users/me`:
+水印配置为用户 profile 的一部分。扩展 `PATCH /api/v1/users/me`：
 
 ```json
 {
     "watermark_config": {
         "enabled": true,
-        "text": "@myusername",
-        ...
+        "text": "@myusername"
     }
 }
 ```
 
-### 5.6 Frontend
+### 5.6 前端
 
-Settings page — new "默认水印" card:
+Settings 页面 — 新增 "默认水印" Card：
 
-- Enable/disable toggle
-- Text input (preview in real-time on a sample image)
-- Font dropdown (5 options with preview)
-- Font size slider
-- Color picker (hex + alpha)
-- Rotation slider (-180 to 180)
-- Scale slider (0.01 to 1.0)
-- Position: 3×3 grid selector + "tile" option
-- Margin inputs
-- **Live preview**: a sample image updates as settings change
+- 启用/禁用开关
+- 文字输入（示例图片实时预览）
+- 字体下拉（5 种选项带预览）
+- 字号滑块
+- 颜色选择器（hex + alpha）
+- 旋转滑块（-180 到 180）
+- 缩放滑块（0.01 到 1.0）
+- 位置：3×3 九宫格选择器 + "平铺"选项
+- 边距输入
+- **实时预览**：一张示例图片随设置变化更新
 
 ---
 
-## 6. P4-E: Image Preprocessing (Client-Side)
+## 6. P4-E：图片预处理（客户端）
 
-### 6.1 Scope
+### 6.1 范围
 
-All preprocessing happens in the browser **before** upload. None of these operations are mandatory — users toggle them on/off.
+所有预处理在浏览器中**上传前**完成。所有操作均可选，用户按需开启。
 
-| Operation | Implementation | Description |
-|-----------|---------------|-------------|
-| EXIF removal | `exif-js` | Strip all EXIF/metadata from JPEG |
-| Rotation | Canvas `rotate()` + `drawImage` | Rotate by 90°/180°/270° or custom degrees |
-| Resize | Canvas `drawImage` with target dimensions | Resize to max width/height, maintain aspect ratio |
-| Format conversion | Canvas `toBlob(mimeType, quality)` | Convert PNG→JPEG, JPEG→WebP, etc. |
-| Compression | Canvas `toBlob(type, quality)` | JPEG quality slider (10-100) |
+| 操作 | 实现 | 说明 |
+|------|------|------|
+| EXIF 移除 | `exif-js` | 清除 JPEG 中所有 EXIF/元数据 |
+| 旋转 | Canvas `rotate()` + `drawImage` | 90°/180°/270° 或自定义角度 |
+| 缩放 | Canvas `drawImage` 指定目标尺寸 | 限制最大宽/高，保持宽高比 |
+| 格式转换 | Canvas `toBlob(mimeType, quality)` | PNG→JPEG, JPEG→WebP 等 |
+| 压缩 | Canvas `toBlob(type, quality)` | JPEG 质量滑块（10-100） |
 
-### 6.2 Architecture
+### 6.2 架构
 
-**Web Worker** — all processing happens off the main thread to avoid UI freezing.
+**Web Worker** — 所有处理在独立线程执行，避免阻塞 UI。
 
 ```
-Main Thread                    Web Worker
+主线程                         Web Worker
     │                              │
-    ├─ File + prefs ───────────────┤
-    │                              ├─ ExifReader → strip EXIF
+    ├─ File + 预处理选项 ──────────┤
+    │                              ├─ ExifReader → 移除 EXIF
     │                              ├─ createImageBitmap(file)
-    │                              ├─ OffscreenCanvas operations
+    │                              ├─ OffscreenCanvas 操作
     │                              ├─ canvas.convertToBlob({type, quality})
-    │                              └─ return { blob, metadata }
-    │  ◄── blob + stats ─────────┤
+    │                              └─ 返回 { blob, metadata }
+    │  ◄── blob + 统计 ───────────┤
     ├─ uploadFile(blob, name)
     │
 ```
 
-**Prefs Model** (in `useUploadQueue` or a settings context):
+**预处理选项模型**（在 `useUploadQueue` 或独立 setting context 中）：
 
 ```typescript
 interface PreprocessingPrefs {
-  stripExif: boolean;         // default false
+  stripExif: boolean;         // 默认 false
   resize: {
-    enabled: boolean;         // default false
-    maxWidth: number;         // default 1920
-    maxHeight: number;        // default 1920
+    enabled: boolean;         // 默认 false
+    maxWidth: number;         // 默认 1920
+    maxHeight: number;        // 默认 1920
   };
   formatConvert: {
-    enabled: boolean;         // default false
+    enabled: boolean;         // 默认 false
     targetFormat: string;     // "image/jpeg" | "image/png" | "image/webp"
-    quality: number;          // 0-100, default 85
+    quality: number;          // 0-100，默认 85
   };
   compression: {
-    enabled: boolean;         // default false
-    quality: number;          // 0-100, default 80
-    maxSizeKB: number;        // optional, default 0 (no limit)
+    enabled: boolean;         // 默认 false
+    quality: number;          // 0-100，默认 80
+    maxSizeKB: number;        // 可选，默认 0（不限制）
   };
   rotate: {
-    enabled: boolean;         // default false
+    enabled: boolean;         // 默认 false
     degrees: number;          // 0, 90, 180, 270
   };
 }
 ```
 
-### 6.3 Frontend Integration
+### 6.3 前端集成
 
-**Settings page** — new "上传预处理" card:
-- Toggle per operation with brief description
-- Resize: width + height inputs
-- Format: dropdown + quality slider
-- Compression: quality slider
-- Rotation: radio buttons (0°/90°/180°/270°)
+**Settings 页** — 新增 "上传预处理" Card：
+- 每个操作一行 toggle + 简要说明
+- 缩放：宽 + 高输入
+- 格式转换：下拉 + 质量滑块
+- 压缩：质量滑块
+- 旋转：单选按钮（0°/90°/180°/270°）
 
-**Dashboard** — preprocessing prefs shown as compact chips below DropZone:
-```
+**Dashboard** — 预处理选项显示为紧凑标签，在 DropZone 下方：
+```text
 预处理: [EXIF:开] [缩放:1920×1920] [WebP:85] [压缩:80%]
         [配置...]
 ```
-Click `[配置...]` → jump to Settings.
+点击 `[配置...]` → 跳转 Settings。
 
-**Processing indicator**: During preprocessing, UploadCard shows "处理中..." status before "上传中...".
+**处理中状态**: 预处理期间，UploadCard 在"上传中..."之前显示"处理中..."。
 
-### 6.4 Limitations
+### 6.4 限制
 
-- Canvas-based operations are lossy for format conversion
-- Not all browsers support `OffscreenCanvas` in Workers (fallback: main-thread Canvas with chunked processing)
-- Large images (>20MP) may cause browser OOM — warn user
-- AVIF encoding requires Chrome 85+ (fallback to WebP/JPEG)
+- Canvas 格式转换是有损的
+- 并非所有浏览器支持 Worker 中的 `OffscreenCanvas`（降级方案：主线程 Canvas，分块处理）
+- 超大图片（>20MP）可能导致浏览器 OOM — 警告用户
+- AVIF 编码需要 Chrome 85+（降级为 WebP/JPEG）
 
 ---
 
-## 7. P4-F: Filename Preservation + Rename
+## 7. P4-F：原文件名保留 + 重命名
 
-### 7.1 Scope
+### 7.1 范围
 
-- `original_name` is already stored in DB (existing behavior)
-- Display original name in Gallery and ImageDetail
-- Allow users to rename images
-- Git storage uses `original_name` as the filename (not random hex) for human-readable URLs
+- `original_name` 已存储于数据库（现有行为）
+- Gallery 和 ImageDetail 中显示原始文件名
+- 允许用户重命名图片
+- Git 存储使用 `original_name` 作为文件名（而非随机 hex），使 URL 可读
 
 ### 7.2 API
 
-**`PATCH /api/v1/images/:id`** — already exists for future use, add:
+**`PATCH /api/v1/images/:id`**:
 
 ```json
 {
@@ -750,112 +786,91 @@ Click `[配置...]` → jump to Settings.
 }
 ```
 
-- Validate: max 255 chars, no path separators (`/`, `\`), no null bytes
-- Returns updated `UploadResult`
+- 校验：最大 255 字符、不含路径分隔符（`/`、`\`）、不含空字节
+- 返回更新后的 `UploadResult`
 
-**URL implications**: Changing the original name after upload does **not** change the Git repository path or public URL. The Git path is fixed at upload time based on `public_key` + extension. Renaming only affects the `original_name` display field.
+**URL 影响**: 上传后更改文件名**不会**改变 Git 仓库路径或公开 URL。Git 路径在上传时基于 `public_key` + 扩展名固定。重命名仅影响显示用的 `original_name` 字段。
 
-### 7.3 Frontend
+### 7.3 前端
 
-**ImageDetail page**:
-```
+**ImageDetail 页**:
+```text
 ┌─ 图片详情 ──────────────────────────────────┐
 │                                              │
 │  photo.jpg  [✎]                             │
-│  ↑ click → becomes input, Enter to save     │
+│  ↑ 点击变输入框，回车保存                     │
 │                                              │
 │  ┌──────────────────────────────────┐       │
-│  │         Image preview             │       │
+│  │         图片预览                   │       │
 │  └──────────────────────────────────┘       │
-│  ...                                         │
 └──────────────────────────────────────────────┘
 ```
 
-**Gallery cards**: Display `original_name` in the overlay (already partially done, verify).
+**Gallery 卡片**: 图片卡片 overlay 显示 `original_name`（确认现有行为已支持，补充遗漏）。
 
 ---
 
-## 8. Migration Plan
+## 8. 实施分期
 
-### 8.1 Dependencies
+### 8.1 依赖关系
 
 ```
-P3 (gap fixes)
+P3（差距修复）
   │
-  └── P4-A (Git storage + multi-backend)
+  └── P4-A（Git 存储 + 多后端上传）
         │
-        ├── P4-B (clipboard + URL upload)
-        ├── P4-C (categories)
-        ├── P4-D (watermarking)
-        ├── P4-E (preprocessing)
-        └── P4-F (rename)
+        ├── P4-B（剪贴板 + URL 上传）──┐
+        ├── P4-C（分类/目录）─────────┤
+        ├── P4-D（水印）──────────────┤  互不依赖，可并行
+        ├── P4-E（预处理）────────────┤
+        └── P4-F（重命名）────────────┘
 ```
 
-P4-B through P4-F are fully independent of each other. They can be developed in any order or in parallel.
+### 8.2 迁移文件
 
-### 8.2 Migration Files
+| 迁移编号 | 创建内容 | 所属阶段 |
+|----------|----------|----------|
+| `0008` | `user_storage_configs` 表、`images` 表 `storage_config_id` 列 | P4-A |
+| `0009` | `categories` 表、`images` 表 `category_id` 列 | P4-C |
+| `0010` | `users` 表 `watermark_config` 列 | P4-D |
 
-| Migration | Creates | Phase |
-|-----------|---------|-------|
-| `0008` | `user_storage_configs` table, `storage_config_id` column on `images` | P4-A |
-| `0009` | `categories` table, `category_id` column on `images` | P4-C |
-| `0010` | `watermark_config` column on `users` | P4-D |
+P4-B、P4-E、P4-F 无需数据库迁移。
 
-P4-B, P4-E, P4-F require no database migrations.
+### 8.3 版本规划
 
-### 8.3 Version Bumps
+| 阶段 | 版本号 | 类型 |
+|------|--------|------|
+| P4-A | v0.15.0 | 次版本（重大新特性） |
+| P4-B | v0.15.1 | 补丁 |
+| P4-C | v0.16.0 | 次版本 |
+| P4-D | v0.16.1 | 补丁 |
+| P4-E | v0.16.2 | 补丁 |
+| P4-F | v0.16.3 | 补丁 |
 
-| Phase | Version | Type |
-|-------|---------|------|
-| P4-A | v0.15.0 | Minor (significant new feature) |
-| P4-B | v0.15.1 | Patch |
-| P4-C | v0.16.0 | Minor |
-| P4-D | v0.16.1 | Patch |
-| P4-E | v0.16.2 | Patch |
-| P4-F | v0.16.3 | Patch |
+### 8.4 新增环境变量
 
-### 8.4 Config Changes
-
-| Variable | Phase | Required |
-|----------|-------|----------|
-| `PICHOST_AUTH_TOKEN_ENCRYPTION_KEY` | P4-A | Yes (for Git backends) |
-| `PICHOST_STORAGE_GITHUB_ENABLED` | P4-A | No (default: true if encryption key set) |
-| `PICHOST_STORAGE_GITCODE_ENABLED` | P4-A | No (default: true if encryption key set) |
-| `PICHOST_STORAGE_MAX_USER_CONFIGS` | P4-A | No (default: 5) |
+| 变量 | 阶段 | 必填 |
+|------|------|------|
+| `PICHOST_AUTH_TOKEN_ENCRYPTION_KEY` | P4-A | 启用 Git 后端时必填 |
+| `PICHOST_STORAGE_MAX_USER_CONFIGS` | P4-A | 否（默认: 5） |
 
 ---
 
-## 9. Risk Assessment
+## 9. 风险评估
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| GitCode API instability / breaking changes | Medium | High | Abstract via `GitProvider` enum; can disable GitCode via config flag without affecting GitHub |
-| User PAT leakage (log, error message, response) | Medium | Critical | AES-256-GCM at rest; token masking in all responses; logging middleware strips `token` field; code review checklist |
-| GitCode 20MB limit blocks large uploads | Medium | Medium | Auto-fallback to local storage for files >20MB on GitCode; configurable threshold |
-| GitHub/GitCode rate limit causes upload failures | Medium | Low | Worker retry (3×) covers transient limits; client shows clear "rate limited, retry in N seconds" error |
-| SSRF via URL upload | Medium | High | IP blocklist (all private ranges), scheme allowlist (http/https), magic byte validation post-download |
-| AES key rotation breaks existing tokens | Low | High | Support key versioning: store `token_encrypted: "v1:base64ciphertext"`, try all known keys on decrypt |
-| Category depth unlimited → complex UI | Low | Low | Enforce max 2 levels at API level; UI only supports 2 |
-| Canvas preprocessing inconsistent across browsers | Medium | Low | Document browser requirements; fallback to server-side processing for unsupported browsers |
+| 风险 | 概率 | 影响 | 缓解措施 |
+|------|------|------|----------|
+| GitCode API 不稳定/breaking changes | 中 | 高 | 通过 `GitProvider` 枚举抽象；可通过配置开关单独禁用 GitCode 而不影响 GitHub |
+| 用户 PAT 泄露（日志、错误消息、响应） | 中 | 严重 | AES-256-GCM 静态加密；所有响应 token 掩码；日志中间件剥离 `token` 字段；代码审查清单 |
+| GitCode 20MB 限制阻断大文件上传 | 中 | 中 | 超限返回明确错误提示，引导用户改用 local 或 GitHub；不做静默 fallback |
+| GitHub/GitCode 速率限制导致上传失败 | 中 | 低 | Worker 重试（3次）覆盖瞬时限流；前端显示明确错误"速率受限，N 秒后重试" |
+| URL 上传 SSRF 攻击 | 中 | 高 | IP 黑名单（全部私有网段）、scheme 白名单（仅 http/https）、下载后 magic byte 校验 |
+| AES 密钥轮换导致旧 token 无法解密 | 低 | 高 | 支持密钥版本化：存储 `token_encrypted: "v1:base64ciphertext"`，解密时尝试所有已知密钥 |
+| 分类层级过深导致复杂 UI | 低 | 低 | API 层面强制最多 2 级；前端 UI 仅支持 2 级 |
+| Canvas 预处理在不同浏览器表现不一致 | 中 | 低 | 文档化浏览器要求；不支持时降级为直传原图 |
 
 ---
 
-## Appendix A: GitCode vs GitHub API Compatibility
+## 附录 A：隐私说明
 
-| Dimension | GitHub | GitCode | Compatible? |
-|-----------|--------|---------|-------------|
-| Base URL | `https://api.github.com` | `https://api.gitcode.com/api/v5` | Different (config) |
-| Auth header | `Authorization: Bearer <token>` | `Authorization: Bearer` or `PRIVATE-TOKEN` | ✅ Both support Bearer |
-| Create file | `PUT .../contents/{path}` | `POST .../contents/{path}` | Different HTTP method |
-| Get file | `GET .../contents/{path}` | `GET .../contents/{path}` | ✅ Same |
-| Get raw file | `GET .../raw/{path}` | `GET .../raw/{path}` | ✅ Same |
-| Delete file | `DELETE .../contents/{path}` | `DELETE .../contents/{path}` | ✅ Same |
-| File size limit | 100 MB (Contents API) | 20 MB (Contents API) | Different |
-| Rate limit | 5,000 req/h | 400/min, 4,000/h | Similar |
-| Raw URL pattern | `raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}` | `raw.gitcode.com/{owner}/{repo}/{branch}/{path}` | Same pattern |
-
-**Conclusion**: Single `GitStorage` implementation with `GitProvider` enum switching base URL, HTTP method, and raw URL template. Core parameter structures are identical.
-
-## Appendix B: GDPR/Privacy Note
-
-Git backends store images in user-owned repositories. PicHost itself does not have access to the repository content outside of the PAT the user provides. Users can revoke PATs at any time on GitHub/GitCode to cut off PicHost's access. Image data location is under the user's control — this is a privacy-positive design pattern.
+Git 后端将图片存储在用户自有仓库中。PicHost 除用户提供的 PAT 授权外，无法访问仓库内容。用户可随时在 GitHub/GitCode 上吊销 PAT 以切断 PicHost 的访问。图片数据位置由用户掌控 — 这是隐私友好的设计模式。
