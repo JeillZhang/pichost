@@ -62,6 +62,7 @@
 - Images assigned via `category_id` FK with `ON DELETE SET NULL`.
 - Category CRUD at `/api/v1/categories`, image move at `/images/:id/move` and batch-move at `/images/batch-move`.
 - Gallery supports `?category_id=` filter parameter.
+- **Frontend CategoryTree**: sidebar component with self-contained inline CRUD — right-click context menu (rename/delete), inline rename input, create modal, delete confirmation dialog. Uses TanStack Query `useMutation` + `invalidateQueries`.
 
 ### Upload
 - Multipart → magic byte check (`infer::is_image`) → SHA256 hash → per-user dedup → random 6-char hex public key → write storage → INSERT (status=`'active'`) → enqueue worker task.
@@ -149,6 +150,7 @@
 - Entry: `src/main.tsx` → `App.tsx`. Dev server :5173, proxy to :3000.
 - **CSS variables**: Design system uses `var(--color-*)` tokens for theming. Glass effects via `backdrop-blur-sm`, `bg-[var(--glass-bg)]`, `border-[var(--color-border)]`.
 - **Hooks**: `useUploadQueue` (multi-file upload with concurrency pool), `useInfiniteQuery` (Gallery scroll).
+- **Components**: `CategoryTree` (sidebar with inline CRUD — context menu, rename, delete confirmation, create modal).
 
 ## Rules
 
