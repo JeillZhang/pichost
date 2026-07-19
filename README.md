@@ -202,7 +202,8 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 │                            StorageRouter, AES-256-GCM crypto
 ├── pichost-api/             Axum server — routes, middleware, services,
 │                            DB pool, Redis, rate limiting, storage config CRUD
-├── pichost-worker/          Background processing — thumbnails, WebP via Redis queue
+├── pichost-worker/          Background processing — thumbnails, WebP, watermarks
+│   └── fonts/               5 built-in TTF fonts (rusttype + imageproc)
 ├── web-ui/                  React SPA — Zustand, TanStack Query, Tailwind CSS 4
 ├── nginx/
 │   └── nginx.conf           Reverse proxy + cache + rate limiting

@@ -191,6 +191,28 @@
 - **简化接口**: CategoryTree 移除 `onAddCategory`/`onEditCategory`/`onDeleteCategory` props，Gallery.tsx 删除对应的 stub handler 和旧模态框
 - **验证**: `cargo clippy` ✅, `cargo test` ✅(38 pass), `npm run build` ✅
 
+## T4: 添加 imageproc/rusttype 依赖 + 字体嵌入模块 ✅ (本次完成)
+
+参考 `docs/superpowers/specs/2026-07-19-pichost-p4-design.md` §5 (水印设计)。
+
+### 变更内容
+- **`pichost-worker/Cargo.toml`**: 新增 `imageproc = "0.25"`、`rusttype = "0.9"` 依赖
+- **`pichost-worker/src/fonts.rs`**: 新建字体嵌入模块，包含：
+  - `load_font(name)` — 通过名称加载 5 个内嵌 TTF 字体
+  - `builtin_font_names()` — 返回可用字体名称列表
+  - `scaled_font_size()` — 根据图片对角线计算缩放字号
+- **`pichost-worker/src/main.rs`**: 新增 `mod fonts;` 声明
+- **字体文件**: `pichost-worker/fonts/` 下 5 个 TTF 文件（NotoSansSC-Regular、NotoSans-Regular、Arial、DejaVuSans、FiraCode-Regular）
+
+### 验证
+- `cargo check -p pichost-worker` ✅
+- `cargo test -p pichost-worker` ✅ (4 tests: 加载每个内置字体、未知字体报错、DejaVuSans 布局、缩放计算)
+- `cargo clippy --workspace -D warnings` ✅
+
+### 注意
+- `dead_code` 抑制：T4 导出的函数供后续水印处理任务（T1–T3）使用，当前无消费方
+- imageproc 0.25 + rusttype 0.9 版本锁定，未来升级需注意 API 兼容性
+
 ## 待实施
 
 | 阶段 | 主题 | 依赖 |

@@ -86,6 +86,11 @@
 - Nginx proxy_cache on `/u/` and `/t/` (IMAGE_CACHE 50MB/1h).
 - Status check: only `'active'` or `'ready'` images served — others return 404.
 
+### Font embedding (watermark)
+- `pichost-worker/src/fonts.rs`: `load_font()`, `builtin_font_names()`, `scaled_font_size()`.
+- 5 built-in TTF fonts at `pichost-worker/fonts/`: NotoSansSC-Regular, NotoSans-Regular, Arial, DejaVuSans, FiraCode-Regular.
+- Uses `rusttype` for font parsing and `imageproc` for image drawing (watermark pipeline).
+
 ### Image status quirk
 - DB default is `'pending'`, but upload INSERT hardcodes `'active'`. The `ImageStatus` enum has `Pending/Processing/Ready/Failed` but code checks string `"active"`. If adding status transitions, reconcile this.
 
