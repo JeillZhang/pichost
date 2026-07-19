@@ -118,9 +118,9 @@ impl StorageBackend for GitStorage {
         let base64_content = BASE64.encode(data);
         let commit_msg = Self::build_commit_message(key);
 
-        // GitCode: check size limit, fall back to file upload if needed
+        // GitCode: check size limit
         if self.provider == GitProvider::GitCode && data.len() > Self::GITCODE_MAX_CONTENTS_BYTES {
-            return Err(StorageError::WriteFailed(
+            return Err(StorageError::PayloadTooLarge(
                 "文件超过GitCode 20MB限制，请改用本地存储或GitHub".into(),
             ));
         }
@@ -154,7 +154,7 @@ impl StorageBackend for GitStorage {
             .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
 
         if resp.status().is_success() || resp.status().as_u16() == 201 {
-            Ok(self.raw_url(&path))
+            Ok(path)
         } else if resp.status().as_u16() == 429 {
             let retry = resp
                 .headers()

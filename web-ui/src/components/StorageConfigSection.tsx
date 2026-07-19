@@ -135,15 +135,6 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
     }
   }
 
-  function handleTestConnection() {
-    const err = validate()
-    if (err) {
-      toast.error(err)
-      return
-    }
-    toast.success('Form is valid — connection test is not yet implemented')
-  }
-
   const fieldStyle: React.CSSProperties = {
     backgroundColor: 'var(--color-surface)',
     border: '1px solid var(--color-border)',
@@ -323,17 +314,7 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
 
           {/* Actions */}
           <div className="flex items-center justify-between pt-2">
-            <button
-              type="button"
-              onClick={handleTestConnection}
-              className="rounded-lg px-3 py-2 text-xs transition-colors"
-              style={{
-                color: 'var(--color-text-secondary)',
-                border: '1px solid var(--color-border)',
-              }}
-            >
-              Test Connection
-            </button>
+            <div />
             <div className="flex gap-3">
               <button
                 type="button"

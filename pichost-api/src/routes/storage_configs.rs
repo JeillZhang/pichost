@@ -63,7 +63,12 @@ fn build_response(config: &UserStorageConfig) -> UserStorageConfigResponse {
     }
 }
 
-async fn check_config_limit(pool: &PgPool, user_id: Uuid) -> Result<(), AppError> {
+async fn check_config_limit(
+    max_configs: Option<u32>,
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    let max = max_configs.unwrap_or(5) as i64;
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM user_storage_configs WHERE user_id = $1",
     )
@@ -71,8 +76,10 @@ async fn check_config_limit(pool: &PgPool, user_id: Uuid) -> Result<(), AppError
     .fetch_one(pool)
     .await?;
 
-    if count >= 5 {
-        return Err(AppError::bad_request("最多只能创建5个存储配置"));
+    if count >= max {
+        return Err(AppError::bad_request(
+            format!("最多只能创建{}个存储配置", max),
+        ));
     }
     Ok(())
 }
@@ -160,6 +167,48 @@ fn merge_config_detail(
     detail
 }
 
+fn api_base_for_provider(provider: &str) -> Option<&str> {
+    match provider {
+        "github" => Some("https://api.github.com"),
+        "gitcode" => Some("https://api.gitcode.com/api/v5"),
+        _ => None,
+    }
+}
+
+async fn verify_repo_access(
+    provider: &str,
+    token: &str,
+    repo: &str,
+) -> Result<(), AppError> {
+    let api_base = api_base_for_provider(provider)
+        .ok_or_else(|| AppError::bad_request("不支持的存储类型"))?;
+    let url = format!("{}/repos/{}", api_base, repo);
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("User-Agent", "pichost/0.15.0")
+        .send()
+        .await
+        .map_err(|e| AppError::bad_request(format!("无法连接仓库: {}", e)))?;
+
+    match resp.status().as_u16() {
+        200 | 302 => Ok(()),
+        401 | 403 => Err(AppError::bad_request(
+            "Token 无效或无权限访问此仓库",
+        )),
+        404 => Err(AppError::bad_request("仓库不存在，请检查 owner/repo")),
+        code => {
+            let body = resp.text().await.unwrap_or_default();
+            Err(AppError::bad_request(format!(
+                "仓库验证失败 ({}): {}",
+                code,
+                body,
+            )))
+        }
+    }
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────
 
 /// GET /api/v1/users/me/storage-configs
@@ -194,8 +243,10 @@ pub async fn create_config(
         ));
     }
 
-    check_config_limit(&state.pool, user.id).await?;
+    check_config_limit(state.config.storage_max_user_configs, &state.pool, user.id).await?;
     check_name_unique(&state.pool, user.id, &req.name).await?;
+
+    verify_repo_access(&req.provider, &req.token, &req.repo).await?;
 
     let encryption_key = state
         .config

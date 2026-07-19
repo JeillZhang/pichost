@@ -503,6 +503,15 @@ fn validate_upload_configs(configs: &[UserStorageConfig]) -> Result<(), ApiError
 
 // ── Storage / DB persistence helpers ───────────────────────────────────────
 
+/// Maps a `StorageError` to an HTTP status code and error message.
+fn storage_error_response(e: &pichost_core::error::StorageError) -> (StatusCode, String) {
+    use pichost_core::error::StorageError;
+    match e {
+        StorageError::PayloadTooLarge(m) => (StatusCode::PAYLOAD_TOO_LARGE, m.clone()),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
 /// Writes bytes to the given storage backend and builds the public URL.
 /// Returns `(storage_key, url, backend_name)`.
 async fn write_to_storage(
@@ -513,16 +522,13 @@ async fn write_to_storage(
     bytes: &[u8],
     mime_type: &str,
 ) -> Result<(String, String, String), ApiError> {
-    let storage_key = format!("{}/{}", user_id, public_key);
-    storage
-        .put(&storage_key, bytes, mime_type)
+    let storage_key = storage
+        .put(&format!("{}/{}", user_id, public_key), bytes, mime_type)
         .await
         .map_err(|e| {
             tracing::warn!("Storage write failed on {}: {e}", storage.backend_name());
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "storage write failed"})),
-            )
+            let (status, msg) = storage_error_response(&e);
+            (status, Json(serde_json::json!({"error": msg})))
         })?;
     let backend_name = storage.backend_name().to_string();
     let url = if backend_name == "local" {
@@ -784,13 +790,26 @@ pub async fn process_upload(
     let (width, height) = image_dimensions(&bytes);
 
     let mut results = Vec::with_capacity(configs.len());
-    for config in &configs {
+
+    if configs.len() == 1 {
         let result = upload_to_single_backend(
-            state, user, config, &encryption_key,
+            state, user, &configs[0], &encryption_key,
             &bytes, &file_name, &sha256, &mime_type, width, height,
         )
         .await?;
         results.push(result);
+    } else if configs.len() >= 2 {
+        let fut0 = upload_to_single_backend(
+            state, user, &configs[0], &encryption_key,
+            &bytes, &file_name, &sha256, &mime_type, width, height,
+        );
+        let fut1 = upload_to_single_backend(
+            state, user, &configs[1], &encryption_key,
+            &bytes, &file_name, &sha256, &mime_type, width, height,
+        );
+        let (r0, r1) = tokio::join!(fut0, fut1);
+        results.push(r0?);
+        results.push(r1?);
     }
 
     Ok(results)

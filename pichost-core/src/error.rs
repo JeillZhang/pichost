@@ -17,6 +17,8 @@ pub enum StorageError {
     ConnectionFailed(String),
     #[error("config error: {0}")]
     Config(String),
+    #[error("payload too large: {0}")]
+    PayloadTooLarge(String),
 }
 
 #[derive(Debug, Error)]
@@ -66,7 +68,16 @@ impl IntoResponse for AppError {
             Self::Validation(m) => (StatusCode::BAD_REQUEST, m.clone()),
             Self::Upload(m) => (StatusCode::BAD_REQUEST, m.clone()),
             Self::RateLimited => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
-            Self::Storage(_) | Self::Internal(_) => {
+            Self::Storage(e) => match e {
+                StorageError::PayloadTooLarge(m) => {
+                    (StatusCode::PAYLOAD_TOO_LARGE, m.clone())
+                }
+                _ => {
+                    tracing::warn!("{:?}", self);
+                    (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
+                }
+            },
+            Self::Internal(_) => {
                 tracing::warn!("{:?}", self);
                 (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
