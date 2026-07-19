@@ -57,6 +57,19 @@ pub fn decrypt_token(encoded: &str, key: &[u8; 32]) -> Result<String, CryptoErro
     String::from_utf8(plaintext).map_err(|_| CryptoError::Decrypt)
 }
 
+/// Decode a base64-encoded 32-byte key string into `[u8; 32]`.
+pub fn decode_key(encoded: &str) -> Result<[u8; 32], CryptoError> {
+    let bytes = BASE64.decode(encoded).map_err(|_| {
+        CryptoError::InvalidKey(0)
+    })?;
+    if bytes.len() != 32 {
+        return Err(CryptoError::InvalidKey(bytes.len()));
+    }
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&bytes);
+    Ok(key)
+}
+
 /// Mask a token for API responses (show first 4 and last 4 chars).
 pub fn mask_token(token: &str) -> String {
     if token.len() <= 8 {
