@@ -36,6 +36,8 @@ pub struct Image {
     pub webp_url: Option<String>,
     pub status: ImageStatus,
     pub storage_config_id: Option<Uuid>,
+    #[serde(default)]
+    pub category_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -81,6 +83,16 @@ pub struct GitConfigDetail {
     pub repo: String,
     pub branch: String,
     pub path_prefix: Option<String>,
+}
+
+/// A user-created image category, supporting up to 2 levels of nesting.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct Category {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub name: String,
+    pub parent_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
 }
 
 /// API 响应用于掩码 token 的配置视图
