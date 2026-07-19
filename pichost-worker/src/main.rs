@@ -14,6 +14,7 @@ mod fonts;
 mod pipeline;
 mod processor;
 mod queue;
+mod watermark;
 
 /// Bundled state shared across all worker tasks.
 struct WorkerState {
