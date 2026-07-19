@@ -131,7 +131,8 @@
 - Bump version on every feature (`0.1.0` → `0.2.0`) and bugfix (`0.1.0` → `0.1.1`).
 - Before planning/developing, read `.omo/summary/summary_and_next.md` and `docs/superpowers/` first.
 - Update `docs/superpowers/specs` target spec docs TODO list after each phase.
-- After each plan completes, update `.omo/summary/summary_and_next.md`.
+- After each plan completes, update `.omo/summary/summary_and_next.md` to summarize the suggestions for next feature implementions, what had been implemented.
 - Clean up temp files, Docker containers after each development phase.
 - When a command hangs >120s, cancel and retry.
 - PR creation: create the PR and share the link — the user handles merge.
+- Rust function or method should less than 50 lines, and <= 120 characters for each line.
