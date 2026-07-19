@@ -185,9 +185,10 @@ impl Default for AppConfig {
 
 #[allow(clippy::result_large_err)]
 pub fn load_config() -> Result<AppConfig, figment::Error> {
-    Figment::new()
+    let figment = Figment::new()
         .merge(Serialized::defaults(AppConfig::default()))
         .merge(Toml::file("config.toml").nested())
-        .merge(Env::prefixed("PICHOST_").global())
-        .extract()
+        .merge(Env::prefixed("PICHOST_").split("_"));
+
+    figment.extract()
 }
