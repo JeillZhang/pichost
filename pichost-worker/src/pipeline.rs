@@ -22,7 +22,6 @@ pub enum PipelineError {
     Thumbnail(String),
     #[error("webp conversion failed: {0}")]
     Webp(String),
-    #[allow(dead_code)]
     #[error("watermark error: {0}")]
     Watermark(String),
     #[error("database update failed: {0}")]
@@ -41,8 +40,8 @@ pub async fn process_task(
 ) -> Result<(), PipelineError> {
     let backend = resolve_backend(pool, router, config, task).await?;
 
-    let (img, fmt, _bytes) = read_source_image(backend.as_ref(), task).await?;
-    let (width, height) = (img.width() as i32, img.height() as i32);
+    let (raw_img, fmt, _bytes) = read_source_image(backend.as_ref(), task).await?;
+    let (width, height) = (raw_img.width() as i32, raw_img.height() as i32);
 
     // Fetch watermark config from user record for post-processing watermarking.
     let watermark_config: Option<pichost_core::models::WatermarkConfig> = sqlx::query_scalar::<_, Option<serde_json::Value>>(
@@ -54,8 +53,14 @@ pub async fn process_task(
     .map_err(|e| PipelineError::Database(format!("Failed to fetch watermark config: {e}")))?
     .flatten()
     .and_then(|v| serde_json::from_value(v).ok());
-    // TODO(T6): watermark_config will be applied to img before variant generation
-    let _watermark_config = watermark_config;
+    // Apply watermark if configured
+    let img = match watermark_config {
+        Some(ref wm_cfg) if wm_cfg.enabled && !wm_cfg.text.is_empty() => {
+            crate::watermark::apply_watermark(&raw_img, wm_cfg)
+                .map_err(PipelineError::Watermark)?
+        }
+        _ => raw_img,
+    };
 
     let thumb_key = format!("{}/thumb.{}", task.user_id, task.image_id);
     let webp_key = format!("{}/webp.{}", task.user_id, task.image_id);
