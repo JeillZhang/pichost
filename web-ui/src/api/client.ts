@@ -62,6 +62,7 @@ export interface ImageInfo {
   status: string
   thumbnail_url: string | null
   webp_url: string | null
+  category_id: string | null
   created_at: string
   storage_config?: StorageConfigInfo | null
 }
@@ -77,6 +78,7 @@ export interface PaginatedListParams {
   order?: 'asc' | 'desc'
   search?: string
   storage_config_id?: string
+  category_id?: string
 }
 
 export interface PaginatedResponse<T> {
@@ -218,6 +220,7 @@ export async function listImages(
   if (params.order) searchParams.set('order', params.order)
   if (params.search) searchParams.set('search', params.search)
   if (params.storage_config_id) searchParams.set('storage_config_id', params.storage_config_id)
+  if (params.category_id) searchParams.set('category_id', params.category_id)
   const qs = searchParams.toString()
   return api.get(`images${qs ? `?${qs}` : ''}`).json<PaginatedResponse<ImageInfo>>()
 }
@@ -295,6 +298,21 @@ export interface StorageConfigInfo {
   provider: string
 }
 
+export interface CategoryTreeNode {
+  id: string
+  name: string
+  parent_id: string | null
+  children: CategoryTreeNode[]
+}
+
+export interface Category {
+  id: string
+  user_id: string
+  name: string
+  parent_id: string | null
+  created_at: string
+}
+
 export async function batchDeleteImages(ids: string[]): Promise<BatchDeleteResult> {
   return api.post('images/batch-delete', { json: { ids } }).json<BatchDeleteResult>()
 }
@@ -322,6 +340,50 @@ export async function deleteStorageConfig(id: string): Promise<void> {
 
 export async function setDefaultStorageConfig(id: string): Promise<void> {
   return api.post(`users/me/storage-configs/${id}/default`).json()
+}
+
+export async function listCategories(): Promise<CategoryTreeNode[]> {
+  return api.get('categories').json()
+}
+
+export async function createCategory(data: {
+  name: string
+  parent_id?: string | null
+}): Promise<Category> {
+  return api.post('categories', { json: data }).json()
+}
+
+export async function getCategory(id: string): Promise<Category> {
+  return api.get(`categories/${id}`).json()
+}
+
+export async function updateCategory(
+  id: string,
+  data: { name?: string },
+): Promise<Category> {
+  return api.patch(`categories/${id}`, { json: data }).json()
+}
+
+export async function deleteCategory(id: string): Promise<void> {
+  await api.delete(`categories/${id}`)
+}
+
+export async function moveImageToCategory(
+  imageId: string,
+  categoryId: string,
+): Promise<{ message: string }> {
+  return api.post(`images/${imageId}/move`, {
+    json: { category_id: categoryId },
+  }).json()
+}
+
+export async function batchMoveImages(
+  imageIds: string[],
+  categoryId: string,
+): Promise<{ message: string; moved: number }> {
+  return api.post('images/batch-move', {
+    json: { image_ids: imageIds, category_id: categoryId },
+  }).json()
 }
 
 export default api

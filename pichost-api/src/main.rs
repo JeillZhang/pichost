@@ -81,11 +81,13 @@ fn image_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(routes::images::list_images))
         .route("/batch-delete", post(routes::images::batch_delete))
+        .route("/batch-move", post(routes::images::batch_move_images))
         .route("/{id}/links", get(routes::images::get_image_links))
         .route(
             "/{id}",
             get(routes::images::get_image).delete(routes::images::delete_image),
         )
+        .route("/{id}/move", post(routes::images::move_image))
         .route_layer(middleware::from_fn_with_state(
             state,
             rate_limit::rate_limit_general,
@@ -120,6 +122,27 @@ fn user_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
             post(routes::storage_configs::set_default),
         )
         .route("/oauth/link", post(routes::oauth::oauth_link))
+        .route_layer(middleware::from_fn_with_state(
+            state,
+            rate_limit::rate_limit_general,
+        ))
+        .route_layer(protected)
+}
+
+fn category_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
+    let protected =
+        middleware::from_fn_with_state(state.clone(), pichost_api::middleware::auth::require_auth);
+    Router::new()
+        .route(
+            "/",
+            get(routes::categories::list_categories).post(routes::categories::create_category),
+        )
+        .route(
+            "/{id}",
+            get(routes::categories::get_category)
+                .patch(routes::categories::update_category)
+                .delete(routes::categories::delete_category),
+        )
         .route_layer(middleware::from_fn_with_state(
             state,
             rate_limit::rate_limit_general,
@@ -178,6 +201,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .nest("/api/v1/images", upload_routes(state.clone()))
         .nest("/api/v1/images", image_routes(state.clone()))
         .nest("/api/v1/users", user_routes(state.clone()))
+        .nest("/api/v1/categories", category_routes(state.clone()))
         .nest("/api/v1/admin", admin_routes(state.clone()))
         .nest("/u", public_routes(state.clone()))
         .nest("/t", thumb_alias_routes(state.clone()))

@@ -159,12 +159,35 @@
 - `npm run build` ✅
 - 版本: `0.15.0` → **`0.15.1`**
 
+## P4-C: 图库分类/目录 ✅ (本次完成)
+
+参考 `docs/superpowers/specs/2026-07-19-pichost-p4-design.md` §4。
+
+### 分类系统
+- **数据库**: `categories` 表（`0009` 迁移）— 自引用 `parent_id`，应用层强制最大深度 2 级
+- **Rust 模型**: `Category` 结构体 (`sqlx::FromRow`)，`Image` 新增 `category_id: Option<Uuid>`
+- **API 端点**: 5 个分类 CRUD (`/api/v1/categories`)，树结构返回，`parent_id` 深度校验
+- **图片移动**: `POST /api/v1/images/:id/move` + `POST /api/v1/images/batch-move` — 分类所有权校验
+- **Gallery 过滤**: `GET /api/v1/images?category_id=uuid` — 新增 `ImageListQuery` 参数 + SQL WHERE 注入
+
+### 前端
+- **CategoryTree**: 侧栏树形组件 — 展开/折叠、选中高亮、右键菜单（重命名/删除）
+- **CRUD 弹窗**: 创建分类对话框（名称输入 + 回车保存）、内联重命名、删除确认对话框
+- **TanStack Query**: `useQuery(['categories'])` 树数据获取，`useMutation` 创建/更新/删除 + `invalidateQueries`
+- **Gallery 改造**: 双栏布局 — 左侧 256px 侧栏 + 右侧网格，`category_id` 同步到 URL searchParams
+- **ImageDetail**: 分类下拉选择器 — 缩进显示树结构，`moveImageToCategory` mutation
+
+### 验证
+- `cargo clippy --workspace -D warnings` ✅
+- `cargo test --workspace` ✅ (38 pass, 10 ignored)
+- `npm run build` ✅
+- 版本: `0.15.1` → **`0.16.0`**
+
 ## 待实施
 
 | 阶段 | 主题 | 依赖 |
 |------|------|------|
-| P4-B | 剪贴板粘贴 + URL 上传 | P4-A ✅ → **✅ 完成 (0.15.1)** |
-| P4-C | 图库分类/目录 | 无 |
+| P4-C | 图库分类/目录 | P4-A ✅ → **✅ 完成 (0.16.0)** |
 | P4-D | 服务端水印 | 无 |
 | P4-E | 客户端图片预处理 | 无 |
 | P4-F | 文件名保留 + 重命名 | 无 |
@@ -173,4 +196,4 @@
 | P4-I | 系统配置管理 | 无 |
 
 **B–I 互不依赖**，可在 P4-A 完成后并行开发。
-**下一步**: P4-B 或 P4-C 任选其一。
+**下一步**: P4-D 或 P4-E 任选其一。

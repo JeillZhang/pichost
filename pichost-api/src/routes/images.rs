@@ -66,6 +66,7 @@ async fn count_user_images(
     user_id: Uuid,
     search_term: &str,
     config_id: Option<Uuid>,
+    category_id: Option<Uuid>,
 ) -> Result<i64, RouteError> {
     let log_err = |e: sqlx::Error| {
         tracing::warn!("Image count query failed: {e}");
@@ -75,26 +76,46 @@ async fn count_user_images(
         )
     };
     if let Some(cid) = config_id {
-        if search_term.is_empty() {
+        if let Some(cat_id) = category_id {
+            if search_term.is_empty() {
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM images WHERE user_id = $1 \
+                     AND storage_config_id = $2 AND category_id = $3",
+                ).bind(user_id).bind(cid).bind(cat_id)
+                .fetch_one(pool).await.map_err(log_err)
+            } else {
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM images WHERE user_id = $1 \
+                     AND original_name ILIKE $2 AND storage_config_id = $3 \
+                     AND category_id = $4",
+                ).bind(user_id).bind(format!("%{}%", search_term)).bind(cid).bind(cat_id)
+                .fetch_one(pool).await.map_err(log_err)
+            }
+        } else if search_term.is_empty() {
             sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM images WHERE user_id = $1 AND storage_config_id = $2",
-            )
-            .bind(user_id)
-            .bind(cid)
-            .fetch_one(pool)
-            .await
-            .map_err(log_err)
+                "SELECT COUNT(*) FROM images WHERE user_id = $1 \
+                 AND storage_config_id = $2",
+            ).bind(user_id).bind(cid)
+            .fetch_one(pool).await.map_err(log_err)
         } else {
             sqlx::query_scalar::<_, i64>(
                 "SELECT COUNT(*) FROM images WHERE user_id = $1 \
                  AND original_name ILIKE $2 AND storage_config_id = $3",
-            )
-            .bind(user_id)
-            .bind(format!("%{}%", search_term))
-            .bind(cid)
-            .fetch_one(pool)
-            .await
-            .map_err(log_err)
+            ).bind(user_id).bind(format!("%{}%", search_term)).bind(cid)
+            .fetch_one(pool).await.map_err(log_err)
+        }
+    } else if let Some(cat_id) = category_id {
+        if search_term.is_empty() {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM images WHERE user_id = $1 AND category_id = $2",
+            ).bind(user_id).bind(cat_id)
+            .fetch_one(pool).await.map_err(log_err)
+        } else {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM images WHERE user_id = $1 \
+                 AND original_name ILIKE $2 AND category_id = $3",
+            ).bind(user_id).bind(format!("%{}%", search_term)).bind(cat_id)
+            .fetch_one(pool).await.map_err(log_err)
         }
     } else if search_term.is_empty() {
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM images WHERE user_id = $1")
@@ -119,6 +140,7 @@ async fn fetch_user_images(
     pool: &DbPool, user_id: Uuid, sort_col: &str, order_dir: &str,
     search_term: &str, limit: i64, offset: i64,
     config_id: Option<Uuid>,
+    category_id: Option<Uuid>,
 ) -> Result<Vec<ImageRow>, RouteError> {
     let map_err = |e: sqlx::Error| {
         tracing::warn!("Image list query failed: {e}");
@@ -126,24 +148,72 @@ async fn fetch_user_images(
     };
     let base = "SELECT i.id,i.public_key,i.original_name,i.url,i.mime_type,i.file_size,\
                 i.sha256,i.width,i.height,i.status,i.thumbnail_url,i.webp_url,\
-                i.created_at,i.storage_config_id,\
+                i.created_at,i.category_id,i.storage_config_id,\
                 c.name,c.provider \
                 FROM images i \
                 LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id";
     if let Some(cid) = config_id {
-        if search_term.is_empty() {
-            let sql = format!("{base} WHERE i.user_id = $1 AND i.storage_config_id = $2 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
-            sqlx::query_as::<_, ImageRow>(&sql).bind(user_id).bind(cid).bind(limit).bind(offset).fetch_all(pool).await.map_err(map_err)
+        if let Some(cat_id) = category_id {
+            if search_term.is_empty() {
+                let sql = format!("{base} WHERE i.user_id = $1 AND i.storage_config_id = $2 \
+                                   AND i.category_id = $3 ORDER BY {sort_col} {order_dir} \
+                                   LIMIT $4 OFFSET $5");
+                sqlx::query_as::<_, ImageRow>(&sql)
+                    .bind(user_id).bind(cid).bind(cat_id).bind(limit).bind(offset)
+                    .fetch_all(pool).await.map_err(map_err)
+            } else {
+                let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 \
+                                   AND i.storage_config_id = $3 AND i.category_id = $4 \
+                                   ORDER BY {sort_col} {order_dir} LIMIT $5 OFFSET $6");
+                sqlx::query_as::<_, ImageRow>(&sql)
+                    .bind(user_id).bind(format!("%{}%", search_term))
+                    .bind(cid).bind(cat_id).bind(limit).bind(offset)
+                    .fetch_all(pool).await.map_err(map_err)
+            }
+        } else if search_term.is_empty() {
+            let sql = format!("{base} WHERE i.user_id = $1 AND i.storage_config_id = $2 \
+                               ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
+            sqlx::query_as::<_, ImageRow>(&sql)
+                .bind(user_id).bind(cid).bind(limit).bind(offset)
+                .fetch_all(pool).await.map_err(map_err)
         } else {
-            let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 AND i.storage_config_id = $3 ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5");
-            sqlx::query_as::<_, ImageRow>(&sql).bind(user_id).bind(format!("%{}%", search_term)).bind(cid).bind(limit).bind(offset).fetch_all(pool).await.map_err(map_err)
+            let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 \
+                               AND i.storage_config_id = $3 \
+                               ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5");
+            sqlx::query_as::<_, ImageRow>(&sql)
+                .bind(user_id).bind(format!("%{}%", search_term))
+                .bind(cid).bind(limit).bind(offset)
+                .fetch_all(pool).await.map_err(map_err)
+        }
+    } else if let Some(cat_id) = category_id {
+        if search_term.is_empty() {
+            let sql = format!("{base} WHERE i.user_id = $1 AND i.category_id = $2 \
+                               ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
+            sqlx::query_as::<_, ImageRow>(&sql)
+                .bind(user_id).bind(cat_id).bind(limit).bind(offset)
+                .fetch_all(pool).await.map_err(map_err)
+        } else {
+            let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 \
+                               AND i.category_id = $3 \
+                               ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5");
+            sqlx::query_as::<_, ImageRow>(&sql)
+                .bind(user_id).bind(format!("%{}%", search_term))
+                .bind(cat_id).bind(limit).bind(offset)
+                .fetch_all(pool).await.map_err(map_err)
         }
     } else if search_term.is_empty() {
-        let sql = format!("{base} WHERE i.user_id = $1 ORDER BY {sort_col} {order_dir} LIMIT $2 OFFSET $3");
-        sqlx::query_as::<_, ImageRow>(&sql).bind(user_id).bind(limit).bind(offset).fetch_all(pool).await.map_err(map_err)
+        let sql = format!("{base} WHERE i.user_id = $1 ORDER BY {sort_col} {order_dir} \
+                           LIMIT $2 OFFSET $3");
+        sqlx::query_as::<_, ImageRow>(&sql)
+            .bind(user_id).bind(limit).bind(offset)
+            .fetch_all(pool).await.map_err(map_err)
     } else {
-        let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
-        sqlx::query_as::<_, ImageRow>(&sql).bind(user_id).bind(format!("%{}%", search_term)).bind(limit).bind(offset).fetch_all(pool).await.map_err(map_err)
+        let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 \
+                           ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
+        sqlx::query_as::<_, ImageRow>(&sql)
+            .bind(user_id).bind(format!("%{}%", search_term))
+            .bind(limit).bind(offset)
+            .fetch_all(pool).await.map_err(map_err)
     }
 }
 
@@ -301,10 +371,12 @@ pub async fn list_images(
     };
 
     let search_term = params.search.trim();
-    let total = count_user_images(&state.pool, user.id, search_term, params.storage_config_id).await?;
+    let total = count_user_images(
+        &state.pool, user.id, search_term, params.storage_config_id, params.category_id,
+    ).await?;
     let rows = fetch_user_images(
         &state.pool, user.id, sort_col, order_dir, search_term, limit, offset,
-        params.storage_config_id,
+        params.storage_config_id, params.category_id,
     )
     .await?;
     let items = map_rows_to_results(rows);
@@ -336,7 +408,7 @@ pub async fn get_image(
             sqlx::query_as::<_, ImageRow>(
                 "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size,\
                  i.sha256, i.width, i.height, i.status, i.thumbnail_url, i.webp_url, \
-                 i.created_at, i.storage_config_id, \
+                 i.created_at, i.category_id, i.storage_config_id, \
                  c.name, c.provider \
                  FROM images i \
                  LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id \
@@ -635,6 +707,113 @@ pub async fn batch_delete(
     let failed = body.ids.len().saturating_sub(deleted);
     tracing::info!(user_id = %user.id, requested = body.ids.len(), deleted, failed, "batch delete");
     Ok(Json(json!({"message": "batch delete completed", "deleted": deleted, "failed": failed})))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MoveImageRequest {
+    pub category_id: Uuid,
+}
+
+/// POST /api/v1/images/{id}/move — move an image to a category
+pub async fn move_image(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<MoveImageRequest>,
+) -> Result<Json<serde_json::Value>, RouteError> {
+    use pichost_core::models::Category;
+
+    let _cat = sqlx::query_as::<_, Category>(
+        "SELECT id, user_id, name, parent_id, created_at \
+         FROM categories WHERE id = $1 AND user_id = $2",
+    )
+    .bind(body.category_id)
+    .bind(user.id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
+    })?
+    .ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(json!({"error": "Category not found"})))
+    })?;
+
+    let result = sqlx::query(
+        "UPDATE images SET category_id = $1 WHERE id = $2 AND user_id = $3",
+    )
+    .bind(body.category_id)
+    .bind(id)
+    .bind(user.id)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
+    })?;
+
+    if result.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, Json(json!({"error": "Image not found"}))));
+    }
+    Ok(Json(json!({"message": "Image moved to category"})))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BatchMoveRequest {
+    pub image_ids: Vec<Uuid>,
+    pub category_id: Uuid,
+}
+
+/// POST /api/v1/images/batch-move — move multiple images to a category
+pub async fn batch_move_images(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+    Json(body): Json<BatchMoveRequest>,
+) -> Result<Json<serde_json::Value>, RouteError> {
+    use pichost_core::models::Category;
+
+    if body.image_ids.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "image_ids cannot be empty"})),
+        ));
+    }
+    if body.image_ids.len() > 100 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Maximum 100 images per batch move"})),
+        ));
+    }
+
+    let _cat = sqlx::query_as::<_, Category>(
+        "SELECT id, user_id, name, parent_id, created_at \
+         FROM categories WHERE id = $1 AND user_id = $2",
+    )
+    .bind(body.category_id)
+    .bind(user.id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
+    })?
+    .ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(json!({"error": "Category not found"})))
+    })?;
+
+    let result = sqlx::query(
+        "UPDATE images SET category_id = $1 WHERE user_id = $2 AND id = ANY($3)",
+    )
+    .bind(body.category_id)
+    .bind(user.id)
+    .bind(&body.image_ids)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
+    })?;
+
+    Ok(Json(json!({
+        "message": "Images moved to category",
+        "moved": result.rows_affected()
+    })))
 }
 
 #[derive(serde::Serialize)]

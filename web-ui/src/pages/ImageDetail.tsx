@@ -1,10 +1,25 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { getImage, deleteImage } from '../api/client'
+import { getImage, deleteImage, listCategories, moveImageToCategory, type CategoryTreeNode } from '../api/client'
 import LinkCard from '../components/LinkCard'
+
+function flattenCategories(
+  nodes: CategoryTreeNode[] | undefined,
+): { id: string; name: string; depth: number }[] {
+  if (!nodes) return []
+  const result: { id: string; name: string; depth: number }[] = []
+  function walk(items: CategoryTreeNode[], depth: number) {
+    for (const item of items) {
+      result.push({ id: item.id, name: item.name, depth })
+      if (item.children.length > 0) walk(item.children, depth + 1)
+    }
+  }
+  walk(nodes, 0)
+  return result
+}
 
 export default function ImageDetail() {
   const { id } = useParams<{ id: string }>()
@@ -17,6 +32,20 @@ export default function ImageDetail() {
     queryKey: ['image', id],
     queryFn: () => getImage(id!),
     enabled: !!id,
+  })
+
+  const { data: categories } = useQuery({
+    queryKey: ['categories'],
+    queryFn: listCategories,
+  })
+
+  const moveMutation = useMutation({
+    mutationFn: ({ imageId, categoryId }: { imageId: string; categoryId: string }) =>
+      moveImageToCategory(imageId, categoryId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['image', id] })
+      queryClient.invalidateQueries({ queryKey: ['images'] })
+    },
   })
 
   async function handleDelete() {
@@ -130,6 +159,32 @@ export default function ImageDetail() {
             {new Date(img.created_at).toLocaleString()}
           </span>
         </p>
+        <div className="mt-3">
+          <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">
+            Category
+          </label>
+          <select
+            value={img.category_id ?? ''}
+            onChange={(e) => {
+              const categoryId = e.target.value
+              if (categoryId) {
+                moveMutation.mutate({ imageId: id!, categoryId })
+              }
+            }}
+            disabled={moveMutation.isPending}
+            className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] disabled:opacity-50"
+          >
+            <option value="">None</option>
+            {categories && flattenCategories(categories).map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {'\u00A0\u00A0'.repeat(cat.depth)}{cat.name}
+              </option>
+            ))}
+          </select>
+          {moveMutation.isPending && (
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">Updating...</p>
+          )}
+        </div>
       </div>
 
       {/* Additional links */}

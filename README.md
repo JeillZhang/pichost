@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.15.1** — P2 complete, P4-A + P4-B. Git storage backends, URL upload, clipboard paste. 12 major features.
+**v0.16.0** — P4-A, P4-B, P4-C complete. Git storage backends, URL upload, clipboard paste, gallery categories. 13 major features.
 
 ## Stack
 
@@ -93,7 +93,7 @@ cd web-ui && npm install && npm run dev  # → http://localhost:5173
 ### Test & Lint
 
 ```bash
-cargo test --workspace                      # 14 pass, 10 ignored (need DB)
+cargo test --workspace                      # 38 pass, 10 ignored (need DB)
 cargo clippy --workspace -- -D warnings      # zero warnings required
 cd web-ui && npm run build                   # tsc -b && vite build
 ```
@@ -139,10 +139,12 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 |--------|------|------|-------|
 | POST | `/api/v1/images` | JWT | Multipart upload, auto-thumbnails |
 | POST | `/api/v1/images/upload-url` | JWT | Upload from URL (SSRF-protected download) |
-| GET | `/api/v1/images` | JWT | Paginated: `?page=&per_page=&sort=&order=&search=&storage_config_id=` |
+| GET | `/api/v1/images` | JWT | Paginated: `?page=&per_page=&sort=&order=&search=&storage_config_id=&category_id=` |
 | GET | `/api/v1/images/:id` | JWT | |
 | DELETE | `/api/v1/images/:id` | JWT | |
+| POST | `/api/v1/images/:id/move` | JWT | Move image to category: `{ category_id }` |
 | POST | `/api/v1/images/batch-delete` | JWT | `{ ids: UUID[] }`, max 100 |
+| POST | `/api/v1/images/batch-move` | JWT | Batch move to category: `{ image_ids: [...], category_id }`, max 100 |
 | GET | `/u/{public_key}` | No | Public image, cached 1 year |
 | GET | `/u/thumb/{id}` | No | Thumbnail variant |
 | GET | `/u/webp/{id}` | No | WebP variant |
@@ -151,6 +153,8 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | GET | `/api/v1/users/me/stats` | JWT | Storage usage + quota |
+| GET/POST | `/api/v1/categories` | JWT | Category CRUD: GET tree, POST create `{ name, parent_id? }` |
+| GET/PATCH/DELETE | `/api/v1/categories/:id` | JWT | Single category: GET, PATCH rename, DELETE cascades |
 | GET/POST | `/api/v1/users/me/storage-configs` | JWT | Git storage config management, GET all / POST create |
 | GET/PATCH/DELETE | `/api/v1/users/me/storage-configs/:id` | JWT | Single config: GET details, PATCH update, DELETE |
 | POST | `/api/v1/users/oauth/link` | JWT | Link OAuth after invite-code registration |
@@ -188,6 +192,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 - [x] RustFS storage backend — S3-compatible object storage (optional)
 - [x] **Git storage backend** — GitHub/GitCode via REST API, AES-256-GCM token encryption, CRUD management UI
 - [x] **Multi-backend upload** — select storage target per upload, parallel dual-backend write
+- [x] **Gallery categories** — 2-level hierarchy, sidebar tree, batch move, category filtering
 
 ## Project Structure
 
@@ -201,7 +206,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 ├── web-ui/                  React SPA — Zustand, TanStack Query, Tailwind CSS 4
 ├── nginx/
 │   └── nginx.conf           Reverse proxy + cache + rate limiting
-├── migrations/              8 SQL migrations (0001–0008)
+├── migrations/              9 SQL migrations (0001–0009)
 ├── Dockerfile.api           Multi-stage Rust build for API
 ├── Dockerfile.worker        Multi-stage Rust build for Worker
 ├── docker-compose.yml       Full stack: Nginx, API×2, Worker×2, PostgreSQL, Redis
