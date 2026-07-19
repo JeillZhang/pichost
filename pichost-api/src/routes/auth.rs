@@ -281,6 +281,12 @@ pub async fn register(
             let _ = state.cache.consume_invite_code(code, &user_id).await;
         }
     }
+    let storage_prefix = format!("users/{}", user_id);
+    let _ = sqlx::query("UPDATE users SET storage_prefix = $1 WHERE id = $2")
+        .bind(&storage_prefix)
+        .bind(user_id)
+        .execute(&state.pool)
+        .await;
     let (access_token, refresh_token, _ac, _rc) =
         generate_tokens(user_id, is_first_user, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
