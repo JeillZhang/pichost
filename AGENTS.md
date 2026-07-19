@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.15.1` — P4-A complete, P4-B clipboard/URL upload added. Bump patch for fixes, minor for features.
+- Version: `0.16.0` — P4-A, P4-B, P4-C complete. Git storage, URL upload, gallery categories. Bump patch for fixes, minor for features.
 
 ## Key Commands
 
@@ -26,7 +26,7 @@
 - **Copy `.env.example` → `.env`, edit `PICHOST_AUTH_JWT_SECRET`** (min 32 chars).
 - **Two DB URL vars**: `DATABASE_URL` (sqlx CLI helper, not consumed by app) and `PICHOST_DATABASE_URL` (consumed by figment config). For local dev only `PICHOST_DATABASE_URL` matters.
 - **sqlx queries are runtime-only** (uses `query_as`, `query_scalar` — no `query!` macro). No compile-time DB needed, no `sqlx prepare`.
-- **Migrations auto-apply** at API startup via `sqlx::migrate!()`. 8 migrations: `0001`-`0008`.
+- **Migrations auto-apply** at API startup via `sqlx::migrate!()`. 9 migrations: `0001`-`0009`.
 - `storage-local/` is gitignored, created at runtime by LocalStorage.
 - Prerequisites: Rust 1.96+, Node.js 22+, PostgreSQL 18, Redis 8.
 
@@ -56,6 +56,12 @@
 - JWT HS256 via `jsonwebtoken`. Access TTL = 900s, refresh TTL = 30 days.
 - Redis blacklist: `bl:{jti}` for logout. Blacklist check **fails closed** (`unwrap_or(true)`) — Redis down = all auth fails.
 - OAuth: GitHub/Google OAuth2 via `oauth2` crate. Users must register via invite code first, then link OAuth in Settings. Callback URLs: `{public_url}/api/v1/auth/oauth/{provider}/callback`.
+
+### Gallery Categories
+- Users can create a 2-level category hierarchy via `categories` table (migration 0009).
+- Images assigned via `category_id` FK with `ON DELETE SET NULL`.
+- Category CRUD at `/api/v1/categories`, image move at `/images/:id/move` and batch-move at `/images/batch-move`.
+- Gallery supports `?category_id=` filter parameter.
 
 ### Upload
 - Multipart → magic byte check (`infer::is_image`) → SHA256 hash → per-user dedup → random 6-char hex public key → write storage → INSERT (status=`'active'`) → enqueue worker task.
@@ -107,11 +113,15 @@
 | GET | `/images` | JWT | Paginated: `page`, `per_page` (default 20, max 100), `sort` (created_at/file_size/original_name), `order` (asc/desc), `search` (ILIKE) |
 | GET | `/images/:id` | JWT | |
 | DELETE | `/images/:id` | JWT | |
+| POST | `/images/:id/move` | JWT | Move image to category: `{ category_id }` |
 | POST | `/images/batch-delete` | JWT | `{ ids: UUID[] }`, max 100 |
+| POST | `/images/batch-move` | JWT | Batch move to category: `{ image_ids: [...], category_id }`, max 100 |
 | GET | `/u/:public_key` | No | Public image serve |
 | GET | `/u/thumb/:id` | No | Thumbnail |
 | GET | `/u/webp/:id` | No | WebP |
 | GET | `/users/me/stats` | JWT | Includes `storage_quota` |
+| GET/POST | `/categories` | JWT | Category CRUD: GET tree, POST create `{ name, parent_id? }` |
+| GET/PATCH/DELETE | `/categories/:id` | JWT | Single category: GET, PATCH rename, DELETE cascades |
 | GET/POST | `/users/me/storage-configs` | JWT | Git storage config CRUD. GET all, POST create |
 | GET/PATCH/DELETE | `/users/me/storage-configs/:id` | JWT | Single config: GET, PATCH update, DELETE |
 | POST | `/users/oauth/link` | JWT | `{ provider, code }` |
@@ -125,7 +135,7 @@
 
 ## Testing
 
-- **Unit tests** (14 pass): `storage_test.rs` (4), `gallery_test.rs` (4), `admin_test.rs` (6 ignored — need DB/Redis), `health_test.rs` (1 ignored), `rustfs_test.rs` (2 pass + 3 ignored — need S3).
+- **Unit tests** (38 pass): `storage_test.rs` (4), `gallery_test.rs` (8), `category_test.rs` (5), `admin_test.rs` (6 ignored — need DB/Redis), `pichost-api` unit (11), `pichost-core` (8), `health_test.rs` (1 ignored), `rustfs_test.rs` (2 pass + 3 ignored — need S3).
 - **Run focused**: `cargo test -p pichost-api test_image_list` — matches test name prefix.
 - **pichost-core tests** need `tokio` features `["rt", "macros"]`.
 - Integration tests in `pichost-api/tests/` require PostgreSQL + Redis (ignored by default).
