@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Trash2, Pencil } from 'lucide-react'
-import api, { type UserInfo } from '../api/client'
-import EditUserDialog from '../components/EditUserDialog'
+import api, { type UserInfo } from '../../api/client'
+import EditUserDialog from '../../components/EditUserDialog'
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
