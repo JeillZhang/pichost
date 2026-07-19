@@ -4,6 +4,7 @@ import { Toaster } from 'sonner'
 import { useAuthStore } from './stores/auth'
 import Layout from './components/Layout'
 import Login from './pages/Login'
+import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import Gallery from './pages/Gallery'
 import ImageDetail from './pages/ImageDetail'
@@ -45,6 +46,7 @@ export default function App() {
           }
         />
         <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
         <Route
           path="/dashboard"
           element={

@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Copy, Clock } from 'lucide-react'
 import { toast } from 'sonner'
-import { listInviteCodes, type InviteCodeInfo } from '../api/client'
-import CreateInviteDialog from '../components/CreateInviteDialog'
+import { listInviteCodes, type InviteCodeInfo } from '../../api/client'
+import CreateInviteDialog from '../../components/CreateInviteDialog'
 
 function formatDate(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleDateString('en-US', {

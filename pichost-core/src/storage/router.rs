@@ -30,6 +30,15 @@ impl StorageRouter {
             .unwrap_or_else(|| self.default_backend())
     }
 
+    /// Route to the backend identified by user's storage_backend preference.
+    /// Falls back to the default backend if the user's preferred backend is
+    /// not registered.
+    pub fn for_user(&self, backend: &str) -> &Arc<dyn StorageBackend> {
+        self.backends
+            .get(backend)
+            .unwrap_or_else(|| self.default_backend())
+    }
+
     /// Get a backend by exact name. Returns `None` if not found.
     pub fn get(&self, name: &str) -> Option<&Arc<dyn StorageBackend>> {
         self.backends.get(name)
@@ -103,6 +112,17 @@ mod tests {
         let router = super::StorageRouter::new(backends, "local".into());
         assert_eq!(router.for_backend("rustfs").backend_name(), "rustfs");
         assert_eq!(router.for_backend("nonexistent").backend_name(), "local");
+    }
+
+    #[test]
+    fn test_router_for_user() {
+        let mut backends: HashMap<String, Arc<dyn StorageBackend>> = HashMap::new();
+        backends.insert("local".into(), Arc::new(MockBackend("local")));
+        backends.insert("rustfs".into(), Arc::new(MockBackend("rustfs")));
+
+        let router = super::StorageRouter::new(backends, "local".into());
+        assert_eq!(router.for_user("rustfs").backend_name(), "rustfs");
+        assert_eq!(router.for_user("nonexistent").backend_name(), "local");
     }
 
     #[test]

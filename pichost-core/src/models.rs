@@ -10,6 +10,7 @@ pub struct User {
     pub password_hash: String,
     pub storage_backend: String,
     pub storage_prefix: String,
+    pub storage_quota: Option<i64>,
     pub is_admin: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -41,6 +42,7 @@ pub struct Image {
 #[serde(rename_all = "snake_case")]
 pub enum ImageStatus {
     Pending,
+    Active,
     Processing,
     Ready,
     Failed,
@@ -50,6 +52,7 @@ impl std::fmt::Display for ImageStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Pending => write!(f, "pending"),
+            Self::Active => write!(f, "active"),
             Self::Processing => write!(f, "processing"),
             Self::Ready => write!(f, "ready"),
             Self::Failed => write!(f, "failed"),
@@ -66,6 +69,36 @@ pub struct UploadTask {
     pub status: String,
     pub error: Option<String>,
     pub retry_count: i32,
+    pub max_retries: i32,
     pub created_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
+}
+
+/// Response for GET /users/me — full user profile
+#[derive(Debug, Clone, Serialize)]
+pub struct UserProfile {
+    pub id: Uuid,
+    pub username: String,
+    pub email: Option<String>,
+    pub storage_backend: String,
+    pub storage_prefix: String,
+    pub storage_quota: Option<i64>,
+    pub is_admin: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Request body for PATCH /users/me
+#[derive(Debug, Deserialize)]
+pub struct UpdateProfileRequest {
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub storage_backend: Option<String>,
+}
+
+/// Request body for POST /users/me/password
+#[derive(Debug, Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
 }

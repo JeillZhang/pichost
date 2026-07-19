@@ -10,6 +10,29 @@ export interface UserInfo {
   created_at: string
 }
 
+export interface UserProfile {
+  id: string
+  username: string
+  email: string | null
+  storage_backend: string
+  storage_prefix: string
+  storage_quota: number | null
+  is_admin: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface UpdateProfileRequest {
+  username?: string
+  email?: string
+  storage_backend?: string
+}
+
+export interface ChangePasswordRequest {
+  current_password: string
+  new_password: string
+}
+
 export interface UserStats {
   total_images: number
   total_size: number
@@ -178,6 +201,18 @@ export async function getImage(id: string): Promise<ImageInfo> {
 
 export async function getUserStats(): Promise<UserStats> {
   return api.get('users/me/stats').json<UserStats>()
+}
+
+export async function getUserMe(): Promise<UserProfile> {
+  return api.get('users/me').json<UserProfile>()
+}
+
+export async function updateUserMe(body: UpdateProfileRequest): Promise<UserProfile> {
+  return api.patch('users/me', { json: body }).json<UserProfile>()
+}
+
+export async function changePassword(body: ChangePasswordRequest): Promise<{ message: string }> {
+  return api.post('users/me/password', { json: body }).json<{ message: string }>()
 }
 
 export async function createInviteCode(ttlDays?: number): Promise<CreateInviteResponse> {

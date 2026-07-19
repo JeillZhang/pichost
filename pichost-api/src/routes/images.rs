@@ -305,6 +305,62 @@ pub async fn public_get_thumb(
         .unwrap())
 }
 
+/// GET /t/{public_key} — serve thumbnail by public_key (alias)
+pub async fn public_get_thumb_by_key(
+    State(state): State<Arc<AppState>>,
+    Path(public_key): Path<String>,
+) -> Result<Response, RouteError> {
+    let row: (Option<String>, String) = sqlx::query_as(
+        "SELECT thumbnail_key, storage_backend FROM images \
+         WHERE public_key = $1 AND status IN ('active', 'ready')",
+    )
+    .bind(&public_key)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Thumbnail-by-key query failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "internal server error"})),
+        )
+    })?
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "image not found"})),
+        )
+    })?;
+
+    let (thumb_key, storage_backend) = row;
+    let thumb_key = thumb_key.ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "thumbnail not yet generated"})),
+        )
+    })?;
+
+    let backend = state.router.for_backend(&storage_backend);
+    let bytes = state
+        .cache
+        .cached_thumb(&format!("thumb:pk:{}", public_key), 3600, async {
+            backend.get(&thumb_key).await.map_err(|e| {
+                tracing::warn!("Thumb storage read by key failed: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "thumbnail not found"})),
+                )
+            })
+        })
+        .await?;
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, mime_for_thumb_key(&thumb_key))
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+        .body(axum::body::Body::from(bytes))
+        .unwrap())
+}
+
 /// GET /u/webp/{image_id} — serve generated WebP (unauthenticated)
 pub async fn public_get_webp(
     State(state): State<Arc<AppState>>,
@@ -427,4 +483,49 @@ pub async fn batch_delete(
     let failed = body.ids.len().saturating_sub(deleted);
     tracing::info!(user_id = %user.id, requested = body.ids.len(), deleted, failed, "batch delete");
     Ok(Json(json!({"message": "batch delete completed", "deleted": deleted, "failed": failed})))
+}
+
+#[derive(serde::Serialize)]
+pub struct ImageLinks {
+    pub url: String,
+    pub markdown: String,
+    pub html: String,
+    pub bbcode: String,
+}
+
+/// GET /api/v1/images/{id}/links — get share link formats only
+pub async fn get_image_links(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+    Path(image_id): Path<Uuid>,
+) -> Result<Json<ImageLinks>, RouteError> {
+    use crate::services::html_escape;
+
+    let row: (String, String, String) = sqlx::query_as(
+        "SELECT public_key, original_name, url FROM images WHERE id = $1 AND user_id = $2",
+    )
+    .bind(image_id)
+    .bind(user.id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Image links query failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "internal server error"})),
+        )
+    })?
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "image not found"})),
+        )
+    })?;
+
+    let (_public_key, original_name, url) = row;
+    let markdown = format!("![{}]({})", original_name, url);
+    let html = format!("<img src=\"{}\" alt=\"{}\" />", url, html_escape(&original_name));
+    let bbcode = format!("[img]{}[/img]", url);
+
+    Ok(Json(ImageLinks { url, markdown, html, bbcode }))
 }

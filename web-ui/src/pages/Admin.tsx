@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import AdminStats from './AdminStats'
-import AdminUsers from './AdminUsers'
-import AdminInvites from './AdminInvites'
+import AdminStats from './admin/AdminStats'
+import AdminUsers from './admin/AdminUsers'
+import AdminInvites from './admin/AdminInvites'
 
 type Tab = 'overview' | 'users' | 'invites'
 
