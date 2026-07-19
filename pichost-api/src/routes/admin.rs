@@ -6,10 +6,17 @@ use axum::{
     http::StatusCode,
     Extension, Json,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
 use pichost_core::StorageRouter;
+
+fn deserialize_optional_jsonb<'de, D>(deserializer: D) -> Result<Option<Option<serde_json::Value>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Some(Option::deserialize(deserializer)?))
+}
 
 use crate::app::AppState;
 use crate::cache::{Cache, InviteCodeInfo};
@@ -59,6 +66,7 @@ type UserRow = (
     String,
     chrono::DateTime<chrono::Utc>,
     Option<i64>,
+    Option<serde_json::Value>,
 );
 
 struct UserUpdateParams<'a> {
@@ -69,6 +77,7 @@ struct UserUpdateParams<'a> {
     is_admin: bool,
     storage_backend: &'a str,
     storage_quota: Option<i64>,
+    watermark_config: Option<serde_json::Value>,
     password_hash: Option<&'a str>,
 }
 
@@ -87,7 +96,7 @@ struct StatsCacheParams {
 fn map_user_rows(rows: Vec<UserRow>) -> Vec<UserInfo> {
     rows.into_iter()
         .map(
-            |(id, username, email, _is_admin, _storage_backend, _created_at, storage_quota)| UserInfo {
+            |(id, username, email, _is_admin, _storage_backend, _created_at, storage_quota, _watermark_config)| UserInfo {
                 id,
                 username,
                 email,
@@ -133,7 +142,8 @@ async fn execute_user_update(params: UserUpdateParams<'_>) -> Result<(), AdminEr
     if let Some(ph) = params.password_hash {
         sqlx::query(
             r#"UPDATE users SET username = $1, email = $2, is_admin = $3,
-               storage_backend = $4, password_hash = $5, storage_quota = $6 WHERE id = $7"#,
+               storage_backend = $4, password_hash = $5, storage_quota = $6,
+               watermark_config = $7 WHERE id = $8"#,
         )
         .bind(params.username)
         .bind(params.email)
@@ -141,6 +151,7 @@ async fn execute_user_update(params: UserUpdateParams<'_>) -> Result<(), AdminEr
         .bind(params.storage_backend)
         .bind(ph)
         .bind(params.storage_quota)
+        .bind(params.watermark_config)
         .bind(params.user_id)
         .execute(params.pool)
         .await
@@ -151,13 +162,15 @@ async fn execute_user_update(params: UserUpdateParams<'_>) -> Result<(), AdminEr
     } else {
         sqlx::query(
             r#"UPDATE users SET username = $1, email = $2, is_admin = $3,
-               storage_backend = $4, storage_quota = $5 WHERE id = $6"#,
+               storage_backend = $4, storage_quota = $5,
+               watermark_config = $6 WHERE id = $7"#,
         )
         .bind(params.username)
         .bind(params.email)
         .bind(params.is_admin)
         .bind(params.storage_backend)
         .bind(params.storage_quota)
+        .bind(params.watermark_config)
         .bind(params.user_id)
         .execute(params.pool)
         .await
@@ -173,9 +186,9 @@ async fn fetch_and_merge_user_fields(
     pool: &DbPool,
     user_id: Uuid,
     body: &UpdateUserBody,
-) -> Result<(String, Option<String>, bool, String, Option<i64>), AdminError> {
-    let existing = sqlx::query_as::<_, (String, Option<String>, bool, String, Option<i64>)>(
-        r#"SELECT username, email, is_admin, storage_backend, storage_quota FROM users WHERE id = $1"#,
+) -> Result<(String, Option<String>, bool, String, Option<i64>, Option<serde_json::Value>), AdminError> {
+    let existing = sqlx::query_as::<_, (String, Option<String>, bool, String, Option<i64>, Option<serde_json::Value>)>(
+        r#"SELECT username, email, is_admin, storage_backend, storage_quota, watermark_config FROM users WHERE id = $1"#,
     )
     .bind(user_id)
     .fetch_optional(pool)
@@ -194,7 +207,7 @@ async fn fetch_and_merge_user_fields(
         )
     })?;
 
-    let (username, email, is_admin, storage_backend, storage_quota) = existing;
+    let (username, email, is_admin, storage_backend, storage_quota, watermark_config) = existing;
     let new_username = body.username.clone().unwrap_or(username);
     let new_email = body.email.clone().or(email);
     let new_is_admin = body.is_admin.unwrap_or(is_admin);
@@ -204,8 +217,13 @@ async fn fetch_and_merge_user_fields(
     } else {
         body.storage_quota.or(storage_quota)
     };
+    let new_watermark_config = match body.watermark_config {
+        Some(Some(ref v)) => Some(v.clone()),
+        Some(None) => None,
+        None => watermark_config,
+    };
 
-    Ok((new_username, new_email, new_is_admin, new_storage_backend, new_storage_quota))
+    Ok((new_username, new_email, new_is_admin, new_storage_backend, new_storage_quota, new_watermark_config))
 }
 
 // ── delete_user helpers ────────────────────────────────────────────────
@@ -437,7 +455,7 @@ pub async fn list_users(
         })?;
 
     let rows = sqlx::query_as::<_, UserRow>(
-        r#"SELECT id, username, email, is_admin, storage_backend, created_at, storage_quota
+        r#"SELECT id, username, email, is_admin, storage_backend, created_at, storage_quota, watermark_config
            FROM users ORDER BY created_at DESC OFFSET $1 LIMIT $2"#,
     )
     .bind(offset)
@@ -466,6 +484,12 @@ pub struct UpdateUserBody {
     pub is_admin: Option<bool>,
     pub storage_backend: Option<String>,
     pub storage_quota: Option<i64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_jsonb",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub watermark_config: Option<Option<serde_json::Value>>,
 }
 
 /// PATCH /api/v1/admin/users/{id} — update user fields (admin only)
@@ -483,7 +507,7 @@ pub async fn update_user(
         ));
     }
 
-    let (new_username, new_email, new_is_admin, new_storage_backend, new_storage_quota) =
+    let (new_username, new_email, new_is_admin, new_storage_backend, new_storage_quota, new_watermark_config) =
         fetch_and_merge_user_fields(&state.pool, user_id, &body).await?;
 
     let password_hash = hash_password_if_provided(&body.password).await?;
@@ -496,6 +520,7 @@ pub async fn update_user(
         is_admin: new_is_admin,
         storage_backend: &new_storage_backend,
         storage_quota: new_storage_quota,
+        watermark_config: new_watermark_config,
         password_hash: password_hash.as_deref(),
     })
     .await?;

@@ -19,6 +19,7 @@ pub struct AuthUser {
     pub id: Uuid,
     pub is_admin: bool,
     pub storage_quota: Option<i64>,
+    pub watermark_config: Option<pichost_core::models::WatermarkConfig>,
 }
 
 pub async fn require_auth(
@@ -89,18 +90,22 @@ async fn check_blacklist_and_quota(
     let user_id: Uuid = claims.sub.parse().map_err(|_| {
         (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "invalid token subject"})))
     })?;
-    let quota: Option<i64> = sqlx::query_scalar(
-        "SELECT storage_quota FROM users WHERE id = $1",
+    let row = sqlx::query_as::<_, (Option<i64>, Option<serde_json::Value>)>(
+        "SELECT storage_quota, watermark_config FROM users WHERE id = $1",
     )
     .bind(user_id)
     .fetch_optional(&state.pool)
     .await
     .map_err(|e| {
-        tracing::warn!("Auth quota lookup failed: {e}");
+        tracing::warn!("Auth user lookup failed: {e}");
         (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal server error"})))
-    })?
-    .flatten();
-    Ok(AuthUser { id: user_id, is_admin: claims.is_admin, storage_quota: quota })
+    })?;
+
+    let (quota, wm_raw) = row.unwrap_or((None, None));
+    let watermark_config = wm_raw.and_then(|v| {
+        serde_json::from_value::<pichost_core::models::WatermarkConfig>(v).ok()
+    });
+    Ok(AuthUser { id: user_id, is_admin: claims.is_admin, storage_quota: quota, watermark_config })
 }
 
 /// Middleware that rejects non-admin users with 403 Forbidden.

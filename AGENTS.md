@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.16.0` — P4-A, P4-B, P4-C complete. Git storage, URL upload, gallery categories. Bump patch for fixes, minor for features.
+- Version: `0.16.1` — P4-D complete. Server-side watermark overlay with configurable text/position/font. Bump patch for fixes, minor for features.
 
 ## Key Commands
 
@@ -13,7 +13,7 @@
 |---|---|---|
 | Build all | `cargo build --workspace` | |
 | Check only api | `cargo check -p pichost-api` | Fast compile-check |
-| Test all | `cargo test --workspace` | 14 pass, 10 ignored (need DB/Redis/S3) |
+| Test all | `cargo test --workspace` | 63 pass, 10 ignored (need DB/Redis/S3) |
 | Lint | `cargo clippy --workspace -- -D warnings` | Zero warnings required |
 | Run API server | `cargo run -p pichost-api` | Requires PostgreSQL + Redis |
 | Frontend dev | `cd web-ui && npm run dev` | Vite proxies `/api`, `/u` → `localhost:3000` |
@@ -26,7 +26,7 @@
 - **Copy `.env.example` → `.env`, edit `PICHOST_AUTH_JWT_SECRET`** (min 32 chars).
 - **Two DB URL vars**: `DATABASE_URL` (sqlx CLI helper, not consumed by app) and `PICHOST_DATABASE_URL` (consumed by figment config). For local dev only `PICHOST_DATABASE_URL` matters.
 - **sqlx queries are runtime-only** (uses `query_as`, `query_scalar` — no `query!` macro). No compile-time DB needed, no `sqlx prepare`.
-- **Migrations auto-apply** at API startup via `sqlx::migrate!()`. 9 migrations: `0001`-`0009`.
+- **Migrations auto-apply** at API startup via `sqlx::migrate!()`. 10 migrations: `0001`-`0010`.
 - `storage-local/` is gitignored, created at runtime by LocalStorage.
 - Prerequisites: Rust 1.96+, Node.js 22+, PostgreSQL 18, Redis 8.
 
@@ -85,6 +85,19 @@
 - `GET /u/{public_key}` → `Cache-Control: public, max-age=31536000, immutable`.
 - Nginx proxy_cache on `/u/` and `/t/` (IMAGE_CACHE 50MB/1h).
 - Status check: only `'active'` or `'ready'` images served — others return 404.
+
+### Font embedding (watermark)
+- `pichost-worker/src/fonts.rs`: `load_font()`, `builtin_font_names()`, `scaled_font_size()`.
+- 5 built-in TTF fonts at `pichost-worker/fonts/`: NotoSansSC-Regular, NotoSans-Regular, Arial, DejaVuSans, FiraCode-Regular.
+- Uses `rusttype` for font parsing, `imageproc` for image drawing, `ab_glyph` for font loading in watermark pipeline.
+
+### Watermark
+- `pichost-worker/src/watermark.rs`: `apply_watermark()` — text overlay on `DynamicImage` with position/color/tile support.
+- Applied in `process_task()` between `read_source_image()` and `process_image_variants()` — all variants inherit the watermark.
+- Config stored as JSONB on `users.watermark_config` (migration `0010`). `WatermarkConfig` and `WatermarkPosition` types in `pichost_core::models`.
+- PATCH endpoints (`/users/me`, `/admin/users/:id`) accept `watermark_config` with absent/null/value semantics. Admin `AuthUser` middleware reads watermark_config.
+- Frontend: `WatermarkSettings` component in Settings page — enable toggle, text/font/color/position/rotation/scale fields.
+- Watermark is enabled only when `watermark_config.enabled == true` and `text` is non-empty. Disabled/empty → no-op (returns clone).
 
 ### Image status quirk
 - DB default is `'pending'`, but upload INSERT hardcodes `'active'`. The `ImageStatus` enum has `Pending/Processing/Ready/Failed` but code checks string `"active"`. If adding status transitions, reconcile this.
