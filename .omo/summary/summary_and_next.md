@@ -183,6 +183,14 @@
 - `npm run build` ✅
 - 版本: `0.15.1` → **`0.16.0`**
 
+### P4-C 分类内联 CRUD 完成 ✅ (本次完成)
+- **Context Menu**: 右键菜单 — Rename/Delete 操作入口，点击外部自动关闭
+- **内联重命名**: 点击 Rename → 节点文字变为 input 输入框，Enter 保存、Escape/失焦取消
+- **创建模态框**: 标题输入 + 回车/按钮创建，支持 `parent_id`（从侧栏新建时自动设为根级）
+- **删除确认**: 二次确认对话框，提示级联删除子分类和图片自动取消关联
+- **简化接口**: CategoryTree 移除 `onAddCategory`/`onEditCategory`/`onDeleteCategory` props，Gallery.tsx 删除对应的 stub handler 和旧模态框
+- **验证**: `cargo clippy` ✅, `cargo test` ✅(38 pass), `npm run build` ✅
+
 ## 待实施
 
 | 阶段 | 主题 | 依赖 |
