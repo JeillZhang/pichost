@@ -86,14 +86,21 @@ impl UploadResult {
             }),
             _ => None,
         };
+        let markdown = format!("![{}]({})", row.original_name, row.url);
+        let html = format!(
+            "<img src=\"{}\" alt=\"{}\" />",
+            row.url,
+            html_escape(&row.original_name)
+        );
+        let bbcode = format!("[img]{}[/img]", row.url);
         Self {
             id: row.id,
             public_key: row.public_key,
             original_name: row.original_name,
             url: row.url,
-            markdown: String::new(),
-            html: String::new(),
-            bbcode: String::new(),
+            markdown,
+            html,
+            bbcode,
             sha256: row.sha256,
             file_size: row.file_size,
             mime_type: row.mime_type,
@@ -257,7 +264,7 @@ async fn check_upload_quotas(
 
     if let Some(quota) = user.storage_quota {
         let current_usage: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(file_size), 0) FROM images WHERE user_id = $1",
+            "SELECT COALESCE(SUM(file_size)::BIGINT, 0) FROM images WHERE user_id = $1",
         )
         .bind(user.id)
         .fetch_one(&state.pool)
