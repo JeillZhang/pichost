@@ -25,3 +25,39 @@ fn test_image_category_id_optional() {
     let img2: pichost_core::models::Image = serde_json::from_str(json_no_cat).unwrap();
     assert_eq!(img2.category_id, None);
 }
+
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+struct CreateCategoryRequest {
+    name: String,
+    parent_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateCategoryRequest {
+    name: Option<String>,
+}
+
+#[test]
+fn test_create_category_request_serde() {
+    let json = r#"{"name":"Blog","parent_id":null}"#;
+    let req: CreateCategoryRequest = serde_json::from_str(json).unwrap();
+    assert_eq!(req.name, "Blog");
+    assert_eq!(req.parent_id, None);
+}
+
+#[test]
+fn test_create_category_request_with_parent() {
+    let json = r#"{"name":"Rust","parent_id":"00000000-0000-0000-0000-000000000001"}"#;
+    let req: CreateCategoryRequest = serde_json::from_str(json).unwrap();
+    assert_eq!(req.name, "Rust");
+    assert!(req.parent_id.is_some());
+}
+
+#[test]
+fn test_update_category_request_partial() {
+    let json = r#"{"name":"New Name"}"#;
+    let req: UpdateCategoryRequest = serde_json::from_str(json).unwrap();
+    assert_eq!(req.name, Some("New Name".into()));
+}
