@@ -65,7 +65,9 @@ export interface ImageInfo {
   created_at: string
 }
 
-export interface UploadResult extends ImageInfo {}
+export interface UploadResult extends ImageInfo {
+  storage_configs?: StorageConfigInfo[]
+}
 
 export interface PaginatedListParams {
   page?: number
@@ -73,6 +75,7 @@ export interface PaginatedListParams {
   sort?: 'created_at' | 'file_size' | 'original_name'
   order?: 'asc' | 'desc'
   search?: string
+  storage_config_id?: string
 }
 
 export interface PaginatedResponse<T> {
@@ -176,9 +179,15 @@ export async function login(
     .json<AuthResponse>()
 }
 
-export async function uploadImage(file: File): Promise<UploadResult> {
+export async function uploadImage(
+  file: File,
+  storageConfigIds?: string[],
+): Promise<UploadResult> {
   const formData = new FormData()
   formData.append('file', file)
+  if (storageConfigIds?.length) {
+    formData.append('storage_config_ids', storageConfigIds.join(','))
+  }
   return api.post('images', { body: formData }).json<UploadResult>()
 }
 
@@ -191,6 +200,7 @@ export async function listImages(
   if (params.sort) searchParams.set('sort', params.sort)
   if (params.order) searchParams.set('order', params.order)
   if (params.search) searchParams.set('search', params.search)
+  if (params.storage_config_id) searchParams.set('storage_config_id', params.storage_config_id)
   const qs = searchParams.toString()
   return api.get(`images${qs ? `?${qs}` : ''}`).json<PaginatedResponse<ImageInfo>>()
 }
@@ -231,8 +241,70 @@ export interface BatchDeleteResult {
   failed: number
 }
 
+export interface UserStorageConfig {
+  id: string
+  name: string
+  provider: 'github' | 'gitcode' | 'local'
+  repo: string
+  branch: string
+  path_prefix: string | null
+  is_default: boolean
+  token_masked: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateStorageConfigRequest {
+  name: string
+  provider: 'github' | 'gitcode'
+  token: string
+  repo: string
+  branch?: string
+  path_prefix?: string
+  is_default?: boolean
+}
+
+export interface UpdateStorageConfigRequest {
+  name?: string
+  token?: string
+  repo?: string
+  branch?: string
+  path_prefix?: string
+}
+
+export interface StorageConfigInfo {
+  id: string
+  name: string
+  provider: string
+}
+
 export async function batchDeleteImages(ids: string[]): Promise<BatchDeleteResult> {
   return api.post('images/batch-delete', { json: { ids } }).json<BatchDeleteResult>()
+}
+
+export async function listStorageConfigs(): Promise<UserStorageConfig[]> {
+  return api.get('users/me/storage-configs').json<UserStorageConfig[]>()
+}
+
+export async function createStorageConfig(
+  data: CreateStorageConfigRequest,
+): Promise<UserStorageConfig> {
+  return api.post('users/me/storage-configs', { json: data }).json<UserStorageConfig>()
+}
+
+export async function updateStorageConfig(
+  id: string,
+  data: UpdateStorageConfigRequest,
+): Promise<UserStorageConfig> {
+  return api.patch(`users/me/storage-configs/${id}`, { json: data }).json<UserStorageConfig>()
+}
+
+export async function deleteStorageConfig(id: string): Promise<void> {
+  return api.delete(`users/me/storage-configs/${id}`).json()
+}
+
+export async function setDefaultStorageConfig(id: string): Promise<void> {
+  return api.post(`users/me/storage-configs/${id}/default`).json()
 }
 
 export default api
