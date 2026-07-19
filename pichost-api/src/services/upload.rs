@@ -50,7 +50,7 @@ pub struct UploadResult {
 /// Full image-row tuple used by list_images / get_image queries.
 /// Fields: id, public_key, original_name, url, mime_type, file_size,
 ///         sha256, width, height, status, thumbnail_url, webp_url, created_at,
-///         storage_config_id
+///         storage_config_id, config_name, config_provider
 pub(crate) type ImageRow = (
     Uuid,
     String,
@@ -66,6 +66,8 @@ pub(crate) type ImageRow = (
     Option<String>,
     DateTime<Utc>,
     Option<Uuid>,
+    Option<String>,
+    Option<String>,
 );
 
 impl UploadResult {
@@ -73,7 +75,15 @@ impl UploadResult {
     /// bbcode link formats from original_name + url.
     pub(crate) fn from_row(row: ImageRow) -> Self {
         let (id, pk, name, url, mime, size, sha256, w, h, status, thumb, webp,
-             created, _cfg_id) = row;
+             created, cfg_id, cfg_name, cfg_provider) = row;
+        let storage_config = match (cfg_id, cfg_name, cfg_provider) {
+            (Some(id), Some(name), Some(provider)) => Some(StorageConfigInfo {
+                id,
+                name,
+                provider,
+            }),
+            _ => None,
+        };
         Self {
             id,
             public_key: pk,
@@ -91,7 +101,7 @@ impl UploadResult {
             thumbnail_url: thumb,
             webp_url: webp,
             created_at: created,
-            storage_config: None,
+            storage_config,
         }
     }
 }

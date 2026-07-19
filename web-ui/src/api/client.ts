@@ -63,6 +63,7 @@ export interface ImageInfo {
   thumbnail_url: string | null
   webp_url: string | null
   created_at: string
+  storage_config?: StorageConfigInfo | null
 }
 
 export interface UploadResult extends ImageInfo {

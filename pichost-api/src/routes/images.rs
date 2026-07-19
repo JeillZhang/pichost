@@ -123,22 +123,25 @@ async fn fetch_user_images(
         tracing::warn!("Image list query failed: {e}");
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal server error"})))
     };
-    let base = "SELECT id,public_key,original_name,url,mime_type,file_size,\
-                sha256,width,height,status,thumbnail_url,webp_url,\
-                created_at,storage_config_id FROM images";
+    let base = "SELECT i.id,i.public_key,i.original_name,i.url,i.mime_type,i.file_size,\
+                i.sha256,i.width,i.height,i.status,i.thumbnail_url,i.webp_url,\
+                i.created_at,i.storage_config_id,\
+                c.name,c.provider \
+                FROM images i \
+                LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id";
     if let Some(cid) = config_id {
         if search_term.is_empty() {
-            let sql = format!("{base} WHERE user_id = $1 AND storage_config_id = $2 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
+            let sql = format!("{base} WHERE i.user_id = $1 AND i.storage_config_id = $2 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
             sqlx::query_as::<_, ImageRow>(&sql).bind(user_id).bind(cid).bind(limit).bind(offset).fetch_all(pool).await.map_err(map_err)
         } else {
-            let sql = format!("{base} WHERE user_id = $1 AND original_name ILIKE $2 AND storage_config_id = $3 ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5");
+            let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 AND i.storage_config_id = $3 ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5");
             sqlx::query_as::<_, ImageRow>(&sql).bind(user_id).bind(format!("%{}%", search_term)).bind(cid).bind(limit).bind(offset).fetch_all(pool).await.map_err(map_err)
         }
     } else if search_term.is_empty() {
-        let sql = format!("{base} WHERE user_id = $1 ORDER BY {sort_col} {order_dir} LIMIT $2 OFFSET $3");
+        let sql = format!("{base} WHERE i.user_id = $1 ORDER BY {sort_col} {order_dir} LIMIT $2 OFFSET $3");
         sqlx::query_as::<_, ImageRow>(&sql).bind(user_id).bind(limit).bind(offset).fetch_all(pool).await.map_err(map_err)
     } else {
-        let sql = format!("{base} WHERE user_id = $1 AND original_name ILIKE $2 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
+        let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
         sqlx::query_as::<_, ImageRow>(&sql).bind(user_id).bind(format!("%{}%", search_term)).bind(limit).bind(offset).fetch_all(pool).await.map_err(map_err)
     }
 }
@@ -284,10 +287,13 @@ pub async fn get_image(
         .cache
         .cached_meta(&id, 600, async {
             sqlx::query_as::<_, ImageRow>(
-                "SELECT id, public_key, original_name, url, mime_type, file_size,\
-                 sha256, width, height, status, thumbnail_url, webp_url, \
-                 created_at, storage_config_id \
-                 FROM images WHERE id = $1 AND user_id = $2",
+                "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size,\
+                 i.sha256, i.width, i.height, i.status, i.thumbnail_url, i.webp_url, \
+                 i.created_at, i.storage_config_id, \
+                 c.name, c.provider \
+                 FROM images i \
+                 LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id \
+                 WHERE i.id = $1 AND i.user_id = $2",
             )
             .bind(id)
             .bind(user.id)
