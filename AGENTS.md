@@ -130,8 +130,13 @@
 - Docs under `docs/` are tracked deliverables — commit them.
 - Bump version on every feature (`0.1.0` → `0.2.0`) and bugfix (`0.1.0` → `0.1.1`).
 - Before planning/developing, read `.omo/summary/summary_and_next.md` and `docs/superpowers/` first.
+- All diagrams in spec docs under `docs/superpowers/specs/` must use UML or Mermaid modeling diagrams — no other diagram formats.
 - Update `docs/superpowers/specs` target spec docs TODO list after each phase.
-- After each plan completes, update `.omo/summary/summary_and_next.md` to summarize the suggestions for next feature implementions, what had been implemented.
+- After each plan completes, update `.omo/summary/summary_and_next.md` to document:
+  - What features have been implemented in this phase
+  - What features are still pending/unimplemented
+  - The next plan / next steps
+  - Any remaining issues or known limitations
 - Clean up temp files, Docker containers after each development phase.
 - When a command hangs >120s, cancel and retry.
 - PR creation: create the PR and share the link — the user handles merge.
