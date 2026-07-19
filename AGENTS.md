@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.14.0` — P2 complete. Bump patch for fixes, minor for features.
+- Version: `0.15.0` — P4-A complete. Bump patch for fixes, minor for features.
 
 ## Key Commands
 
@@ -26,7 +26,7 @@
 - **Copy `.env.example` → `.env`, edit `PICHOST_AUTH_JWT_SECRET`** (min 32 chars).
 - **Two DB URL vars**: `DATABASE_URL` (sqlx CLI helper, not consumed by app) and `PICHOST_DATABASE_URL` (consumed by figment config). For local dev only `PICHOST_DATABASE_URL` matters.
 - **sqlx queries are runtime-only** (uses `query_as`, `query_scalar` — no `query!` macro). No compile-time DB needed, no `sqlx prepare`.
-- **Migrations auto-apply** at API startup via `sqlx::migrate!()`. 7 migrations: `0001`-`0007`.
+- **Migrations auto-apply** at API startup via `sqlx::migrate!()`. 8 migrations: `0001`-`0008`.
 - `storage-local/` is gitignored, created at runtime by LocalStorage.
 - Prerequisites: Rust 1.96+, Node.js 22+, PostgreSQL 18, Redis 8.
 
@@ -40,11 +40,13 @@
   - `PICHOST_SERVER_PUBLIC_URL` — for OAuth callbacks and link generation
   - OAuth: `PICHOST_AUTH_OAUTH_GITHUB_CLIENT_ID`, `..._SECRET`, same for Google
   - `PICHOST_STORAGE_LOCAL_BASE_PATH`, `PICHOST_STORAGE_RUSTFS_*` — storage config
+  - `PICHOST_STORAGE_MAX_USER_CONFIGS` — max Git storage configs per user (default 5)
+  - `PICHOST_AUTH_TOKEN_ENCRYPTION_KEY` — AES-256-GCM key for Git token encryption
 - No `config.toml` in repo — env vars are the intended override mechanism.
 
 ## CRATE BOUNDARIES
 
-- **pichost-core** (`pichost_core`): Domain models, config, error types, `StorageBackend` trait + `LocalStorage`/`RustfsStorage` impls + `StorageRouter`. No web/framework deps.
+- **pichost-core** (`pichost_core`): Domain models, config, error types, `StorageBackend` trait + `LocalStorage`/`RustfsStorage`/`GitStorage` impls + `StorageRouter`. No web/framework deps.
 - **pichost-api** (`pichost_api`): Axum server — routes, middleware, services, DB pool, Redis cache. Depends on `pichost-core`.
 - **pichost-worker**: Background image processing binary — thumbnail/WebP generation via Redis queue. Depends on `pichost-core`.
 
@@ -60,6 +62,16 @@
 - Dedup: per-user, per-SHA256. Same user, same content → 200 with existing metadata.
 - Storage quota: enforced before write. `SUM(file_size)` per user, 413 on exceed. NULL = unlimited, default 1 GB.
 - Multi-file: frontend `useUploadQueue` hook, MAX_CONCURRENT=3, per-file UploadCard progress.
+
+### Storage Backends
+- **LocalStorage**: filesystem-based, base path `./storage-local/` (configurable).
+- **RustfsStorage**: S3-compatible object storage via `aws-sdk-s3`. Supports custom endpoint for non-AWS providers (MinIO, etc.).
+- **GitStorage**: push files to GitHub/GitCode repositories via Contents REST API. No clone-commit-push — API direct write.
+  - Tokens encrypted at rest via AES-256-GCM (`PICHOST_AUTH_TOKEN_ENCRYPTION_KEY`).
+  - Per-user storage configs stored in `user_storage_configs` table, managed via `/api/v1/users/me/storage-configs` CRUD.
+  - Rate limits: GitHub 5,000 req/h, GitCode 400 req/min. 429 → retry-after.
+  - Size limits: GitCode 20 MB, GitHub 100 MB (PicHost's own 50 MB cap applies first).
+- **StorageRouter**: `RwLock<HashMap>` for dynamic backend routing via `storage_config_id`. Git backends created/cached on demand, evicted on config change.
 
 ### Public serving
 - `GET /u/{public_key}` → `Cache-Control: public, max-age=31536000, immutable`.
@@ -98,6 +110,8 @@
 | GET | `/u/thumb/:id` | No | Thumbnail |
 | GET | `/u/webp/:id` | No | WebP |
 | GET | `/users/me/stats` | JWT | Includes `storage_quota` |
+| GET/POST | `/users/me/storage-configs` | JWT | Git storage config CRUD. GET all, POST create |
+| GET/PATCH/DELETE | `/users/me/storage-configs/:id` | JWT | Single config: GET, PATCH update, DELETE |
 | POST | `/users/oauth/link` | JWT | `{ provider, code }` |
 | GET | `/admin/stats` | JWT+Admin | |
 | GET/POST | `/admin/invites` | JWT+Admin | |
@@ -137,6 +151,12 @@
   - What features are still pending/unimplemented
   - The next plan / next steps
   - Any remaining issues or known limitations
+- After each feature phase completes AND `cargo test --workspace` + `cargo clippy --workspace -- -D warnings` pass, automatically:
+  - Update `AGENTS.md`: sync version, migrations count, new API routes, architecture notes, config vars, crate boundaries — any structural change introduced in the phase.
+  - Update `README.md`: sync version tagline, Features checklist, Project Structure tree, API endpoint tables, migrations count, and config var table — any user-facing change introduced in the phase.
+  - Update `.omo/summary/summary_and_next.md`: add a new "## {phase}: {title} ✅ (本次完成)" section documenting what was built, verification results, and updating the "## 待实施" table if needed.
+  - Commit the three files together as `docs: auto-sync AGENTS.md, README.md, summary after {phase} completion`.
+  - Do NOT wait for the user to request this — it is a mandatory post-phase step.
 - Clean up temp files, Docker containers after each development phase.
 - When a command hangs >120s, cancel and retry.
 - PR creation: create the PR and share the link — the user handles merge.
