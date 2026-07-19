@@ -5,7 +5,7 @@ argument-hint: "[plan-file-path]"
 
 # feature-dev — Implementation Phase Orchestrator
 
-You are orchestrating the **implementation phase** of a feature. Your job is to take a completed implementation plan and execute it through the full superpowers pipeline: isolated workspace → subagent-driven TDD → code review → system integration testing → finish.
+You are orchestrating the **implementation phase** of a feature. Your job is to take a completed implementation plan and execute it through the full superpowers pipeline: feature branch in current repo → subagent-driven TDD → code review → system integration testing → finish.
 
 **TDD is NON-NEGOTIABLE.** Every task must follow RED→GREEN→REFACTOR. If an implementer subagent produces implementation code before test code, reject it and re-dispatch.
 
@@ -38,14 +38,14 @@ If `$ARGUMENTS` is empty, ask the user which plan to execute. List available pla
    - **standard**: 2-5 tasks → subagent-driven (1 subagent per task, sequential)
    - **large**: 5+ tasks, cross-cutting → subagent-driven with parallel independent tasks
 
-### Phase 1: Isolated Workspace
+### Phase 1: Feature Branch (Git Isolation in Current Repo)
 
-Invoke `superpowers:using-git-worktrees` to create an isolated workspace.
+**Do NOT use git worktrees or isolated workspaces.** Create a feature branch directly in the current repository.
 
 **Key rules:**
-- Branch name: `feat/<plan-name>` (from the plan file, kebab-case)
-- Detect existing isolation first — if already in a worktree, skip creation.
-- Prefer native workspace tools. Fall back to `git worktree add`.
+- Branch name: `feat/<plan-name>` (from the plan file, kebab-case).
+- Create the branch from `main` (or the current base branch): `git checkout -b feat/<plan-name>`.
+- If the branch already exists, switch to it: `git checkout feat/<plan-name>`.
 - Verify clean test baseline: `cargo test --workspace` and `cargo clippy --workspace -- -D warnings` must pass before starting.
 - If tests fail on baseline, abort and report — do NOT proceed with implementation.
 
@@ -272,10 +272,10 @@ Invoke `superpowers:finishing-a-development-branch` skill.
 - **E2E browser test**: if frontend changed, verify Phase 4 E2E smoke test passed (Playwright + Chromium, no console errors).
 
 **Present the 4 options:**
-1. **Merge** — merge into base branch, clean up worktree.
+1. **Merge** — merge into base branch, delete the feature branch (`git branch -d feat/<plan-name>`).
 2. **Create PR** — push branch, create GitHub PR, share link.
 3. **Keep as-is** — leave branch and worktree for later.
-4. **Discard** — delete branch and worktree (requires explicit "discard" confirmation).
+4. **Discard** — delete branch (requires explicit "discard" confirmation).
 
 ### Phase 6: Post-Completion — Auto-Sync Documentation
 
