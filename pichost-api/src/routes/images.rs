@@ -16,6 +16,7 @@ use crate::middleware::auth::AuthUser;
 use crate::services::upload::{
     self, ImageListQuery, ImageListResponse, ImageRow, UploadResult,
 };
+use crate::services::upload_url;
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -167,6 +168,52 @@ pub async fn upload_handler(
         extract_upload_parts(&mut multipart).await?;
 
     match upload::process_upload(&state, &user, bytes, file_name, storage_config_ids).await {
+        Ok(results) => {
+            crate::metrics::UPLOADS_TOTAL.inc();
+            Ok((StatusCode::CREATED, Json(results)))
+        }
+        Err(e) => {
+            crate::metrics::UPLOAD_ERRORS_TOTAL.inc();
+            Err(e)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// URL upload
+// ---------------------------------------------------------------------------
+
+/// Request body for URL-based image upload.
+#[derive(Debug, serde::Deserialize)]
+pub struct UrlUploadRequest {
+    pub url: String,
+    #[serde(default)]
+    pub storage_config_ids: Option<Vec<Uuid>>,
+}
+
+fn validate_url_not_empty(url: &str) -> Result<(), RouteError> {
+    if url.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "url field is required"})),
+        ));
+    }
+    Ok(())
+}
+
+/// POST /api/v1/images/upload-url — upload from a remote URL (protected)
+pub async fn url_upload_handler(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+    Json(payload): Json<UrlUploadRequest>,
+) -> Result<(StatusCode, Json<Vec<UploadResult>>), RouteError> {
+    validate_url_not_empty(&payload.url)?;
+
+    let (bytes, file_name) =
+        upload_url::fetch_image_from_url(&payload.url).await?;
+
+    match upload::process_upload(&state, &user, bytes, file_name, payload.storage_config_ids).await
+    {
         Ok(results) => {
             crate::metrics::UPLOADS_TOTAL.inc();
             Ok((StatusCode::CREATED, Json(results)))

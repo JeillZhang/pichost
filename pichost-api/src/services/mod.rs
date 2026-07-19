@@ -1,4 +1,5 @@
 pub mod upload;
+pub mod upload_url;
 
 /// Escape special HTML characters to prevent XSS in generated tags.
 /// Handles &, <, >, and ".

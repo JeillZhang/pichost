@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.15.0** — P2 complete. Git storage backends, token encryption, multi-backend router. 12 major features.
+**v0.15.1** — P2 complete, P4-A + P4-B. Git storage backends, URL upload, clipboard paste. 12 major features.
 
 ## Stack
 
@@ -138,6 +138,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | POST | `/api/v1/images` | JWT | Multipart upload, auto-thumbnails |
+| POST | `/api/v1/images/upload-url` | JWT | Upload from URL (SSRF-protected download) |
 | GET | `/api/v1/images` | JWT | Paginated: `?page=&per_page=&sort=&order=&search=&storage_config_id=` |
 | GET | `/api/v1/images/:id` | JWT | |
 | DELETE | `/api/v1/images/:id` | JWT | |
@@ -177,6 +178,8 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 - [x] **Multi-file upload** — concurrent queue (max 3), per-file progress cards
 - [x] **Batch management** — delete up to 100 images at once
 - [x] Public sharing — `/u/{public_key}` with full-format links (URL/MD/HTML/BBCode)
+- [x] **Clipboard paste** — Ctrl+V image upload from clipboard
+- [x] **URL upload** — paste image URL, server downloads + SSRF protection
 - [x] Admin panel — user management, invite codes, system stats, quota control
 - [x] **Rate limiting** — 4 strategies (auth, upload, general, public), Redis-backed
 - [x] Nginx — reverse proxy, proxy_cache, gzip, upstream least_conn

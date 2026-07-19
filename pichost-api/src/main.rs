@@ -67,6 +67,7 @@ fn upload_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         middleware::from_fn_with_state(state.clone(), pichost_api::middleware::auth::require_auth);
     Router::new()
         .route("/", post(routes::images::upload_handler))
+        .route("/upload-url", post(routes::images::url_upload_handler))
         .route_layer(middleware::from_fn_with_state(
             state,
             rate_limit::rate_limit_upload,

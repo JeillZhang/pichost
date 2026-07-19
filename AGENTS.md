@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.15.0` — P4-A complete. Bump patch for fixes, minor for features.
+- Version: `0.15.1` — P4-A complete, P4-B clipboard/URL upload added. Bump patch for fixes, minor for features.
 
 ## Key Commands
 
@@ -59,6 +59,7 @@
 
 ### Upload
 - Multipart → magic byte check (`infer::is_image`) → SHA256 hash → per-user dedup → random 6-char hex public key → write storage → INSERT (status=`'active'`) → enqueue worker task.
+- **URL upload**: `POST /images/upload-url` downloads image from URL with SSRF protection (scheme allowlist, DNS-level private IP blocking, redirect/size/timeout limits), then feeds into the same `process_upload()` pipeline.
 - Dedup: per-user, per-SHA256. Same user, same content → 200 with existing metadata.
 - Storage quota: enforced before write. `SUM(file_size)` per user, 413 on exceed. NULL = unlimited, default 1 GB.
 - Multi-file: frontend `useUploadQueue` hook, MAX_CONCURRENT=3, per-file UploadCard progress.
@@ -102,6 +103,7 @@
 | GET | `/auth/oauth/{github,google}` | No | Redirect to provider |
 | GET | `/auth/oauth/{provider}/callback` | No | Returns JWT |
 | POST | `/images` | JWT | Multipart upload |
+| POST | `/images/upload-url` | JWT | Upload from URL (SSRF-protected) |
 | GET | `/images` | JWT | Paginated: `page`, `per_page` (default 20, max 100), `sort` (created_at/file_size/original_name), `order` (asc/desc), `search` (ILIKE) |
 | GET | `/images/:id` | JWT | |
 | DELETE | `/images/:id` | JWT | |
