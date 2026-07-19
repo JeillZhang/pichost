@@ -134,11 +134,36 @@
 - `npm run build` ✅
 - 版本: `0.14.0` → **`0.15.0`**
 
+## P4-B: 剪贴板粘贴 + URL 上传 ✅ (本次完成)
+
+参考 `docs/superpowers/specs/2026-07-19-pichost-p4-design.md` §3。
+
+### 剪贴板粘贴
+- **`useClipboardPaste` hook**: 监听 `document` 上的 `paste` 事件，从 `ClipboardItem` 提取图片 `Blob` → `File`
+- 集成到 `useUploadQueue.addFiles()`，复用现有上传流程（含多后端选择）
+
+### URL 上传
+- **`POST /api/v1/images/upload-url`** 端点：JSON body `{ url, storage_config_ids? }`
+- **SSRF 防护**: scheme 白名单 (http/https)，DNS 解析 + 私有 IP 拦截（IPv4 全部保留段 + IPv6 loopback/link-local/unique-local），重定向限制 (5)，超时 (30s)，大小上限 (50MB)，magic byte 校验
+- **`fetch_image_from_url()`** 服务函数：下载 → 校验 → 返回 `(bytes, filename)`
+- 复用 `process_upload()` 管线，不做重复实现
+
+### 前端
+- **`UrlUploadInput`** 组件：URL 输入框 + 上传按钮，置于 DropZone 下方
+- **`uploadFromUrl()`** API 客户端：`POST images/upload-url`
+- Dashboard 集成：Cmd+V 粘贴 → 加入上传队列；URL 输入 → 服务端下载 → 刷新图库
+
+### 验证
+- `cargo clippy --workspace -D warnings` ✅
+- `cargo test --workspace` ✅ (29 pass, 10 ignored)
+- `npm run build` ✅
+- 版本: `0.15.0` → **`0.15.1`**
+
 ## 待实施
 
 | 阶段 | 主题 | 依赖 |
 |------|------|------|
-| P4-B | 剪贴板粘贴 + URL 上传 | P4-A ✅ |
+| P4-B | 剪贴板粘贴 + URL 上传 | P4-A ✅ → **✅ 完成 (0.15.1)** |
 | P4-C | 图库分类/目录 | 无 |
 | P4-D | 服务端水印 | 无 |
 | P4-E | 客户端图片预处理 | 无 |
