@@ -80,6 +80,7 @@ fn image_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(routes::images::list_images))
         .route("/batch-delete", post(routes::images::batch_delete))
+        .route("/{id}/links", get(routes::images::get_image_links))
         .route(
             "/{id}",
             get(routes::images::get_image).delete(routes::images::delete_image),
@@ -95,7 +96,9 @@ fn user_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
     let protected =
         middleware::from_fn_with_state(state.clone(), pichost_api::middleware::auth::require_auth);
     Router::new()
+        .route("/me", get(routes::users::get_my_profile).patch(routes::users::update_my_profile))
         .route("/me/stats", get(routes::users::get_my_stats))
+        .route("/me/password", post(routes::users::change_my_password))
         .route("/oauth/link", post(routes::oauth::oauth_link))
         .route_layer(middleware::from_fn_with_state(
             state,
@@ -139,6 +142,15 @@ fn public_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         ))
 }
 
+fn thumb_alias_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/{public_key}", get(routes::images::public_get_thumb_by_key))
+        .route_layer(middleware::from_fn_with_state(
+            state,
+            rate_limit::rate_limit_public,
+        ))
+}
+
 /// Assembles route groups into the top-level Router with shared middleware layers.
 fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
@@ -148,6 +160,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .nest("/api/v1/users", user_routes(state.clone()))
         .nest("/api/v1/admin", admin_routes(state.clone()))
         .nest("/u", public_routes(state.clone()))
+        .nest("/t", thumb_alias_routes(state.clone()))
         .route("/api/health", get(routes::health::health_check))
         .route("/metrics", get(metrics_handler))
         .layer(middleware::from_fn(
