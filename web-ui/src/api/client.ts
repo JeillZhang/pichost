@@ -17,6 +17,7 @@ export interface UserProfile {
   storage_backend: string
   storage_prefix: string
   storage_quota: number | null
+  watermark_config: WatermarkConfig | null
   is_admin: boolean
   created_at: string
   updated_at: string
@@ -26,6 +27,7 @@ export interface UpdateProfileRequest {
   username?: string
   email?: string
   storage_backend?: string
+  watermark_config?: WatermarkConfig | null
 }
 
 export interface ChangePasswordRequest {
@@ -311,6 +313,19 @@ export interface Category {
   name: string
   parent_id: string | null
   created_at: string
+}
+
+export interface WatermarkConfig {
+  enabled: boolean
+  text: string
+  font: string
+  font_size: number
+  color: string
+  rotation: number
+  scale: number
+  position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center' | 'tile'
+  margin_x: number
+  margin_y: number
 }
 
 export async function batchDeleteImages(ids: string[]): Promise<BatchDeleteResult> {
