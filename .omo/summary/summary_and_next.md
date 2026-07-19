@@ -211,14 +211,57 @@
 
 ### 注意
 - `dead_code` 抑制：T4 导出的函数供后续水印处理任务（T1–T3）使用，当前无消费方
-- imageproc 0.25 + rusttype 0.9 版本锁定，未来升级需注意 API 兼容性
+- imageproc 0.25 + rusttype 0.9 + ab_glyph 0.2 版本锁定，未来升级需注意 API 兼容性
+
+## P4-D: 服务端图片水印 ✅ (本次完成)
+
+参考 `docs/superpowers/specs/2026-07-19-pichost-p4-design.md` §5。
+
+### 变更内容
+
+**数据库**:
+- 迁移 `0010`: `ALTER TABLE users ADD COLUMN watermark_config JSONB` — 每用户水印配置
+
+**核心模型 (pichost-core)**:
+- `WatermarkConfig` 结构体 (10 字段: enabled, text, font, font_size, color, rotation, scale, position, margin_x, margin_y) — 所有字段有 `serde(default)` 默认值
+- `WatermarkPosition` 枚举 (6 变体: TopLeft, TopRight, BottomLeft, BottomRight, Center, Tile)
+- `User`/`UserProfile`/`UpdateProfileRequest` 新增 `watermark_config` 字段
+- `Option<Option<T>>` 反序列化模式: absent=不改, null=清除, value=设置
+
+**API 处理程序 (pichost-api)**:
+- `PATCH /users/me` 接受 `watermark_config` — CASE WHEN 模式区分 absent/null/value
+- `PATCH /admin/users/:id` 接受 `watermark_config` — fetch_and_merge 模式
+- `AuthUser` 中间件读取 watermark_config
+
+**Worker 管线 (pichost-worker)**:
+- 字体嵌入: 5 个 TTF 字体 (`fonts.rs`) 通过 `include_bytes!` 编译进二进制
+- 水印渲染: `watermark.rs` — `apply_watermark()` 支持所有位置 + RGBA 颜色 + Tile 模式
+- 管线集成: `process_task()` 在 `read_source_image` 之后、`process_image_variants` 之前应用水印
+- `PipelineError::Watermark` 新错误变体
+
+**前端 (web-ui)**:
+- `WatermarkConfig` TypeScript 类型 + `UserProfile`/`UpdateProfileRequest` 更新
+- `WatermarkSettings` 组件 — 开关、文字/字体/颜色/位置/旋转/缩放/边距控件
+- 集成到 Settings 页面 (Profile → Storage → Watermark → OAuth 顺序)
+
+### 依赖
+- `imageproc = "0.25"` — 图片绘制 (draw_text_mut)
+- `rusttype = "0.9"` — TTF 字体解析
+- `ab_glyph = "0.2"` — imageproc 0.25 内部使用 ab_glyph
+
+### 验证
+- `cargo clippy --workspace -D warnings` ✅
+- `cargo test --workspace` ✅ (63 pass, 10 ignored — 新增 25 测试：7 config 测试 + 4 字体测试 + 14 水印渲染测试)
+- `npm run build` ✅
+
+### 版本: 0.16.0 → **0.16.1**
 
 ## 待实施
 
 | 阶段 | 主题 | 依赖 |
 |------|------|------|
 | P4-C | 图库分类/目录 | P4-A ✅ → **✅ 完成 (0.16.0)** |
-| P4-D | 服务端水印 | 无 |
+| P4-D | 服务端水印 | 无 → **✅ 完成 (0.16.1)** |
 | P4-E | 客户端图片预处理 | 无 |
 | P4-F | 文件名保留 + 重命名 | 无 |
 | P4-G | 设置入口优化 | 无 |
@@ -226,4 +269,4 @@
 | P4-I | 系统配置管理 | 无 |
 
 **B–I 互不依赖**，可在 P4-A 完成后并行开发。
-**下一步**: P4-D 或 P4-E 任选其一。
+**下一步**: P4-E (客户端图片预处理) 或 P4-F (文件名保留+重命名) 任选其一。

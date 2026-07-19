@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.16.0** — P4-A, P4-B, P4-C complete. Git storage backends, URL upload, clipboard paste, gallery categories. 13 major features.
+**v0.16.1** — P4-D complete. Server-side watermark overlay with configurable text/position/font. 14 major features.
 
 ## Stack
 
@@ -193,6 +193,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 - [x] **Git storage backend** — GitHub/GitCode via REST API, AES-256-GCM token encryption, CRUD management UI
 - [x] **Multi-backend upload** — select storage target per upload, parallel dual-backend write
 - [x] **Gallery categories** — 2-level hierarchy, sidebar tree, batch move, category filtering
+- [x] **Server-side watermark** — configurable text overlay (font/color/position/tile), applied in Worker pipeline
 
 ## Project Structure
 
@@ -207,7 +208,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 ├── web-ui/                  React SPA — Zustand, TanStack Query, Tailwind CSS 4
 ├── nginx/
 │   └── nginx.conf           Reverse proxy + cache + rate limiting
-├── migrations/              9 SQL migrations (0001–0009)
+├── migrations/              10 SQL migrations (0001–0010)
 ├── Dockerfile.api           Multi-stage Rust build for API
 ├── Dockerfile.worker        Multi-stage Rust build for Worker
 ├── docker-compose.yml       Full stack: Nginx, API×2, Worker×2, PostgreSQL, Redis
