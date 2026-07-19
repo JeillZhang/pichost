@@ -18,6 +18,8 @@ deadpool-redis.workspace = true
 redis.workspace = true
 figment.workspace = true
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp", "avif", "bmp"] }
+imageproc = "0.25"
+rusttype = "0.9"
 webp.workspace = true
 
 [[bin]]

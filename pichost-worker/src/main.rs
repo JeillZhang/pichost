@@ -10,6 +10,7 @@ use tokio::task::JoinHandle;
 
 mod config;
 mod db;
+mod fonts;
 mod pipeline;
 mod processor;
 mod queue;
