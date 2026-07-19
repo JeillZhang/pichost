@@ -132,8 +132,8 @@ pub async fn get_my_profile(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
 ) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)> {
-    let row = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String, Option<i64>, bool, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>(
-        "SELECT id, username, email, storage_backend, storage_prefix, storage_quota, is_admin, created_at, updated_at FROM users WHERE id = $1"
+    let row = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String, Option<i64>, bool, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>, Option<serde_json::Value>)>(
+        "SELECT id, username, email, storage_backend, storage_prefix, storage_quota, is_admin, created_at, updated_at, watermark_config FROM users WHERE id = $1"
     )
     .bind(user.id)
     .fetch_optional(&state.pool)
@@ -147,7 +147,7 @@ pub async fn get_my_profile(
     })?;
 
     match row {
-        Some((id, username, email, storage_backend, storage_prefix, storage_quota, is_admin, created_at, updated_at)) => {
+        Some((id, username, email, storage_backend, storage_prefix, storage_quota, is_admin, created_at, updated_at, watermark_config)) => {
             Ok(Json(UserProfile {
                 id,
                 username,
@@ -158,7 +158,9 @@ pub async fn get_my_profile(
                 is_admin,
                 created_at,
                 updated_at,
-                watermark_config: None,
+                watermark_config: watermark_config.and_then(|v| {
+                    serde_json::from_value::<pichost_core::models::WatermarkConfig>(v).ok()
+                }),
             }))
         }
         None => Err((
@@ -229,11 +231,27 @@ pub async fn update_my_profile(
         }
     }
 
+    let (wm_provided, wm_value): (bool, Option<serde_json::Value>) = match payload.watermark_config {
+        Some(Some(cfg)) => {
+            let json = serde_json::to_value(cfg).map_err(|e| {
+                tracing::warn!("Watermark config serialization failed: {e}");
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": "invalid watermark config"})),
+                )
+            })?;
+            (true, Some(json))
+        }
+        Some(None) => (true, None),
+        None => (false, None),
+    };
+
     sqlx::query(
         "UPDATE users SET \
          username = COALESCE($1, username), \
          email = CASE WHEN $2::boolean THEN $3 ELSE email END, \
          storage_backend = COALESCE($4, storage_backend), \
+         watermark_config = CASE WHEN $6::boolean THEN $7::jsonb ELSE watermark_config END, \
          updated_at = now() \
          WHERE id = $5",
     )
@@ -242,6 +260,8 @@ pub async fn update_my_profile(
     .bind(&payload.email)
     .bind(&payload.storage_backend)
     .bind(user.id)
+    .bind(wm_provided)
+    .bind(&wm_value)
     .execute(&state.pool)
     .await
     .map_err(|e| {
@@ -262,8 +282,8 @@ pub async fn update_my_profile(
         )
     })?;
 
-    let row = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String, Option<i64>, bool, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>(
-        "SELECT id, username, email, storage_backend, storage_prefix, storage_quota, is_admin, created_at, updated_at FROM users WHERE id = $1"
+    let row = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String, Option<i64>, bool, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>, Option<serde_json::Value>)>(
+        "SELECT id, username, email, storage_backend, storage_prefix, storage_quota, is_admin, created_at, updated_at, watermark_config FROM users WHERE id = $1"
     )
     .bind(user.id)
     .fetch_one(&state.pool)
@@ -281,7 +301,9 @@ pub async fn update_my_profile(
         storage_backend: row.3, storage_prefix: row.4,
         storage_quota: row.5, is_admin: row.6,
         created_at: row.7, updated_at: row.8,
-        watermark_config: None,
+        watermark_config: row.9.and_then(|v| {
+            serde_json::from_value::<pichost_core::models::WatermarkConfig>(v).ok()
+        }),
     }))
 }
 
