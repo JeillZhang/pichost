@@ -96,9 +96,28 @@ fn user_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
     let protected =
         middleware::from_fn_with_state(state.clone(), pichost_api::middleware::auth::require_auth);
     Router::new()
-        .route("/me", get(routes::users::get_my_profile).patch(routes::users::update_my_profile))
+        .route(
+            "/me",
+            get(routes::users::get_my_profile)
+                .patch(routes::users::update_my_profile),
+        )
         .route("/me/stats", get(routes::users::get_my_stats))
         .route("/me/password", post(routes::users::change_my_password))
+        .route(
+            "/me/storage-configs",
+            get(routes::storage_configs::list_configs)
+                .post(routes::storage_configs::create_config),
+        )
+        .route(
+            "/me/storage-configs/{id}",
+            get(routes::storage_configs::get_config)
+                .patch(routes::storage_configs::update_config)
+                .delete(routes::storage_configs::delete_config),
+        )
+        .route(
+            "/me/storage-configs/{id}/default",
+            post(routes::storage_configs::set_default),
+        )
         .route("/oauth/link", post(routes::oauth::oauth_link))
         .route_layer(middleware::from_fn_with_state(
             state,

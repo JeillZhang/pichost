@@ -35,6 +35,7 @@ pub struct Image {
     pub webp_key: Option<String>,
     pub webp_url: Option<String>,
     pub status: ImageStatus,
+    pub storage_config_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -58,6 +59,43 @@ impl std::fmt::Display for ImageStatus {
             Self::Failed => write!(f, "failed"),
         }
     }
+}
+
+/// 用户的存储后端配置
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct UserStorageConfig {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub name: String,
+    pub provider: String,
+    pub is_default: bool,
+    pub config: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Git 后端 config JSON 的反序列化结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitConfigDetail {
+    pub token_encrypted: String,
+    pub repo: String,
+    pub branch: String,
+    pub path_prefix: Option<String>,
+}
+
+/// API 响应用于掩码 token 的配置视图
+#[derive(Debug, Clone, Serialize)]
+pub struct UserStorageConfigResponse {
+    pub id: Uuid,
+    pub name: String,
+    pub provider: String,
+    pub repo: String,
+    pub branch: String,
+    pub path_prefix: Option<String>,
+    pub is_default: bool,
+    pub token_masked: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

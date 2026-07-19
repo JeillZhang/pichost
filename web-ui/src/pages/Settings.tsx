@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { Loader2, Save, Lock } from 'lucide-react'
 import { getUserMe, updateUserMe, changePassword, getUserStats } from '../api/client'
 import type { UserProfile, UserStats } from '../api/client'
+import StorageConfigSection from '../components/StorageConfigSection'
 
 export default function Settings() {
   const [profile, setProfile] = useState<UserProfile | null>(null)
@@ -12,7 +13,6 @@ export default function Settings() {
 
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
-  const [storageBackend, setStorageBackend] = useState('local')
 
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -25,7 +25,6 @@ export default function Settings() {
         setStats(s)
         setUsername(p.username)
         setEmail(p.email ?? '')
-        setStorageBackend(p.storage_backend)
       })
       .catch(() => toast.error('Failed to load profile'))
       .finally(() => setLoading(false))
@@ -38,7 +37,6 @@ export default function Settings() {
       const updated = await updateUserMe({
         username: username || undefined,
         email: email || undefined,
-        storage_backend: storageBackend,
       })
       setProfile(updated)
       toast.success('Profile updated')
@@ -135,18 +133,9 @@ export default function Settings() {
         </button>
       </form>
 
-      {/* Storage Card */}
+      {/* Storage Usage */}
       <div className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm">
-        <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Storage</h3>
-        <div>
-          <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Backend</label>
-          <select value={storageBackend} onChange={e => setStorageBackend(e.target.value)}
-            className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm"
-            style={{ color: 'var(--color-text-primary)' }}>
-            <option value="local">local</option>
-            <option value="rustfs">rustfs</option>
-          </select>
-        </div>
+        <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Storage Usage</h3>
         {quota && quota > 0 ? (
           <div>
             <div className="flex justify-between text-xs" style={{ color: 'var(--color-text-muted)' }}>
@@ -161,6 +150,9 @@ export default function Settings() {
           <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{formatBytes(used)} used (unlimited)</p>
         )}
       </div>
+
+      {/* Storage Configs */}
+      <StorageConfigSection />
 
       {/* OAuth Card */}
       <div className="rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm">

@@ -1,10 +1,11 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Shield, Trash2 } from 'lucide-react'
+import { Shield, Trash2, ChevronDown, Plus, X } from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
 import DropZone from '../components/DropZone'
 import UploadCard from '../components/UploadCard'
-import { listImages, getUserStats } from '../api/client'
+import { listImages, getUserStats, listStorageConfigs } from '../api/client'
+import type { UserStorageConfig } from '../api/client'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useUploadQueue } from '../hooks/useUploadQueue'
 
@@ -31,6 +32,58 @@ export default function Dashboard() {
     queryKey: ['user-stats'],
     queryFn: () => getUserStats(),
   })
+
+  const { data: storageConfigs } = useQuery({
+    queryKey: ['storage-configs'],
+    queryFn: () => listStorageConfigs(),
+  })
+  const [selectedConfigIds, setSelectedConfigIds] = useState<string[]>([])
+
+  useEffect(() => {
+    if (storageConfigs && storageConfigs.length > 0 && selectedConfigIds.length === 0) {
+      const defaultCfg = storageConfigs.find((c) => c.is_default) || storageConfigs[0]
+      setSelectedConfigIds([defaultCfg.id])
+    }
+  }, [storageConfigs, selectedConfigIds.length])
+
+  const handleUpload = (files: File[]) => {
+    addFiles(files, selectedConfigIds.length > 0 ? selectedConfigIds : undefined)
+  }
+
+  const availableForSlot = (slotIndex: number): UserStorageConfig[] =>
+    (storageConfigs || []).filter(
+      (c) => !selectedConfigIds.includes(c.id) || c.id === selectedConfigIds[slotIndex],
+    )
+
+  const handleSlotChange = (slotIndex: number, newId: string) => {
+    setSelectedConfigIds((prev) => {
+      const next = [...prev]
+      next[slotIndex] = newId
+      return next
+    })
+  }
+
+  const handleRemoveSlot = (slotIndex: number) => {
+    setSelectedConfigIds((prev) => {
+      if (prev.length === 2 && slotIndex === 0) return [prev[1]]
+      if (prev.length === 2 && slotIndex === 1) return [prev[0]]
+      return []
+    })
+  }
+
+  const handleAddSlot = () => {
+    if (!storageConfigs || selectedConfigIds.length >= 2) return
+    const next = storageConfigs.find((c) => !selectedConfigIds.includes(c.id))
+    if (next) setSelectedConfigIds((prev) => [...prev, next.id])
+  }
+
+  const canAddSlot =
+    storageConfigs &&
+    selectedConfigIds.length < 2 &&
+    selectedConfigIds.length < storageConfigs.length
+
+  const selectCls =
+    'w-full appearance-none rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] px-3 py-2 pr-8 text-sm text-[var(--color-text-primary)] backdrop-blur-sm focus:border-[var(--color-accent)] focus:outline-none'
 
   // Invalidate when any upload completes
   const prevDoneCount = useRef(0)
@@ -71,8 +124,54 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Backend selector */}
+      {storageConfigs && storageConfigs.length > 0 && (
+        <div className="mb-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-[var(--color-text-muted)]">
+              Storage Backend
+            </span>
+            {canAddSlot && (
+              <button
+                onClick={handleAddSlot}
+                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--color-accent)] hover:bg-[var(--color-accent-subtle)]"
+              >
+                <Plus className="h-3 w-3" />
+                Add 2nd backend
+              </button>
+            )}
+          </div>
+          {selectedConfigIds.map((selectedId, idx) => (
+            <div key={idx} className="relative flex items-center gap-2">
+              <div className="relative flex-1">
+                <select
+                  value={selectedId}
+                  onChange={(e) => handleSlotChange(idx, e.target.value)}
+                  className={selectCls}
+                >
+                  {availableForSlot(idx).map((cfg) => (
+                    <option key={cfg.id} value={cfg.id}>
+                      {cfg.name} ({cfg.provider}){cfg.is_default ? ' · default' : ''}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
+              </div>
+              {selectedConfigIds.length > 1 && (
+                <button
+                  onClick={() => handleRemoveSlot(idx)}
+                  className="shrink-0 rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)]"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* DropZone — always active, accepts multiple files */}
-      <DropZone onUpload={addFiles} />
+      <DropZone onUpload={handleUpload} />
 
       {/* Upload queue */}
       {queue.length > 0 && (

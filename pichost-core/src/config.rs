@@ -12,6 +12,13 @@ pub struct AppConfig {
     pub upload: UploadConfig,
     pub logging: LoggingConfig,
     pub worker: WorkerConfig,
+    /// AES-256-GCM 密钥，用于加密用户 Git PAT
+    /// 须 32 字节（base64 或 hex 编码），与 JWT secret 独立
+    #[serde(default)]
+    pub token_encryption_key: Option<String>,
+    /// 每用户最多可创建的存储配置数。（None = 默认 5）
+    #[serde(default)]
+    pub storage_max_user_configs: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -179,6 +186,8 @@ impl Default for AppConfig {
             },
             logging: LoggingConfig { level: "info".into(), format: "json".into() },
             worker: WorkerConfig::default(),
+            token_encryption_key: None,
+            storage_max_user_configs: None,
         }
     }
 }

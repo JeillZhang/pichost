@@ -32,6 +32,13 @@ export default function UploadCard({ task }: UploadCardProps) {
         <p className="truncate text-sm text-[var(--color-text-primary)]">
           {task.file.name}
         </p>
+        {task.status === 'done' &&
+          task.result?.storage_configs &&
+          task.result.storage_configs.length > 0 && (
+            <p className="truncate text-xs text-[var(--color-text-secondary)]">
+              {task.result.storage_configs.map((c) => `→ ${c.name}`).join(' · ')}
+            </p>
+          )}
         <div className="mt-1 flex items-center gap-2">
           {/* Progress bar (pending/uploading) */}
           {(task.status === 'pending' || task.status === 'uploading') && (

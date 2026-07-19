@@ -13,7 +13,9 @@ use uuid::Uuid;
 use crate::app::AppState;
 use crate::db::DbPool;
 use crate::middleware::auth::AuthUser;
-use crate::services::upload::{self, ImageListQuery, ImageListResponse, ImageRow, UploadResult};
+use crate::services::upload::{
+    self, ImageListQuery, ImageListResponse, ImageRow, UploadResult,
+};
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -62,6 +64,7 @@ async fn count_user_images(
     pool: &DbPool,
     user_id: Uuid,
     search_term: &str,
+    config_id: Option<Uuid>,
 ) -> Result<i64, RouteError> {
     let log_err = |e: sqlx::Error| {
         tracing::warn!("Image count query failed: {e}");
@@ -70,7 +73,29 @@ async fn count_user_images(
             Json(json!({"error": "internal server error"})),
         )
     };
-    if search_term.is_empty() {
+    if let Some(cid) = config_id {
+        if search_term.is_empty() {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM images WHERE user_id = $1 AND storage_config_id = $2",
+            )
+            .bind(user_id)
+            .bind(cid)
+            .fetch_one(pool)
+            .await
+            .map_err(log_err)
+        } else {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM images WHERE user_id = $1 \
+                 AND original_name ILIKE $2 AND storage_config_id = $3",
+            )
+            .bind(user_id)
+            .bind(format!("%{}%", search_term))
+            .bind(cid)
+            .fetch_one(pool)
+            .await
+            .map_err(log_err)
+        }
+    } else if search_term.is_empty() {
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM images WHERE user_id = $1")
             .bind(user_id)
             .fetch_one(pool)
@@ -88,21 +113,35 @@ async fn count_user_images(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn fetch_user_images(
     pool: &DbPool, user_id: Uuid, sort_col: &str, order_dir: &str,
     search_term: &str, limit: i64, offset: i64,
+    config_id: Option<Uuid>,
 ) -> Result<Vec<ImageRow>, RouteError> {
     let map_err = |e: sqlx::Error| {
         tracing::warn!("Image list query failed: {e}");
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal server error"})))
     };
-    let base = "SELECT id,public_key,original_name,url,mime_type,file_size,\
-                sha256,width,height,status,thumbnail_url,webp_url,created_at FROM images";
-    if search_term.is_empty() {
-        let sql = format!("{base} WHERE user_id = $1 ORDER BY {sort_col} {order_dir} LIMIT $2 OFFSET $3");
+    let base = "SELECT i.id,i.public_key,i.original_name,i.url,i.mime_type,i.file_size,\
+                i.sha256,i.width,i.height,i.status,i.thumbnail_url,i.webp_url,\
+                i.created_at,i.storage_config_id,\
+                c.name,c.provider \
+                FROM images i \
+                LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id";
+    if let Some(cid) = config_id {
+        if search_term.is_empty() {
+            let sql = format!("{base} WHERE i.user_id = $1 AND i.storage_config_id = $2 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
+            sqlx::query_as::<_, ImageRow>(&sql).bind(user_id).bind(cid).bind(limit).bind(offset).fetch_all(pool).await.map_err(map_err)
+        } else {
+            let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 AND i.storage_config_id = $3 ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5");
+            sqlx::query_as::<_, ImageRow>(&sql).bind(user_id).bind(format!("%{}%", search_term)).bind(cid).bind(limit).bind(offset).fetch_all(pool).await.map_err(map_err)
+        }
+    } else if search_term.is_empty() {
+        let sql = format!("{base} WHERE i.user_id = $1 ORDER BY {sort_col} {order_dir} LIMIT $2 OFFSET $3");
         sqlx::query_as::<_, ImageRow>(&sql).bind(user_id).bind(limit).bind(offset).fetch_all(pool).await.map_err(map_err)
     } else {
-        let sql = format!("{base} WHERE user_id = $1 AND original_name ILIKE $2 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
+        let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
         sqlx::query_as::<_, ImageRow>(&sql).bind(user_id).bind(format!("%{}%", search_term)).bind(limit).bind(offset).fetch_all(pool).await.map_err(map_err)
     }
 }
@@ -119,18 +158,79 @@ fn map_rows_to_results(rows: Vec<ImageRow>) -> Vec<UploadResult> {
 pub async fn upload_handler(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
-    multipart: Multipart,
-) -> Result<(StatusCode, Json<UploadResult>), (StatusCode, Json<serde_json::Value>)> {
-    match upload::process_upload(state, user, multipart).await {
-        Ok(result) => {
+    mut multipart: Multipart,
+) -> Result<
+    (StatusCode, Json<Vec<UploadResult>>),
+    (StatusCode, Json<serde_json::Value>),
+> {
+    let (bytes, file_name, storage_config_ids) =
+        extract_upload_parts(&mut multipart).await?;
+
+    match upload::process_upload(&state, &user, bytes, file_name, storage_config_ids).await {
+        Ok(results) => {
             crate::metrics::UPLOADS_TOTAL.inc();
-            Ok((StatusCode::CREATED, Json(result)))
+            Ok((StatusCode::CREATED, Json(results)))
         }
         Err(e) => {
             crate::metrics::UPLOAD_ERRORS_TOTAL.inc();
             Err(e)
         }
     }
+}
+
+/// Extract file data and optional storage_config_ids from a multipart upload.
+async fn extract_upload_parts(
+    multipart: &mut Multipart,
+) -> Result<(Vec<u8>, String, Option<Vec<Uuid>>), RouteError> {
+    let mut file_data: Option<Vec<u8>> = None;
+    let mut file_name = "file".to_string();
+    let mut storage_config_ids: Option<Vec<Uuid>> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        match field.name() {
+            Some("file") => {
+                file_name = field
+                    .file_name()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "file".to_string());
+                let data = field.bytes().await.map_err(|e| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": format!("failed to read file: {e}")})),
+                    )
+                })?;
+                file_data = Some(data.to_vec());
+            }
+            Some("storage_config_ids") => {
+                let text = field.text().await.map_err(|e| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": format!("failed to read config ids: {e}")})),
+                    )
+                })?;
+                let ids: Result<Vec<Uuid>, _> = text
+                    .split(',')
+                    .map(|s| Uuid::parse_str(s.trim()))
+                    .collect();
+                storage_config_ids = Some(ids.map_err(|_| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "invalid UUID in storage_config_ids"})),
+                    )
+                })?);
+            }
+            _ => {}
+        }
+    }
+
+    let bytes = file_data.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "no file field found in upload"})),
+        )
+    })?;
+
+    Ok((bytes, file_name, storage_config_ids))
 }
 
 /// GET /api/v1/images — list user's images with pagination, search, and sort (protected)
@@ -154,9 +254,10 @@ pub async fn list_images(
     };
 
     let search_term = params.search.trim();
-    let total = count_user_images(&state.pool, user.id, search_term).await?;
+    let total = count_user_images(&state.pool, user.id, search_term, params.storage_config_id).await?;
     let rows = fetch_user_images(
         &state.pool, user.id, sort_col, order_dir, search_term, limit, offset,
+        params.storage_config_id,
     )
     .await?;
     let items = map_rows_to_results(rows);
@@ -186,9 +287,13 @@ pub async fn get_image(
         .cache
         .cached_meta(&id, 600, async {
             sqlx::query_as::<_, ImageRow>(
-                "SELECT id, public_key, original_name, url, mime_type, file_size,\
-                 sha256, width, height, status, thumbnail_url, webp_url, created_at \
-                 FROM images WHERE id = $1 AND user_id = $2",
+                "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size,\
+                 i.sha256, i.width, i.height, i.status, i.thumbnail_url, i.webp_url, \
+                 i.created_at, i.storage_config_id, \
+                 c.name, c.provider \
+                 FROM images i \
+                 LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id \
+                 WHERE i.id = $1 AND i.user_id = $2",
             )
             .bind(id)
             .bind(user.id)

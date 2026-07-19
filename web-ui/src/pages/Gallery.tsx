@@ -1,33 +1,71 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
-import { listImages, batchDeleteImages } from '../api/client'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useInfiniteQuery, keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { listImages, batchDeleteImages, listStorageConfigs } from '../api/client'
 import type { ImageInfo, PaginatedListParams } from '../api/client'
-import { CheckSquare, Square, Trash2, X } from 'lucide-react'
+import { CheckSquare, Square, Trash2, X, Code2, Server, HardDrive } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
 import SortDropdown from '../components/SortDropdown'
+
+const STORAGE_CONFIG_KEY = 'backend'
+
+function getProviderIcon(provider: string) {
+  switch (provider) {
+    case 'github': return <Code2 className="h-3 w-3" />
+    case 'gitcode': return <Server className="h-3 w-3" />
+    default: return <HardDrive className="h-3 w-3" />
+  }
+}
 
 export default function Gallery() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
+
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<NonNullable<PaginatedListParams['sort']>>('created_at')
   const [order, setOrder] = useState<NonNullable<PaginatedListParams['order']>>('desc')
+  const [storageConfigFilter, setStorageConfigFilter] = useState(
+    () => searchParams.get(STORAGE_CONFIG_KEY) ?? '',
+  )
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [selectMode, setSelectMode] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
 
+  const { data: storageConfigs } = useQuery({
+    queryKey: ['storage-configs'],
+    queryFn: () => listStorageConfigs(),
+    staleTime: 5 * 60 * 1000,
+  })
+
   const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteQuery({
-      queryKey: ['images', { search, sort, order }],
+      queryKey: ['images', { search, sort, order, storageConfigFilter }],
       queryFn: ({ pageParam }) =>
-        listImages({ page: pageParam, per_page: 20, sort, order, search }),
+        listImages({
+          page: pageParam,
+          per_page: 20,
+          sort,
+          order,
+          search,
+          storage_config_id: storageConfigFilter || undefined,
+        }),
       initialPageParam: 1,
       getNextPageParam: (lastPage) =>
         lastPage.page < lastPage.total_pages ? lastPage.page + 1 : undefined,
       placeholderData: keepPreviousData,
     })
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams)
+    if (storageConfigFilter) {
+      params.set(STORAGE_CONFIG_KEY, storageConfigFilter)
+    } else {
+      params.delete(STORAGE_CONFIG_KEY)
+    }
+    setSearchParams(params, { replace: true })
+  }, [storageConfigFilter, searchParams, setSearchParams])
 
   const observerRef = useRef<IntersectionObserver>(undefined)
   const lastItemRef = useCallback(
@@ -92,6 +130,9 @@ export default function Gallery() {
     }
   }
 
+  const selectCls =
+    'rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-glass)] px-2 py-2 text-sm text-[var(--color-text-primary)] backdrop-blur-sm focus:border-[var(--color-accent)] focus:outline-none'
+
   return (
     <div className="mx-auto max-w-5xl p-4">
       {/* Header */}
@@ -101,6 +142,21 @@ export default function Gallery() {
         </h1>
         <div className="flex items-center gap-3">
           <div className="w-48 sm:w-64"><SearchBar value={search} onChange={setSearch} /></div>
+
+          {/* Storage backend filter */}
+          {storageConfigs && storageConfigs.length > 0 && (
+            <select
+              value={storageConfigFilter}
+              onChange={(e) => setStorageConfigFilter(e.target.value)}
+              className={selectCls}
+            >
+              <option value="">全部后端</option>
+              {storageConfigs.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          )}
+
           <SortDropdown sort={sort} order={order}
             onSortChange={(s) => setSort(s as NonNullable<PaginatedListParams['sort']>)}
             onOrderChange={(o) => setOrder(o as NonNullable<PaginatedListParams['order']>)} />
@@ -151,6 +207,13 @@ export default function Gallery() {
                       {isSelected ? <CheckSquare className="h-4 w-4 text-[var(--color-accent)]" />
                         : <Square className="h-4 w-4 text-white/60" />}
                     </button>
+                  )}
+                  {/* Provider badge */}
+                  {!selectMode && img.storage_config && (
+                    <span className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white/80 backdrop-blur-sm">
+                      {getProviderIcon(img.storage_config.provider)}
+                      {img.storage_config.name}
+                    </span>
                   )}
                   <button
                     ref={isLast ? lastItemRef : undefined}

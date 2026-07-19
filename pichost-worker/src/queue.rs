@@ -10,6 +10,8 @@ pub struct TaskPayload {
     pub image_id: Uuid,
     pub user_id: Uuid,
     pub storage_backend: String,
+    pub storage_config_id: Option<Uuid>,
+    pub storage_backend_name: String,
     pub source_key: String,
     pub source_mime: String,
     pub retry_count: i32,

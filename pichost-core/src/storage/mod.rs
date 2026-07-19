@@ -1,9 +1,12 @@
 use async_trait::async_trait;
 use crate::error::StorageError;
 
+pub mod git;
 pub mod local;
 pub mod router;
 pub mod s3;
+
+pub use git::{GitProvider, GitStorage};
 
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
