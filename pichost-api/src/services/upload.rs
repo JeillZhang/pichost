@@ -39,7 +39,8 @@ pub struct UploadResult {
 
 /// Full image-row tuple used by list_images / get_image queries.
 /// Fields: id, public_key, original_name, url, mime_type, file_size,
-///         sha256, width, height, status, thumbnail_url, webp_url, created_at
+///         sha256, width, height, status, thumbnail_url, webp_url, created_at,
+///         storage_config_id
 pub(crate) type ImageRow = (
     Uuid,
     String,
@@ -54,13 +55,14 @@ pub(crate) type ImageRow = (
     Option<String>,
     Option<String>,
     DateTime<Utc>,
+    Option<Uuid>,
 );
 
 impl UploadResult {
     /// Build an UploadResult from a DB row tuple. Generates markdown, HTML and
     /// bbcode link formats from original_name + url.
     pub(crate) fn from_row(row: ImageRow) -> Self {
-        let (id, public_key, original_name, url, mime_type, file_size, sha256, width, height, status, thumbnail_url, webp_url, created_at) =
+        let (id, public_key, original_name, url, mime_type, file_size, sha256, width, height, status, thumbnail_url, webp_url, created_at, _storage_config_id) =
             row;
         let markdown = format!("![{}]({})", original_name, url);
         let html = format!(
