@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.14.0** — P2 complete. 10 major features, all documented.
+**v0.15.0** — P2 complete. Git storage backends, token encryption, multi-backend router. 12 major features.
 
 ## Stack
 
