@@ -4,6 +4,7 @@ import { Loader2, Save, Lock } from 'lucide-react'
 import { getUserMe, updateUserMe, changePassword, getUserStats } from '../api/client'
 import type { UserProfile, UserStats } from '../api/client'
 import StorageConfigSection from '../components/StorageConfigSection'
+import WatermarkSettings from '../components/WatermarkSettings'
 
 export default function Settings() {
   const [profile, setProfile] = useState<UserProfile | null>(null)
@@ -153,6 +154,12 @@ export default function Settings() {
 
       {/* Storage Configs */}
       <StorageConfigSection />
+
+      {/* Watermark Settings */}
+      <WatermarkSettings
+        profile={profile}
+        onUpdate={(updatedProfile) => setProfile(updatedProfile)}
+      />
 
       {/* OAuth Card */}
       <div className="rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm">
