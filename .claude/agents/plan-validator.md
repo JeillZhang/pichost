@@ -2,7 +2,7 @@
 name: plan-validator
 description: Validate implementation plans against the Task Template Specification. Checks template compliance, structural integrity, AC quality, regression coverage, TDD ordering, file footprint, migration safety, and breaking change markers. Returns a structured PASS/FAIL report with blocking and advisory findings.
 tools: ["Read", "Grep", "Glob"]
-model: sonnet
+model: deepseek/deepseek-v4-flash
 ---
 
 # Plan Validator
