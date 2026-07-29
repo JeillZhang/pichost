@@ -5,6 +5,7 @@ import { getUserMe, updateUserMe, changePassword, getUserStats } from '../api/cl
 import type { UserProfile, UserStats } from '../api/client'
 import StorageConfigSection from '../components/StorageConfigSection'
 import WatermarkSettings from '../components/WatermarkSettings'
+import { PreprocessingSettings } from '../components/PreprocessingSettings'
 
 export default function Settings() {
   const [profile, setProfile] = useState<UserProfile | null>(null)
@@ -160,6 +161,9 @@ export default function Settings() {
         profile={profile}
         onUpdate={(updatedProfile) => setProfile(updatedProfile)}
       />
+
+      {/* Preprocessing Settings */}
+      <PreprocessingSettings />
 
       {/* OAuth Card */}
       <div className="rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm">
