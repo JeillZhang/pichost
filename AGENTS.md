@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.16.1` — P4-D complete. Server-side watermark overlay with configurable text/position/font. Bump patch for fixes, minor for features.
+- Version: `0.16.2` — P4-E complete. Client-side image preprocessing (EXIF strip, resize, format convert, compress, rotate) via Web Worker. Bump patch for fixes, minor for features.
 
 ## Key Commands
 

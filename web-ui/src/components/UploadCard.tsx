@@ -7,6 +7,7 @@ interface UploadCardProps {
 
 const STATUS_ICONS: Record<UploadTask['status'], { icon: typeof Check; cls: string }> = {
   pending: { icon: Loader2, cls: 'text-[var(--color-text-muted)]' },
+  processing: { icon: Loader2, cls: 'animate-spin text-[var(--color-accent)]' },
   uploading: { icon: Loader2, cls: 'animate-spin text-blue-400' },
   done: { icon: Check, cls: 'text-green-400' },
   error: { icon: X, cls: 'text-red-400' },
@@ -14,6 +15,7 @@ const STATUS_ICONS: Record<UploadTask['status'], { icon: typeof Check; cls: stri
 
 const STATUS_LABELS: Record<UploadTask['status'], string> = {
   pending: 'Queued',
+  processing: 'Processing…',
   uploading: 'Uploading…',
   done: 'Uploaded',
   error: 'Failed',

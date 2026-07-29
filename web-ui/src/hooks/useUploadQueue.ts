@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { uploadImage, type UploadResult } from '../api/client'
+import { usePreprocessingStore } from '../stores/preprocessing'
+import { needsProcessing } from '../workers/imageProcessor'
 
-export type UploadStatus = 'pending' | 'uploading' | 'done' | 'error'
+export type UploadStatus = 'pending' | 'processing' | 'uploading' | 'done' | 'error'
 
 export interface UploadTask {
   id: string
@@ -11,12 +13,59 @@ export interface UploadTask {
   result: UploadResult | null
   error: string | null
   storageConfigIds?: string[]
+  processingStatus?: 'processing' | 'done' | 'failed'
 }
 
 const MAX_CONCURRENT = 3
 
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+let _worker: Worker | null = null
+function getWorker(): Worker {
+  if (!_worker) {
+    _worker = new Worker(
+      new URL('../workers/imageProcessor.worker.ts', import.meta.url),
+      { type: 'module' },
+    )
+  }
+  return _worker
+}
+
+let _supportsOffscreenCanvas: boolean | null = null
+function supportsOffscreenCanvas(): boolean {
+  if (_supportsOffscreenCanvas === null) {
+    try {
+      _supportsOffscreenCanvas = typeof OffscreenCanvas !== 'undefined'
+    } catch {
+      _supportsOffscreenCanvas = false
+    }
+  }
+  return _supportsOffscreenCanvas
+}
+
+async function preprocessFile(file: File, prefs: any): Promise<File> {
+  if (!needsProcessing(prefs)) return file
+
+  if (!supportsOffscreenCanvas()) {
+    const { processFile: mainProcess } = await import('../workers/imageProcessor')
+    return mainProcess(file, prefs)
+  }
+
+  return new Promise((resolve, reject) => {
+    const worker = getWorker()
+    const handler = (e: MessageEvent) => {
+      worker.removeEventListener('message', handler)
+      if (e.data.success) {
+        resolve(e.data.file)
+      } else {
+        reject(new Error(e.data.error))
+      }
+    }
+    worker.addEventListener('message', handler)
+    worker.postMessage({ file, prefs })
+  })
 }
 
 export function useUploadQueue() {
@@ -77,8 +126,12 @@ export function useUploadQueue() {
   }, [updateTask])
 
   const addFiles = useCallback(
-    (files: File[], storageConfigIds?: string[]) => {
+    async (files: File[], storageConfigIds?: string[]) => {
       if (files.length === 0) return
+
+      const prefs = usePreprocessingStore.getState()
+
+      // First, create tasks with 'processing' status so UI shows immediately
       const ids: string[] = []
       setTasks((prev) => {
         const next = new Map(prev)
@@ -88,17 +141,43 @@ export function useUploadQueue() {
           next.set(id, {
             id,
             file,
-            status: 'pending',
+            status: 'processing',
             progress: 0,
             result: null,
             error: null,
             storageConfigIds,
+            processingStatus: 'processing',
           })
         }
         return next
       })
+
+      // Process files in parallel
+      const processedFiles = await Promise.all(
+        files.map((f, i) =>
+          preprocessFile(f, prefs).then((pf) => ({ index: i, file: pf })),
+        ),
+      )
+
+      // Update tasks with processed files, change status to 'pending'
+      setTasks((prev) => {
+        const next = new Map(prev)
+        for (const { index, file } of processedFiles) {
+          const id = ids[index]
+          const existing = next.get(id)
+          if (existing) {
+            next.set(id, {
+              ...existing,
+              file,
+              status: 'pending',
+              processingStatus: 'done',
+            })
+          }
+        }
+        return next
+      })
+
       pendingRef.current.push(...ids)
-      // Kick off processing after the state update queued
       setTimeout(() => processNext(), 0)
     },
     [processNext],

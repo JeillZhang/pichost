@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.16.1** — P4-D complete. Server-side watermark overlay with configurable text/position/font. 14 major features.
+**v0.16.2** — P4-E complete. Client-side image preprocessing (EXIF strip, resize, format convert, compress, rotate) via Web Worker. 15 major features.
 
 ## Stack
 
@@ -194,6 +194,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 - [x] **Multi-backend upload** — select storage target per upload, parallel dual-backend write
 - [x] **Gallery categories** — 2-level hierarchy, sidebar tree, batch move, category filtering
 - [x] **Server-side watermark** — configurable text overlay (font/color/position/tile), applied in Worker pipeline
+- [x] **Client-side preprocessing** — browser-side image pipeline (EXIF strip, resize, format convert, compress, rotate) via Web Worker
 
 ## Project Structure
 

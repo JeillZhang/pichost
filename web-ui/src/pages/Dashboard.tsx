@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useUploadQueue } from '../hooks/useUploadQueue'
 import { useClipboardPaste } from '../hooks/useClipboardPaste'
 import UrlUploadInput from '../components/UrlUploadInput'
+import { PreprocessingStatus } from '../components/PreprocessingStatus'
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -196,6 +197,11 @@ export default function Dashboard() {
 
       <div className="mt-3">
         <UrlUploadInput onUpload={handleUrlUpload} />
+      </div>
+
+      {/* Preprocessing status */}
+      <div className="mt-3 flex justify-end">
+        <PreprocessingStatus />
       </div>
 
       {/* Upload queue */}
