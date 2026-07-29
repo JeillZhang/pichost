@@ -256,17 +256,32 @@
 
 ### 版本: 0.16.0 → **0.16.1**
 
+## P4-E: 客户端图片预处理 ✅ (本次完成)
+
+参考 `docs/superpowers/specs/2026-07-19-pichost-p4-design.md` §6。
+
+### 客户端图片预处理
+- **Web Worker 管线**: `OffscreenCanvas` 实现浏览器端图片处理（EXIF 移除、缩放、格式转换、压缩、旋转），不阻塞主线程
+- **预处理操作**: EXIF 移除（JPEG 二进制）、缩放、格式转换（WebP/JPEG/PNG）、压缩、旋转（0°/90°/180°/270°）
+- **Zustand Store**: `types/preprocessing.ts` + `stores/preprocessing.ts` — localStorage 持久化（遵循 `ui.ts` 主题模式）
+- **设置界面**: `PreprocessingSettings` — 5 个操作的开关和控件，集成到 Settings 页面
+- **Dashboard 状态栏**: `PreprocessingStatus` — 显示当前启用的预处理设置
+- **UploadCard**: 新增 "Processing..." 状态
+- **降级方案**: OffscreenCanvas 不可用时回退到主线程
+
+### 验证
+- `cargo clippy --workspace -D warnings` ✅
+- `cargo test --workspace` ✅ (63 pass, 10 ignored)
+- `npm run build` ✅
+- `npx vitest run` ✅ (20/20 pass — 8 store + 12 processor)
+
+### 版本: 0.16.1 → **0.16.2**
+
 ## 待实施
 
 | 阶段 | 主题 | 依赖 |
 |------|------|------|
-| P4-C | 图库分类/目录 | P4-A ✅ → **✅ 完成 (0.16.0)** |
-| P4-D | 服务端水印 | 无 → **✅ 完成 (0.16.1)** |
-| P4-E | 客户端图片预处理 | 无 |
 | P4-F | 文件名保留 + 重命名 | 无 |
 | P4-G | 设置入口优化 | 无 |
 | P4-H | 软件打包 + 自动化发布 | 无 |
 | P4-I | 系统配置管理 | 无 |
-
-**B–I 互不依赖**，可在 P4-A 完成后并行开发。
-**下一步**: P4-E (客户端图片预处理) 或 P4-F (文件名保留+重命名) 任选其一。
