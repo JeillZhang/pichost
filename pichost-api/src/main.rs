@@ -85,7 +85,9 @@ fn image_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/{id}/links", get(routes::images::get_image_links))
         .route(
             "/{id}",
-            get(routes::images::get_image).delete(routes::images::delete_image),
+            get(routes::images::get_image)
+                .patch(routes::images::rename_image)
+                .delete(routes::images::delete_image),
         )
         .route("/{id}/move", post(routes::images::move_image))
         .route_layer(middleware::from_fn_with_state(
