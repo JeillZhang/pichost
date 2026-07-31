@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Trash2 } from 'lucide-react'
+import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { getImage, deleteImage, listCategories, moveImageToCategory, type CategoryTreeNode } from '../api/client'
+import { getImage, deleteImage, listCategories, moveImageToCategory, renameImage, type CategoryTreeNode } from '../api/client'
 import LinkCard from '../components/LinkCard'
 
 function flattenCategories(
@@ -27,6 +27,8 @@ export default function ImageDetail() {
   const queryClient = useQueryClient()
   const [deleting, setDeleting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
 
   const { data: img, isLoading } = useQuery({
     queryKey: ['image', id],
@@ -45,6 +47,21 @@ export default function ImageDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['image', id] })
       queryClient.invalidateQueries({ queryKey: ['images'] })
+    },
+  })
+
+  const renameMutation = useMutation({
+    mutationFn: ({ imageId, name }: { imageId: string; name: string }) =>
+      renameImage(imageId, name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['image', id] })
+      queryClient.invalidateQueries({ queryKey: ['images'] })
+      setIsRenaming(false)
+    },
+    onError: (e: unknown) => {
+      const msg = e instanceof Error ? e.message : 'Rename failed'
+      toast.error(msg)
+      setIsRenaming(false)
     },
   })
 
@@ -123,10 +140,41 @@ export default function ImageDetail() {
 
       {/* Info */}
       <div className="mt-4 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] p-4 space-y-1 text-sm text-[var(--color-text-secondary)]" style={{ backdropFilter: 'blur(var(--glass-blur))', boxShadow: 'var(--glass-shadow)' }}>
-        <p>
-          Name:{' '}
-          <span className="text-[var(--color-text-primary)]">{img.original_name}</span>
-        </p>
+        <div className="flex items-center gap-2">
+          <span className="text-[var(--color-text-secondary)]">Name:</span>
+          {isRenaming ? (
+            <input
+              autoFocus
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && renameValue.trim()) {
+                  renameMutation.mutate({ imageId: id!, name: renameValue.trim() })
+                } else if (e.key === 'Escape') {
+                  setIsRenaming(false)
+                }
+              }}
+              onBlur={() => setIsRenaming(false)}
+              disabled={renameMutation.isPending}
+              className="flex-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+            />
+          ) : (
+            <button
+              onClick={() => {
+                setRenameValue(img.original_name)
+                setIsRenaming(true)
+              }}
+              className="group flex items-center gap-1 text-[var(--color-text-primary)] hover:text-[var(--color-accent)]"
+            >
+              <span>{img.original_name}</span>
+              <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+          )}
+          {renameMutation.isPending && (
+            <span className="text-xs text-[var(--color-text-muted)]">Saving...</span>
+          )}
+        </div>
         <p className="flex items-center gap-2">
           Status:{' '}
           <span

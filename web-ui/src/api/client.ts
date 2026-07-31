@@ -231,6 +231,10 @@ export async function getImage(id: string): Promise<ImageInfo> {
   return api.get(`images/${id}`).json<ImageInfo>()
 }
 
+export async function renameImage(id: string, originalName: string): Promise<ImageInfo> {
+  return api.patch(`images/${id}`, { json: { original_name: originalName } }).json<ImageInfo>()
+}
+
 export async function getUserStats(): Promise<UserStats> {
   return api.get('users/me/stats').json<UserStats>()
 }
