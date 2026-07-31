@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.16.2` — P4-E complete. Client-side image preprocessing (EXIF strip, resize, format convert, compress, rotate) via Web Worker. Bump patch for fixes, minor for features.
+- Version: `0.16.3` — P4-F complete. File name retention + rename (PATCH /images/:id, inline rename on ImageDetail).
 
 ## Key Commands
 
@@ -126,6 +126,7 @@
 | POST | `/images/upload-url` | JWT | Upload from URL (SSRF-protected) |
 | GET | `/images` | JWT | Paginated: `page`, `per_page` (default 20, max 100), `sort` (created_at/file_size/original_name), `order` (asc/desc), `search` (ILIKE) |
 | GET | `/images/:id` | JWT | |
+| PATCH | `/images/:id` | JWT | Rename: `{ original_name }` |
 | DELETE | `/images/:id` | JWT | |
 | POST | `/images/:id/move` | JWT | Move image to category: `{ category_id }` |
 | POST | `/images/batch-delete` | JWT | `{ ids: UUID[] }`, max 100 |

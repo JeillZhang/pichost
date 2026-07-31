@@ -277,11 +277,26 @@
 
 ### 版本: 0.16.1 → **0.16.2**
 
+## P4-F: 文件名保留 + 重命名 ✅ (本次完成)
+
+参考 `docs/superpowers/specs/2026-07-19-pichost-p4-design.md` §7。
+
+### 变更内容
+- **后端**: `PATCH /api/v1/images/:id` — 重命名图片显示名称，校验（≤255 字符、无路径分隔符/空字节），Redis 缓存失效
+- **前端**: ImageDetail 页面内联重命名 — 点击文件名 → input 输入框，Enter 保存、Escape/失焦取消，Pencil 图标悬停提示
+- 5 个单元测试验证校验逻辑
+
+### 验证
+- `cargo clippy --workspace -D warnings` ✅
+- `cargo test --workspace` ✅ (68 pass, 10 ignored)
+- `npm run build` ✅
+
+### 版本: 0.16.2 → **0.16.3**
+
 ## 待实施
 
 | 阶段 | 主题 | 依赖 |
 |------|------|------|
-| P4-F | 文件名保留 + 重命名 | 无 |
 | P4-G | 设置入口优化 | 无 |
 | P4-H | 软件打包 + 自动化发布 | 无 |
 | P4-I | 系统配置管理 | 无 |
