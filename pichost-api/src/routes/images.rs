@@ -61,6 +61,35 @@ async fn cleanup_storage_files(
 
 type RouteError = (StatusCode, Json<serde_json::Value>);
 
+/// Request body for PATCH /api/v1/images/:id
+#[derive(Debug, Deserialize)]
+pub struct UpdateImageRequest {
+    pub original_name: String,
+}
+
+/// Validate original_name: non-empty, ≤255 chars, no path separators or null bytes.
+fn validate_original_name(name: &str) -> Result<(), RouteError> {
+    if name.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "original_name cannot be empty"})),
+        ));
+    }
+    if name.len() > 255 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "original_name too long (max 255)"})),
+        ));
+    }
+    if name.contains('/') || name.contains('\\') || name.contains('\0') {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "original_name contains invalid characters"})),
+        ));
+    }
+    Ok(())
+}
+
 async fn count_user_images(
     pool: &DbPool,
     user_id: Uuid,
@@ -436,6 +465,46 @@ pub async fn get_image(
         .await?;
 
     Ok(Json(result))
+}
+
+/// PATCH /api/v1/images/{id} — rename an image's display name
+pub async fn rename_image(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateImageRequest>,
+) -> Result<Json<UploadResult>, RouteError> {
+    validate_original_name(&req.original_name)?;
+
+    let updated = sqlx::query_as::<_, ImageRow>(
+        "UPDATE images SET original_name = $1 \
+         WHERE id = $2 AND user_id = $3 \
+         RETURNING id, public_key, original_name, url, mime_type, file_size, \
+                   sha256, width, height, status, thumbnail_url, webp_url, \
+                   created_at, category_id, storage_config_id"
+    )
+    .bind(&req.original_name)
+    .bind(id)
+    .bind(user.id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Rename image query failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "internal server error"})),
+        )
+    })?
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "image not found"})),
+        )
+    })?;
+
+    let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
+
+    Ok(Json(UploadResult::from_row(updated)))
 }
 
 /// GET /u/{public_key} — serve image publicly (unauthenticated)
@@ -859,4 +928,49 @@ pub async fn get_image_links(
     let bbcode = format!("[img]{}[/img]", url);
 
     Ok(Json(ImageLinks { url, markdown, html, bbcode }))
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+    use axum::http::StatusCode;
+
+    #[test]
+    fn validate_name_rejects_empty() {
+        let result = validate_original_name("");
+        assert!(result.is_err());
+        let (code, _) = result.unwrap_err();
+        assert_eq!(code, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn validate_name_rejects_too_long() {
+        let long_name = "a".repeat(256);
+        let result = validate_original_name(&long_name);
+        assert!(result.is_err());
+        let (code, _) = result.unwrap_err();
+        assert_eq!(code, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn validate_name_rejects_path_separators() {
+        for ch in &['/', '\\', '\0'] {
+            let name = format!("bad{}name.txt", ch);
+            let result = validate_original_name(&name);
+            assert!(result.is_err(), "should reject char '{}'", ch);
+        }
+    }
+
+    #[test]
+    fn validate_name_accepts_valid() {
+        let result = validate_original_name("valid-file_name (1).jpg");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_name_accepts_max_length() {
+        let name = "a".repeat(255);
+        let result = validate_original_name(&name);
+        assert!(result.is_ok());
+    }
 }

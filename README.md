@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.16.2** — P4-E complete. Client-side image preprocessing (EXIF strip, resize, format convert, compress, rotate) via Web Worker. 15 major features.
+**v0.16.3** — P4-F complete. File name retention + rename (PATCH /images/:id, inline rename on ImageDetail).
 
 ## Stack
 
@@ -141,6 +141,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 | POST | `/api/v1/images/upload-url` | JWT | Upload from URL (SSRF-protected download) |
 | GET | `/api/v1/images` | JWT | Paginated: `?page=&per_page=&sort=&order=&search=&storage_config_id=&category_id=` |
 | GET | `/api/v1/images/:id` | JWT | |
+| PATCH | `/api/v1/images/:id` | JWT | Rename: `{ original_name }` |
 | DELETE | `/api/v1/images/:id` | JWT | |
 | POST | `/api/v1/images/:id/move` | JWT | Move image to category: `{ category_id }` |
 | POST | `/api/v1/images/batch-delete` | JWT | `{ ids: UUID[] }`, max 100 |
@@ -195,6 +196,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 - [x] **Gallery categories** — 2-level hierarchy, sidebar tree, batch move, category filtering
 - [x] **Server-side watermark** — configurable text overlay (font/color/position/tile), applied in Worker pipeline
 - [x] **Client-side preprocessing** — browser-side image pipeline (EXIF strip, resize, format convert, compress, rotate) via Web Worker
+- [x] **File rename** — inline rename on ImageDetail, `PATCH /api/v1/images/:id`
 
 ## Project Structure
 
