@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.16.3` — P4-F complete. File name retention + rename (PATCH /images/:id, inline rename on ImageDetail).
+- Version: `0.17.1` — P4-I complete. System config management (admin config API + config.toml read/write), Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI).
 
 ## Key Commands
 
@@ -13,7 +13,7 @@
 |---|---|---|
 | Build all | `cargo build --workspace` | |
 | Check only api | `cargo check -p pichost-api` | Fast compile-check |
-| Test all | `cargo test --workspace` | 63 pass, 10 ignored (need DB/Redis/S3) |
+| Test all | `cargo test --workspace` | 70 pass, 10 ignored (need DB/Redis/S3) |
 | Lint | `cargo clippy --workspace -- -D warnings` | Zero warnings required |
 | Run API server | `cargo run -p pichost-api` | Requires PostgreSQL + Redis |
 | Frontend dev | `cd web-ui && npm run dev` | Vite proxies `/api`, `/u` → `localhost:3000` |
@@ -39,7 +39,7 @@
   - `PICHOST_AUTH_JWT_SECRET` — JWT signing key
   - `PICHOST_SERVER_PUBLIC_URL` — for OAuth callbacks and link generation
   - OAuth: `PICHOST_AUTH_OAUTH_GITHUB_CLIENT_ID`, `..._SECRET`, same for Google
-  - `PICHOST_STORAGE_LOCAL_BASE_PATH`, `PICHOST_STORAGE_RUSTFS_*` — storage config
+  - `PICHOST_STORAGE_LOCAL_BASE_PATH` — local storage dir; `PICHOST_STORAGE_RUSTFS_ENDPOINT`/`..._BUCKET`/`..._REGION`/`..._ACCESS_KEY`/`..._SECRET_KEY` — S3-compatible storage
   - `PICHOST_STORAGE_MAX_USER_CONFIGS` — max Git storage configs per user (default 5)
   - `PICHOST_AUTH_TOKEN_ENCRYPTION_KEY` — AES-256-GCM key for Git token encryption
 - No `config.toml` in repo — env vars are the intended override mechanism.
@@ -47,7 +47,7 @@
 ## CRATE BOUNDARIES
 
 - **pichost-core** (`pichost_core`): Domain models, config, error types, `StorageBackend` trait + `LocalStorage`/`RustfsStorage`/`GitStorage` impls + `StorageRouter`. No web/framework deps.
-- **pichost-api** (`pichost_api`): Axum server — routes, middleware, services, DB pool, Redis cache. Depends on `pichost-core`.
+- **pichost-api** (`pichost_api`): Axum server — routes, middleware, services, DB pool, Redis cache, system config service (config.toml read/write, backups, connection tests). Depends on `pichost-core`. Extra deps: `toml_edit` (0.22), `regex` (1), `thiserror`, `tempfile` (dev).
 - **pichost-worker**: Background image processing binary — thumbnail/WebP generation via Redis queue. Depends on `pichost-core`.
 
 ## Architecture Notes
@@ -106,11 +106,24 @@
 - 4 strategies in Redis middleware: auth (5/min/IP), upload (30/min/user), general (60/min/user), public images (200/min/IP).
 - Nginx layer: additional `limit_req` zones (60r/m API, 200r/m public).
 
+### Settings UI
+- NavBar uses a `DropdownMenu` (`web-ui/src/components/ui/DropdownMenu.tsx`) for the user section — Settings/Admin/Logout.
+- Settings page is restructured as accordion sections (Profile, Password, Storage Usage, Storage Backends, Watermark, Preprocessing, OAuth) with hash-based auto-expand (`#settings?section=...`).
+- Design token `--color-surface-hover` added to theme.css.
+
+### System Config
+- Config service in `pichost-api/src/services/config.rs` — reads/writes `config.toml` with figment-compatible nested keys (`[database] url`, `[redis] url`, `[server] public_url`, `[storage] default_backend`/`local_base_path`), timestamped `.bak` backups, `test_database_connection` (5s timeout) / `test_redis_connection`.
+- Admin config API (6 JWT+Admin endpoints under `/admin/config`): GET current config (sensitive fields masked), PUT write with auto-backup, POST test connections, POST backup, GET backups list, POST restore.
+- Frontend: `SystemConfig.tsx` component (Database/Redis/Server/Security/Backups sections, test-connection buttons, save/restore) wired to a "Config" tab in the Admin page.
+- Design tokens `--color-success` / `--color-success-hover` / `--color-success-subtle` added to theme.css.
+
 ### Deployment
 - Nginx :80 → API upstream `least_conn` (2 replicas).
 - Worker: 2 replicas, independent Redis `BRPOP` consumers.
 - API is stateless (state in PostgreSQL + Redis) — scale horizontally.
 - Postgres/Redis ports not exposed to host — internal Docker network only.
+- Bare-metal packaging: `scripts/pichost-api.service` + `scripts/pichost-worker.service` (systemd, `User=pichost`, `EnvironmentFile=/etc/pichost/.env`), install/uninstall via `scripts/install.sh` / `scripts/uninstall.sh`.
+- Release CI: `.github/workflows/release.yml` — `v*` tags trigger build of x86_64-unknown-linux-gnu, cargo test + clippy, then package `.tar.gz` with binaries/web-ui/migrations/nginx/scripts.
 
 ## API Endpoints Summary
 
@@ -145,6 +158,12 @@
 | GET | `/admin/users` | JWT+Admin | Paginated, includes quota |
 | PATCH | `/admin/users/:id` | JWT+Admin | Fields + `storage_quota` |
 | DELETE | `/admin/users/:id` | JWT+Admin | Cascades |
+| GET | `/admin/config` | JWT+Admin | Current config, sensitive fields masked |
+| PUT | `/admin/config` | JWT+Admin | Write config.toml (auto-backup), returns updated config |
+| POST | `/admin/config/test` | JWT+Admin | Test DB/Redis connections |
+| POST | `/admin/config/backup` | JWT+Admin | Create timestamped backup |
+| GET | `/admin/config/backups` | JWT+Admin | List backup files, newest first |
+| POST | `/admin/config/restore` | JWT+Admin | Restore config.toml from a backup |
 | GET | `/metrics` | No | Prometheus text format |
 | GET | `/health` | No | Nginx health check; also `/api/health` (JSON) |
 
@@ -164,7 +183,7 @@
 - Entry: `src/main.tsx` → `App.tsx`. Dev server :5173, proxy to :3000.
 - **CSS variables**: Design system uses `var(--color-*)` tokens for theming. Glass effects via `backdrop-blur-sm`, `bg-[var(--glass-bg)]`, `border-[var(--color-border)]`.
 - **Hooks**: `useUploadQueue` (multi-file upload with concurrency pool), `useInfiniteQuery` (Gallery scroll).
-- **Components**: `CategoryTree` (sidebar with inline CRUD — context menu, rename, delete confirmation, create modal).
+- **Components**: `CategoryTree` (sidebar with inline CRUD — context menu, rename, delete confirmation, create modal), `ui/DropdownMenu` (NavBar user menu), `SystemConfig` (admin config management — test connections, save/restore).
 
 ## Rules
 

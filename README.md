@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.16.3** — P4-F complete. File name retention + rename (PATCH /images/:id, inline rename on ImageDetail).
+**v0.17.1** — P4-G/H/I complete. Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI), system config management (admin config API + config.toml read/write).
 
 ## Stack
 
@@ -93,7 +93,7 @@ cd web-ui && npm install && npm run dev  # → http://localhost:5173
 ### Test & Lint
 
 ```bash
-cargo test --workspace                      # 38 pass, 10 ignored (need DB)
+cargo test --workspace                      # 70 pass, 10 ignored (need DB)
 cargo clippy --workspace -- -D warnings      # zero warnings required
 cd web-ui && npm run build                   # tsc -b && vite build
 ```
@@ -115,6 +115,11 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 | `PICHOST_AUTH_OAUTH_GOOGLE_CLIENT_ID` | OAuth | — | Google OAuth client ID |
 | `PICHOST_AUTH_OAUTH_GOOGLE_CLIENT_SECRET` | OAuth | — | Google OAuth client secret |
 | `PICHOST_STORAGE_LOCAL_BASE_PATH` | Local storage | `./storage-local` | File storage directory |
+| `PICHOST_STORAGE_RUSTFS_ENDPOINT` | RustFS | — | S3-compatible endpoint URL (MinIO, etc.) |
+| `PICHOST_STORAGE_RUSTFS_BUCKET` | RustFS | — | Bucket name |
+| `PICHOST_STORAGE_RUSTFS_REGION` | RustFS | `us-east-1` | Region |
+| `PICHOST_STORAGE_RUSTFS_ACCESS_KEY` | RustFS | — | Access key |
+| `PICHOST_STORAGE_RUSTFS_SECRET_KEY` | RustFS | — | Secret key |
 | `PICHOST_STORAGE_MAX_USER_CONFIGS` | — | `5` | Max Git storage configs per user |
 | `PICHOST_AUTH_TOKEN_ENCRYPTION_KEY` | Git storage | — | AES-256-GCM key for Git token encryption |
 | `DATABASE_URL` | Docker only | — | sqlx CLI helper (not consumed by app) |
@@ -165,6 +170,16 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 | PATCH | `/api/v1/admin/users/:id` | JWT+Admin | Edit user + set `storage_quota` |
 | DELETE | `/api/v1/admin/users/:id` | JWT+Admin | Cascades (images, oauth links) |
 
+### Admin Config
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| GET | `/api/v1/admin/config` | JWT+Admin | Current config, sensitive fields masked |
+| PUT | `/api/v1/admin/config` | JWT+Admin | Write config.toml (auto-backup), returns updated config |
+| POST | `/api/v1/admin/config/test` | JWT+Admin | Test DB/Redis connections |
+| POST | `/api/v1/admin/config/backup` | JWT+Admin | Create timestamped backup |
+| GET | `/api/v1/admin/config/backups` | JWT+Admin | List backup files, newest first |
+| POST | `/api/v1/admin/config/restore` | JWT+Admin | Restore config.toml from a backup |
+
 ### Observability
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
@@ -197,6 +212,9 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 - [x] **Server-side watermark** — configurable text overlay (font/color/position/tile), applied in Worker pipeline
 - [x] **Client-side preprocessing** — browser-side image pipeline (EXIF strip, resize, format convert, compress, rotate) via Web Worker
 - [x] **File rename** — inline rename on ImageDetail, `PATCH /api/v1/images/:id`
+- [x] **Settings UI optimization** — NavBar user dropdown (Settings/Admin/Logout), accordion settings with hash-based section expand
+- [x] **Software packaging** — systemd services, install/uninstall scripts, GitHub Actions release CI (`v*` tags → `.tar.gz`)
+- [x] **System config management** — admin config.toml read/write API, DB/Redis connection tests, backup/restore
 
 ## Project Structure
 
@@ -205,13 +223,18 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 │                            LocalStorage, RustfsStorage, GitStorage,
 │                            StorageRouter, AES-256-GCM crypto
 ├── pichost-api/             Axum server — routes, middleware, services,
-│                            DB pool, Redis, rate limiting, storage config CRUD
+│                            DB pool, Redis, rate limiting, storage config CRUD,
+│                            system config service (config.toml + backups)
 ├── pichost-worker/          Background processing — thumbnails, WebP, watermarks
 │   └── fonts/               5 built-in TTF fonts (rusttype + imageproc)
 ├── web-ui/                  React SPA — Zustand, TanStack Query, Tailwind CSS 4
+│   └── src/components/      Components (SystemConfig, CategoryTree, ...)
+│       └── ui/              UI primitives (Button, Input, DropdownMenu)
 ├── nginx/
 │   └── nginx.conf           Reverse proxy + cache + rate limiting
 ├── migrations/              10 SQL migrations (0001–0010)
+├── scripts/                 systemd services + install/uninstall scripts
+├── .github/workflows/       Release CI (v* tags → build, test, package .tar.gz)
 ├── Dockerfile.api           Multi-stage Rust build for API
 ├── Dockerfile.worker        Multi-stage Rust build for Worker
 ├── docker-compose.yml       Full stack: Nginx, API×2, Worker×2, PostgreSQL, Redis
@@ -237,6 +260,15 @@ curl http://localhost/health
 ```
 
 Default compute layout: 2 API replicas (least_conn), 2 worker replicas (independent consumers). Postgres and Redis ports are **not exposed** to the host — internal Docker network only.
+
+### systemd (bare metal)
+
+```bash
+sudo ./scripts/install.sh          # installs binaries to /opt/pichost, configures systemd units
+sudo ./scripts/uninstall.sh        # removes installation and services
+```
+
+Units: `pichost-api.service` (API) + `pichost-worker.service` (worker), run as user `pichost` with `EnvironmentFile=/etc/pichost/.env`. Release artifacts (`.tar.gz`) are built by GitHub Actions on `v*` tags.
 
 ### Production checklist
 
