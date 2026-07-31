@@ -1,0 +1,18 @@
+[Unit]
+Description=PicHost API Server
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=pichost
+Group=pichost
+WorkingDirectory=/opt/pichost
+EnvironmentFile=/etc/pichost/.env
+ExecStart=/opt/pichost/pichost-api
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

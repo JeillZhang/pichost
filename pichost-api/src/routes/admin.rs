@@ -24,6 +24,7 @@ use crate::db::DbPool;
 use crate::metrics::{TOTAL_IMAGES, TOTAL_STORAGE_BYTES, TOTAL_USERS};
 use crate::middleware::auth::AuthUser;
 use crate::routes::auth::UserInfo;
+use crate::services::config::{self, SystemConfig};
 
 // ── Error shorthand ──
 
@@ -68,6 +69,51 @@ type UserRow = (
     Option<i64>,
     Option<serde_json::Value>,
 );
+
+// ── Config endpoint types ─────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateConfigBody {
+    pub database_url: Option<String>,
+    pub redis_url: Option<String>,
+    pub public_url: Option<String>,
+    pub default_backend: Option<String>,
+    pub local_base_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TestConfigBody {
+    pub database_url: Option<String>,
+    pub redis_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RestoreBackupBody {
+    pub backup_file: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConfigResponse {
+    pub database_url: String,
+    pub redis_url: String,
+    pub jwt_secret: String,
+    pub token_encryption_key: String,
+    pub public_url: String,
+    pub default_backend: String,
+    pub local_base_path: String,
+    pub config_path: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BackupInfo {
+    pub filename: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TestResult {
+    pub database: Option<String>,
+    pub redis: Option<String>,
+}
 
 struct UserUpdateParams<'a> {
     pool: &'a DbPool,
@@ -433,6 +479,24 @@ fn build_backends_map(local: &BackendStats, rustfs: &BackendStats) -> HashMap<St
     m
 }
 
+// ── Config helpers ────────────────────────────────────────────────────
+
+fn mask_url(url: &str) -> String {
+    let re = regex::Regex::new(r"://([^:]*):([^@]*)@").unwrap();
+    re.replace(url, "://$1:***@").to_string()
+}
+
+fn config_file_path() -> std::path::PathBuf {
+    std::env::current_dir().unwrap_or_default().join("config.toml")
+}
+
+fn internal_error(msg: String) -> AdminError {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({"error": msg})),
+    )
+}
+
 // ── Handlers ───────────────────────────────────────────────────────────
 
 /// GET /api/v1/admin/users — paginated user list (admin only)
@@ -668,4 +732,111 @@ pub async fn list_invites(
         )
     })?;
     Ok(Json(codes))
+}
+
+// ── Config management handlers (P4-I) ─────────────────────────────────
+
+/// GET /api/v1/admin/config — current config with sensitive fields masked
+pub async fn get_admin_config() -> Result<Json<ConfigResponse>, AdminError> {
+    let path = config_file_path();
+    let cfg = config::read_config_toml(&path).map_err(|e| internal_error(e.to_string()))?;
+
+    Ok(Json(ConfigResponse {
+        database_url: cfg
+            .database_url
+            .as_deref()
+            .map(mask_url)
+            .unwrap_or_else(|| "not set".into()),
+        redis_url: cfg
+            .redis_url
+            .as_deref()
+            .map(mask_url)
+            .unwrap_or_else(|| "not set".into()),
+        jwt_secret: "********".into(),
+        token_encryption_key: if cfg.token_encryption_key.is_some() {
+            "********".into()
+        } else {
+            "not set".into()
+        },
+        public_url: cfg.public_url.unwrap_or_else(|| "not set".into()),
+        default_backend: cfg.default_backend.unwrap_or_else(|| "local".into()),
+        local_base_path: cfg.local_base_path.unwrap_or_else(|| "./storage-local".into()),
+        config_path: path.display().to_string(),
+    }))
+}
+
+/// PUT /api/v1/admin/config — write config.toml with auto-backup
+pub async fn update_admin_config(
+    Json(body): Json<UpdateConfigBody>,
+) -> Result<Json<ConfigResponse>, AdminError> {
+    let path = config_file_path();
+    // Best-effort backup — first save may have no existing config.toml
+    let _ = config::backup_config(&path);
+
+    let cfg = SystemConfig {
+        database_url: body.database_url,
+        redis_url: body.redis_url,
+        jwt_secret: None,
+        token_encryption_key: None,
+        public_url: body.public_url,
+        default_backend: body.default_backend,
+        local_base_path: body.local_base_path,
+    };
+    config::write_config_toml(&path, &cfg)
+        .map_err(|e| internal_error(format!("write failed: {e}")))?;
+
+    get_admin_config().await
+}
+
+/// POST /api/v1/admin/config/test — test DB/Redis connections
+pub async fn test_admin_config(
+    Json(body): Json<TestConfigBody>,
+) -> Result<Json<TestResult>, AdminError> {
+    let mut result = TestResult {
+        database: None,
+        redis: None,
+    };
+    if let Some(ref url) = body.database_url {
+        result.database = Some(match config::test_database_connection(url).await {
+            Ok(()) => "ok".into(),
+            Err(e) => format!("fail: {e}"),
+        });
+    }
+    if let Some(ref url) = body.redis_url {
+        result.redis = Some(match config::test_redis_connection(url) {
+            Ok(()) => "ok".into(),
+            Err(e) => format!("fail: {e}"),
+        });
+    }
+    Ok(Json(result))
+}
+
+/// POST /api/v1/admin/config/backup — create a timestamped backup
+pub async fn backup_admin_config() -> Result<Json<BackupInfo>, AdminError> {
+    let path = config_file_path();
+    let filename = config::backup_config(&path).map_err(|e| internal_error(e.to_string()))?;
+    Ok(Json(BackupInfo { filename }))
+}
+
+/// GET /api/v1/admin/config/backups — list backup files, newest first
+pub async fn list_config_backups() -> Result<Json<Vec<BackupInfo>>, AdminError> {
+    let dir = std::env::current_dir().unwrap_or_default();
+    let backups = config::list_backups(&dir)
+        .map_err(|e| internal_error(e.to_string()))?
+        .into_iter()
+        .map(|filename| BackupInfo { filename })
+        .collect();
+    Ok(Json(backups))
+}
+
+/// POST /api/v1/admin/config/restore — restore config.toml from a backup
+pub async fn restore_admin_config(
+    Json(body): Json<RestoreBackupBody>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let path = config_file_path();
+    config::restore_config(&path, &body.backup_file).map_err(|e| internal_error(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "status": "restored",
+        "from": body.backup_file,
+    })))
 }

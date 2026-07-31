@@ -168,6 +168,14 @@ fn admin_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
             "/invites",
             get(routes::admin::list_invites).post(routes::admin::create_invite),
         )
+        .route(
+            "/config",
+            get(routes::admin::get_admin_config).put(routes::admin::update_admin_config),
+        )
+        .route("/config/test", post(routes::admin::test_admin_config))
+        .route("/config/backup", post(routes::admin::backup_admin_config))
+        .route("/config/backups", get(routes::admin::list_config_backups))
+        .route("/config/restore", post(routes::admin::restore_admin_config))
         .route_layer(middleware::from_fn_with_state(
             state,
             rate_limit::rate_limit_general,
