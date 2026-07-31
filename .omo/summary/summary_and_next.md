@@ -293,10 +293,39 @@
 
 ### 版本: 0.16.2 → **0.16.3**
 
+## P4-G/H/I: Settings UI + Packaging + System Config ✅ (本次完成)
+
+### P4-G: Settings Entry Optimization
+- **NavBar**: 用户区改为 `DropdownMenu`（Settings/Admin/Logout），新建 `web-ui/src/components/ui/DropdownMenu.tsx`
+- **Settings 页面**: 重构为手风琴分区（Profile/Password/Storage Usage/Storage Backends/Watermark/Preprocessing/OAuth），支持 hash 自动展开（`#settings?section=...`）
+- **设计系统**: theme.css 新增 `--color-surface-hover` token
+- 无后端变更
+
+### P4-H: Software Packaging + CI/CD
+- **systemd 服务**: `scripts/pichost-api.service` + `scripts/pichost-worker.service`（Type=simple, User=pichost, WorkingDirectory=/opt/pichost, EnvironmentFile=/etc/pichost/.env）
+- **安装/卸载脚本**: `scripts/install.sh` / `scripts/uninstall.sh`
+- **Release CI**: `.github/workflows/release.yml` — `v*` tag 触发，构建 x86_64-unknown-linux-gnu，cargo test + clippy，打包 `.tar.gz`（binaries/web-ui/migrations/nginx/scripts）
+- **env.example**: 补齐全部 `PICHOST_*` 变量（DATABASE_URL/REDIS_URL/STORAGE/AUTH）
+- 无 Rust 代码变更
+
+### P4-I: System Configuration Management
+- **Config 服务**: `pichost-api/src/services/config.rs` — config.toml 读写（figment 兼容嵌套键 `[database] url`/`[redis] url`/`[server] public_url`/`[storage] default_backend`/`local_base_path`），带时间戳 `.bak` 备份/恢复，`test_database_connection`（5s 超时）/`test_redis_connection`
+- **依赖**: pichost-api 新增 `toml_edit = "0.22"`、`regex = "1"`、`thiserror.workspace = true`、`tempfile = "3"`（dev-dep）
+- **Admin Config API**: 6 个 JWT+Admin 端点（GET 掩码返回、PUT 写回+自动备份、POST /test 连接测试、POST /backup、GET /backups、POST /restore）
+- **前端**: `web-ui/src/components/SystemConfig.tsx` — Database/Redis/Server/Security/Backups 分区、连接测试按钮、保存/恢复；Admin 页新增 "Config" 标签
+- **设计系统**: theme.css 新增 `--color-success` / `--color-success-hover` / `--color-success-subtle` tokens
+- 无新增数据库迁移
+
+### Verification
+- `cargo clippy --workspace -D warnings` ✅
+- `cargo test --workspace` ✅ (70 pass, 10 ignored)
+- `npm run build` ✅
+
+### 版本: 0.16.3 → **0.17.1**
+
 ## 待实施
 
 | 阶段 | 主题 | 依赖 |
 |------|------|------|
-| P4-G | 设置入口优化 | 无 |
-| P4-H | 软件打包 + 自动化发布 | 无 |
-| P4-I | 系统配置管理 | 无 |
+
+当前计划内阶段（P0–P4-I）已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划）。

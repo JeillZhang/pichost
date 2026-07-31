@@ -1,11 +1,94 @@
-import { useState, useEffect, type FormEvent } from 'react'
+import { useState, useEffect, type FormEvent, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { Loader2, Save, Lock } from 'lucide-react'
+import {
+  Loader2,
+  Save,
+  Lock,
+  User,
+  HardDrive,
+  Database,
+  Droplets,
+  Image,
+  Shield,
+  ChevronDown,
+  type LucideIcon,
+} from 'lucide-react'
 import { getUserMe, updateUserMe, changePassword, getUserStats } from '../api/client'
 import type { UserProfile, UserStats } from '../api/client'
 import StorageConfigSection from '../components/StorageConfigSection'
 import WatermarkSettings from '../components/WatermarkSettings'
 import { PreprocessingSettings } from '../components/PreprocessingSettings'
+
+type SettingsSection =
+  | 'profile'
+  | 'password'
+  | 'storage-usage'
+  | 'storage-configs'
+  | 'watermark'
+  | 'preprocessing'
+  | 'oauth'
+
+const SECTION_META: Record<SettingsSection, { title: string; icon: LucideIcon }> = {
+  profile: { title: 'Profile', icon: User },
+  password: { title: 'Password', icon: Lock },
+  'storage-usage': { title: 'Storage Usage', icon: HardDrive },
+  'storage-configs': { title: 'Storage Backends', icon: Database },
+  watermark: { title: 'Watermark', icon: Droplets },
+  preprocessing: { title: 'Preprocessing', icon: Image },
+  oauth: { title: 'OAuth', icon: Shield },
+}
+
+const MOBILE_QUERY = '(max-width: 767px)'
+
+function parseSectionFromHash(hash: string): SettingsSection | null {
+  const match = hash.match(/^#settings\?section=([a-z-]+)/)
+  if (!match) return null
+  const section = match[1] as SettingsSection
+  return section in SECTION_META ? section : null
+}
+
+interface AccordionSectionProps {
+  id: SettingsSection
+  expanded: boolean
+  onToggle: (id: SettingsSection) => void
+  padded?: boolean
+  children: ReactNode
+}
+
+function AccordionSection({ id, expanded, onToggle, padded = true, children }: AccordionSectionProps) {
+  const { title, icon: Icon } = SECTION_META[id]
+  return (
+    <div
+      id={`settings-section-${id}`}
+      className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] backdrop-blur-sm"
+    >
+      <button
+        type="button"
+        onClick={() => onToggle(id)}
+        aria-expanded={expanded}
+        aria-controls={`settings-section-${id}-content`}
+        className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-glass)]"
+      >
+        <Icon className="h-4 w-4 shrink-0" style={{ color: 'var(--color-text-muted)' }} />
+        <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          {title}
+        </span>
+        <ChevronDown
+          className={`ml-auto h-4 w-4 shrink-0 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+          style={{ color: 'var(--color-text-muted)' }}
+        />
+      </button>
+      {expanded && (
+        <div
+          id={`settings-section-${id}-content`}
+          className={`border-t border-[var(--color-border)] ${padded ? 'p-4' : ''}`}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function Settings() {
   const [profile, setProfile] = useState<UserProfile | null>(null)
@@ -20,6 +103,14 @@ export default function Settings() {
   const [newPassword, setNewPassword] = useState('')
   const [changingPw, setChangingPw] = useState(false)
 
+  const [expanded, setExpanded] = useState<Set<SettingsSection>>(() => {
+    const section = parseSectionFromHash(window.location.hash)
+    return section ? new Set([section]) : new Set()
+  })
+  const [scrollTarget, setScrollTarget] = useState<SettingsSection | null>(() =>
+    parseSectionFromHash(window.location.hash),
+  )
+
   useEffect(() => {
     Promise.all([getUserMe(), getUserStats()])
       .then(([p, s]) => {
@@ -31,6 +122,33 @@ export default function Settings() {
       .catch(() => toast.error('Failed to load profile'))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    if (loading || !scrollTarget) return
+    requestAnimationFrame(() => {
+      document
+        .getElementById(`settings-section-${scrollTarget}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setScrollTarget(null)
+    })
+  }, [loading, scrollTarget])
+
+  function toggleSection(id: SettingsSection) {
+    const isMobile = window.matchMedia(MOBILE_QUERY).matches
+    const next = new Set(expanded)
+    if (next.has(id)) {
+      next.delete(id)
+    } else {
+      if (isMobile) next.clear()
+      next.add(id)
+    }
+    setExpanded(next)
+    if (next.has(id)) {
+      window.history.replaceState(null, '', `#settings?section=${id}`)
+    } else if (next.size === 0) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }
 
   async function handleSaveProfile(e: FormEvent) {
     e.preventDefault()
@@ -85,88 +203,97 @@ export default function Settings() {
     <div className="mx-auto max-w-2xl space-y-4 p-4">
       <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>Settings</h2>
 
-      {/* Profile Card */}
-      <form onSubmit={handleSaveProfile} className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm">
-        <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Profile</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Username</label>
-            <input type="text" value={username} onChange={e => setUsername(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm"
-              style={{ color: 'var(--color-text-primary)' }} />
+      {/* Profile */}
+      <AccordionSection id="profile" expanded={expanded.has('profile')} onToggle={toggleSection}>
+        <form onSubmit={handleSaveProfile} className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Username</label>
+              <input type="text" value={username} onChange={e => setUsername(e.target.value)}
+                className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm"
+                style={{ color: 'var(--color-text-primary)' }} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Email</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm"
+                style={{ color: 'var(--color-text-primary)' }} />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Email</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm"
-              style={{ color: 'var(--color-text-primary)' }} />
-          </div>
-        </div>
-        <button type="submit" disabled={saving}
-          className="flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-          style={{ backgroundColor: 'var(--color-accent)' }}>
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-          Save Profile
-        </button>
-      </form>
+          <button type="submit" disabled={saving}
+            className="flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            style={{ backgroundColor: 'var(--color-accent)' }}>
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            Save Profile
+          </button>
+        </form>
+      </AccordionSection>
 
-      {/* Password Card */}
-      <form onSubmit={handleChangePassword} className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm">
-        <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Password</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Current Password</label>
-            <input type="password" required value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm"
-              style={{ color: 'var(--color-text-primary)' }} />
+      {/* Password */}
+      <AccordionSection id="password" expanded={expanded.has('password')} onToggle={toggleSection}>
+        <form onSubmit={handleChangePassword} className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Current Password</label>
+              <input type="password" required value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
+                className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm"
+                style={{ color: 'var(--color-text-primary)' }} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>New Password (min 8 chars)</label>
+              <input type="password" required minLength={8} value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm"
+                style={{ color: 'var(--color-text-primary)' }} />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>New Password (min 8 chars)</label>
-            <input type="password" required minLength={8} value={newPassword} onChange={e => setNewPassword(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm"
-              style={{ color: 'var(--color-text-primary)' }} />
-          </div>
-        </div>
-        <button type="submit" disabled={changingPw}
-          className="flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-          style={{ backgroundColor: 'var(--color-accent)' }}>
-          {changingPw ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lock className="h-3.5 w-3.5" />}
-          Change Password
-        </button>
-      </form>
+          <button type="submit" disabled={changingPw}
+            className="flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            style={{ backgroundColor: 'var(--color-accent)' }}>
+            {changingPw ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lock className="h-3.5 w-3.5" />}
+            Change Password
+          </button>
+        </form>
+      </AccordionSection>
 
       {/* Storage Usage */}
-      <div className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm">
-        <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Storage Usage</h3>
-        {quota && quota > 0 ? (
-          <div>
-            <div className="flex justify-between text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              <span>{formatBytes(used)} / {formatBytes(quota)}</span>
-              <span>{usagePercent.toFixed(0)}%</span>
+      <AccordionSection id="storage-usage" expanded={expanded.has('storage-usage')} onToggle={toggleSection}>
+        <div className="space-y-3">
+          {quota && quota > 0 ? (
+            <div>
+              <div className="flex justify-between text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                <span>{formatBytes(used)} / {formatBytes(quota)}</span>
+                <span>{usagePercent.toFixed(0)}%</span>
+              </div>
+              <div className="mt-1 h-2 overflow-hidden rounded-full" style={{ backgroundColor: 'var(--color-surface)' }}>
+                <div className="h-full rounded-full transition-all" style={{ width: `${usagePercent}%`, backgroundColor: quotaColor }} />
+              </div>
             </div>
-            <div className="mt-1 h-2 overflow-hidden rounded-full" style={{ backgroundColor: 'var(--color-surface)' }}>
-              <div className="h-full rounded-full transition-all" style={{ width: `${usagePercent}%`, backgroundColor: quotaColor }} />
-            </div>
-          </div>
-        ) : (
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{formatBytes(used)} used (unlimited)</p>
-        )}
-      </div>
+          ) : (
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{formatBytes(used)} used (unlimited)</p>
+          )}
+        </div>
+      </AccordionSection>
 
       {/* Storage Configs */}
-      <StorageConfigSection />
+      <AccordionSection id="storage-configs" expanded={expanded.has('storage-configs')} onToggle={toggleSection} padded={false}>
+        <StorageConfigSection />
+      </AccordionSection>
 
       {/* Watermark Settings */}
-      <WatermarkSettings
-        profile={profile}
-        onUpdate={(updatedProfile) => setProfile(updatedProfile)}
-      />
+      <AccordionSection id="watermark" expanded={expanded.has('watermark')} onToggle={toggleSection} padded={false}>
+        <WatermarkSettings
+          profile={profile}
+          onUpdate={(updatedProfile) => setProfile(updatedProfile)}
+        />
+      </AccordionSection>
 
       {/* Preprocessing Settings */}
-      <PreprocessingSettings />
+      <AccordionSection id="preprocessing" expanded={expanded.has('preprocessing')} onToggle={toggleSection}>
+        <PreprocessingSettings />
+      </AccordionSection>
 
-      {/* OAuth Card */}
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm">
+      {/* OAuth */}
+      <AccordionSection id="oauth" expanded={expanded.has('oauth')} onToggle={toggleSection}>
         <h3 className="mb-2 text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>OAuth Accounts</h3>
         <p className="mb-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
           Link your GitHub or Google account for one-click login.
@@ -183,7 +310,7 @@ export default function Settings() {
             Link Google
           </a>
         </div>
-      </div>
+      </AccordionSection>
     </div>
   )
 }

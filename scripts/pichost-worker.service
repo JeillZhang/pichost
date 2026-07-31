@@ -1,0 +1,18 @@
+[Unit]
+Description=PicHost Background Worker
+After=network.target postgresql.service redis.service pichost-api.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=pichost
+Group=pichost
+WorkingDirectory=/opt/pichost
+EnvironmentFile=/etc/pichost/.env
+ExecStart=/opt/pichost/pichost-worker
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

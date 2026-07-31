@@ -3043,7 +3043,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pichost-api"
-version = "0.16.3"
+version = "0.17.1"
 dependencies = [
  "argon2",
  "axum",
@@ -3059,13 +3059,17 @@ dependencies = [
  "prometheus",
  "rand 0.8.6",
  "redis 0.27.6",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "sha2 0.10.9",
  "sqlx",
+ "tempfile",
+ "thiserror 2.0.18",
  "tokio",
+ "toml_edit",
  "tower",
  "tower-http",
  "tracing",
@@ -3076,7 +3080,7 @@ dependencies = [
 
 [[package]]
 name = "pichost-core"
-version = "0.16.3"
+version = "0.17.1"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -3100,7 +3104,7 @@ dependencies = [
 
 [[package]]
 name = "pichost-worker"
-version = "0.16.3"
+version = "0.17.1"
 dependencies = [
  "ab_glyph",
  "chrono",
@@ -3655,6 +3659,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5102a6aaa05aa011a238e178e6bca86d2cb56fc9f586d37cb80f5bca6e07759"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "regex"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a0e75113e14dc5acb068cd0786884f214f1312650a3d36d269f5c4f3cdee8a2"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-automata",
+ "regex-syntax",
 ]
 
 [[package]]
