@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use pichost_core::config::AppConfig;
+
 /// Runtime `config.toml` view. Every field is optional so a missing file
 /// (or missing key) falls back to `pichost-core` figment defaults.
 #[derive(Debug, Clone, Default)]
@@ -11,6 +13,22 @@ pub struct SystemConfig {
     pub public_url: Option<String>,
     pub default_backend: Option<String>,
     pub local_base_path: Option<String>,
+}
+
+impl SystemConfig {
+    /// Build a config.toml view from the runtime-effective config.
+    /// Sensitive fields (`jwt_secret`, `token_encryption_key`) are intentionally omitted.
+    pub fn from_effective(cfg: &AppConfig) -> Self {
+        Self {
+            database_url: Some(cfg.database.url.clone()),
+            redis_url: Some(cfg.redis.url.clone()),
+            jwt_secret: None,
+            token_encryption_key: None,
+            public_url: Some(cfg.server.public_url.clone()),
+            default_backend: Some(cfg.storage.default_backend.clone()),
+            local_base_path: Some(cfg.storage.local_base_path.display().to_string()),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -200,5 +218,26 @@ mod tests {
         let config = read_config_toml(&path).unwrap();
         assert_eq!(config.database_url, None);
         assert_eq!(config.public_url, None);
+    }
+
+    #[test]
+    fn test_from_effective_omits_secrets_and_roundtrips() {
+        let app = pichost_core::config::AppConfig::default();
+        let view = SystemConfig::from_effective(&app);
+        assert!(view.jwt_secret.is_none());
+        assert!(view.token_encryption_key.is_none());
+        assert_eq!(
+            view.database_url.as_deref(),
+            Some("postgres://pichost:pichost@localhost:5432/pichost")
+        );
+        assert_eq!(view.redis_url.as_deref(), Some("redis://localhost:6379"));
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        write_config_toml(&path, &view).unwrap();
+        let read = read_config_toml(&path).unwrap();
+        assert_eq!(read.database_url, view.database_url);
+        assert_eq!(read.public_url, view.public_url);
+        assert_eq!(read.default_backend, view.default_backend);
     }
 }
