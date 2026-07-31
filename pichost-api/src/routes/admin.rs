@@ -811,9 +811,16 @@ pub async fn test_admin_config(
     Ok(Json(result))
 }
 
-/// POST /api/v1/admin/config/backup — create a timestamped backup
-pub async fn backup_admin_config() -> Result<Json<BackupInfo>, AdminError> {
+/// POST /api/v1/admin/config/backup — materializes config.toml if missing, then backs it up
+pub async fn backup_admin_config(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<BackupInfo>, AdminError> {
     let path = config_file_path();
+    if !path.exists() {
+        let cfg = SystemConfig::from_effective(&state.config);
+        config::write_config_toml(&path, &cfg)
+            .map_err(|e| internal_error(format!("materialize config failed: {e}")))?;
+    }
     let filename = config::backup_config(&path).map_err(|e| internal_error(e.to_string()))?;
     Ok(Json(BackupInfo { filename }))
 }
