@@ -79,6 +79,10 @@ fn test_batch_move_request_serde() {
     );
     let req: BatchMoveRequest = serde_json::from_str(json).unwrap();
     assert_eq!(req.image_ids.len(), 2);
+    assert_eq!(
+        req.category_id,
+        Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()
+    );
 }
 
 #[test]
