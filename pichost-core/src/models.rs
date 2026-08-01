@@ -294,3 +294,211 @@ mod watermark_tests {
         assert!(inner.unwrap().enabled);
     }
 }
+
+#[cfg(test)]
+mod model_tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn now() -> DateTime<Utc> {
+        Utc::now()
+    }
+
+    #[test]
+    fn image_status_display() {
+        assert_eq!(ImageStatus::Pending.to_string(), "pending");
+        assert_eq!(ImageStatus::Active.to_string(), "active");
+        assert_eq!(ImageStatus::Processing.to_string(), "processing");
+        assert_eq!(ImageStatus::Ready.to_string(), "ready");
+        assert_eq!(ImageStatus::Failed.to_string(), "failed");
+    }
+
+    #[test]
+    fn image_status_serde_roundtrip() {
+        for (status, name) in [
+            (ImageStatus::Pending, "pending"),
+            (ImageStatus::Active, "active"),
+            (ImageStatus::Processing, "processing"),
+            (ImageStatus::Ready, "ready"),
+            (ImageStatus::Failed, "failed"),
+        ] {
+            let json = serde_json::to_string(&status).unwrap();
+            assert_eq!(json, format!("\"{}\"", name));
+            let back: ImageStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, status);
+        }
+    }
+
+    fn sample_user() -> User {
+        User {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+            email: Some("alice@example.com".into()),
+            password_hash: "hash".into(),
+            storage_backend: "local".into(),
+            storage_prefix: "pfx".into(),
+            storage_quota: Some(1_000_000),
+            is_admin: true,
+            created_at: now(),
+            updated_at: now(),
+            watermark_config: None,
+        }
+    }
+
+    #[test]
+    fn user_serde_roundtrip() {
+        let user = sample_user();
+        let json = serde_json::to_string(&user).unwrap();
+        let back: User = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, user.id);
+        assert_eq!(back.username, "alice");
+        assert_eq!(back.email, user.email);
+        assert_eq!(back.storage_quota, Some(1_000_000));
+        assert!(back.is_admin);
+    }
+
+    fn sample_image(category_id: Option<Uuid>) -> Image {
+        Image {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            public_key: "abc123".into(),
+            original_name: "photo.png".into(),
+            storage_key: "u/1/2026/01/01/a.png".into(),
+            storage_backend: "local".into(),
+            mime_type: "image/png".into(),
+            file_size: 1024,
+            width: Some(100),
+            height: Some(50),
+            sha256: "deadbeef".into(),
+            url: "http://x/u/abc123".into(),
+            thumbnail_key: None,
+            thumbnail_url: None,
+            webp_key: None,
+            webp_url: None,
+            status: ImageStatus::Active,
+            storage_config_id: None,
+            category_id,
+            created_at: now(),
+        }
+    }
+
+    #[test]
+    fn image_serde_roundtrip_with_category() {
+        let cat = Uuid::new_v4();
+        let img = sample_image(Some(cat));
+        let json = serde_json::to_string(&img).unwrap();
+        let back: Image = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.category_id, Some(cat));
+        assert_eq!(back.status, ImageStatus::Active);
+    }
+
+    #[test]
+    fn image_serde_roundtrip_without_category() {
+        let img = sample_image(None);
+        let json = serde_json::to_string(&img).unwrap();
+        let back: Image = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.category_id, None);
+    }
+
+    #[test]
+    fn user_storage_config_serde_roundtrip() {
+        let cfg = UserStorageConfig {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            name: "my git".into(),
+            provider: "github".into(),
+            is_default: true,
+            config: serde_json::json!({"repo": "a/b", "branch": "main"}),
+            created_at: now(),
+            updated_at: now(),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: UserStorageConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "my git");
+        assert_eq!(back.provider, "github");
+        assert!(back.is_default);
+        assert_eq!(back.config["branch"], "main");
+    }
+
+    #[test]
+    fn git_config_detail_deserialize() {
+        let detail: GitConfigDetail = serde_json::from_str(
+            r#"{"token_encrypted":"enc","repo":"owner/repo","branch":"main","path_prefix":"pic"}"#,
+        )
+        .unwrap();
+        assert_eq!(detail.token_encrypted, "enc");
+        assert_eq!(detail.repo, "owner/repo");
+        assert_eq!(detail.branch, "main");
+        assert_eq!(detail.path_prefix, Some("pic".into()));
+
+        let minimal: GitConfigDetail =
+            serde_json::from_str(r#"{"token_encrypted":"e","repo":"o/r","branch":"b"}"#)
+                .unwrap();
+        assert!(minimal.path_prefix.is_none());
+    }
+
+    #[test]
+    fn category_serde_roundtrip() {
+        let cat = Category {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            name: "travel".into(),
+            parent_id: None,
+            created_at: now(),
+        };
+        let json = serde_json::to_string(&cat).unwrap();
+        let back: Category = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "travel");
+        assert_eq!(back.parent_id, None);
+    }
+
+    #[test]
+    fn user_storage_config_response_serialize() {
+        let resp = UserStorageConfigResponse {
+            id: Uuid::new_v4(),
+            name: "git".into(),
+            provider: "github".into(),
+            repo: "owner/repo".into(),
+            branch: "main".into(),
+            path_prefix: None,
+            is_default: false,
+            token_masked: "ghp_****5678".into(),
+            created_at: now(),
+            updated_at: now(),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["token_masked"], "ghp_****5678");
+        assert_eq!(v["provider"], "github");
+        assert!(v["path_prefix"].is_null());
+    }
+
+    #[test]
+    fn upload_task_serde_roundtrip() {
+        let task = UploadTask {
+            id: Uuid::new_v4(),
+            image_id: Uuid::new_v4(),
+            task_type: "thumbnail".into(),
+            payload: Some(serde_json::json!({"size": 300})),
+            status: "pending".into(),
+            error: None,
+            retry_count: 0,
+            max_retries: 3,
+            created_at: now(),
+            completed_at: None,
+        };
+        let json = serde_json::to_string(&task).unwrap();
+        let back: UploadTask = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.task_type, "thumbnail");
+        assert_eq!(back.payload.unwrap()["size"], 300);
+        assert_eq!(back.retry_count, 0);
+    }
+
+    #[test]
+    fn change_password_request_deserialize() {
+        let req: ChangePasswordRequest =
+            serde_json::from_str(r#"{"current_password":"old","new_password":"new"}"#).unwrap();
+        assert_eq!(req.current_password, "old");
+        assert_eq!(req.new_password, "new");
+    }
+}

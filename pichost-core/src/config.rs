@@ -248,3 +248,140 @@ pub fn load_config() -> Result<AppConfig, figment::Error> {
 
     figment.extract()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.old {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    struct PichostEnvGuard {
+        saved: Vec<(String, Option<String>)>,
+    }
+
+    impl PichostEnvGuard {
+        fn capture() -> Self {
+            let saved = std::env::vars()
+                .filter(|(k, _)| k.starts_with("PICHOST_"))
+                .map(|(k, v)| {
+                    std::env::remove_var(&k);
+                    (k, Some(v))
+                })
+                .collect();
+            Self { saved }
+        }
+    }
+
+    impl Drop for PichostEnvGuard {
+        fn drop(&mut self) {
+            for (k, v) in &self.saved {
+                match v {
+                    Some(v) => std::env::set_var(k, v),
+                    None => std::env::remove_var(k),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_defaults_app_config() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.server.host, "0.0.0.0");
+        assert_eq!(cfg.server.port, 3000);
+        assert_eq!(cfg.server.public_url, "http://localhost:3000");
+        assert_eq!(cfg.auth.jwt_secret, "");
+        assert_eq!(cfg.auth.access_token_ttl, 900);
+        assert_eq!(cfg.auth.refresh_token_ttl, 2_592_000);
+        assert_eq!(
+            cfg.database.url,
+            "postgres://pichost:pichost@localhost:5432/pichost"
+        );
+        assert_eq!(cfg.database.max_connections, 10);
+        assert_eq!(cfg.redis.url, "redis://localhost:6379");
+        assert_eq!(cfg.redis.pool_size, 20);
+        assert_eq!(cfg.storage.default_backend, "local");
+        assert_eq!(cfg.storage.local_base_path, PathBuf::from("./storage-local"));
+        assert!(cfg.storage.rustfs.is_none());
+        assert_eq!(cfg.upload.max_file_size_admin, 52_428_800);
+        assert_eq!(cfg.upload.max_file_size_user, 10_485_760);
+        assert_eq!(cfg.upload.storage_quota_default, 1_073_741_824);
+        assert!(cfg.upload.allowed_mimes.contains(&"image/png".to_string()));
+        assert_eq!(cfg.logging.level, "info");
+        assert_eq!(cfg.logging.format, "json");
+        assert!(cfg.token_encryption_key.is_none());
+        assert!(cfg.storage_max_user_configs.is_none());
+    }
+
+    #[test]
+    fn test_defaults_rate_limit() {
+        let rl = RateLimitConfig::default();
+        assert_eq!(rl.auth_max, 5);
+        assert_eq!(rl.upload_max, 30);
+        assert_eq!(rl.general_max, 60);
+        assert_eq!(rl.public_max, 200);
+    }
+
+    #[test]
+    fn test_defaults_worker() {
+        let w = WorkerConfig::default();
+        assert_eq!(w.concurrency, 4);
+        assert_eq!(w.queue_poll_timeout, 5);
+        assert_eq!(w.task_timeout, 300);
+        assert_eq!(w.recovery_scan_interval, 60);
+        let p = WorkerProcessingConfig::default();
+        assert_eq!(p.thumbnail_size, 300);
+        assert_eq!(p.thumbnail_quality, 85);
+        assert_eq!(p.webp_quality, 82.0);
+        assert_eq!(p.compress_threshold_kb, 500);
+        assert_eq!(w.processing.thumbnail_size, p.thumbnail_size);
+    }
+
+    #[test]
+    fn test_load_config_env_override_and_restore() {
+        let _guard = PichostEnvGuard::capture();
+        let g1 = EnvGuard::set("PICHOST_AUTH__JWT_SECRET", "supersecret1234567890");
+        let g2 = EnvGuard::set("PICHOST_DATABASE_URL", "postgres://x:y@db:5432/app");
+        let cfg = load_config().unwrap();
+        assert_eq!(cfg.auth.jwt_secret, "supersecret1234567890");
+        assert_eq!(cfg.database.url, "postgres://x:y@db:5432/app");
+        drop(g1);
+        drop(g2);
+        let cfg = load_config().unwrap();
+        assert_eq!(cfg.auth.jwt_secret, "");
+        assert_eq!(
+            cfg.database.url,
+            "postgres://pichost:pichost@localhost:5432/pichost"
+        );
+    }
+
+    #[test]
+    fn test_rustfs_config_region_default() {
+        let cfg: RustfsStorageConfig = serde_json::from_str(
+            r#"{"endpoint":"http://x","bucket":"b","access_key":"a","secret_key":"s"}"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.region, "us-east-1");
+        assert!(!cfg.use_ssl);
+        assert!(cfg.public_endpoint.is_none());
+    }
+}

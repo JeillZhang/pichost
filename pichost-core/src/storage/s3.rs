@@ -69,11 +69,15 @@ impl StorageBackend for RustfsStorage {
             .send()
             .await
             .map_err(|e| {
-                let err_str = e.to_string();
-                if err_str.contains("NoSuchKey") || err_str.contains("NotFound") {
+                let not_found = e
+                    .as_service_error()
+                    .is_some_and(|se| se.is_no_such_key())
+                    || e.to_string().contains("NoSuchKey")
+                    || e.to_string().contains("NotFound");
+                if not_found {
                     StorageError::NotFound(key.to_string())
                 } else {
-                    StorageError::ReadFailed(err_str)
+                    StorageError::ReadFailed(e.to_string())
                 }
             })?;
 
@@ -118,5 +122,46 @@ impl StorageBackend for RustfsStorage {
 
     fn backend_name(&self) -> &str {
         "rustfs"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(endpoint: &str) -> RustfsStorageConfig {
+        RustfsStorageConfig {
+            endpoint: endpoint.into(),
+            bucket: "pichost".into(),
+            access_key: "minioadmin".into(),
+            secret_key: "minioadmin".into(),
+            region: "us-east-1".into(),
+            use_ssl: false,
+            public_endpoint: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn public_url_format() {
+        let s = RustfsStorage::new(&config("http://localhost:9000/")).await;
+        assert_eq!(
+            s.public_url("users/u/file.png"),
+            "http://localhost:9000/pichost/users/u/file.png"
+        );
+    }
+
+    #[tokio::test]
+    async fn public_url_no_trailing_slash() {
+        let s = RustfsStorage::new(&config("http://localhost:9000")).await;
+        assert_eq!(
+            s.public_url("k.png"),
+            "http://localhost:9000/pichost/k.png"
+        );
+    }
+
+    #[tokio::test]
+    async fn backend_name_is_rustfs() {
+        let s = RustfsStorage::new(&config("http://localhost:9000")).await;
+        assert_eq!(s.backend_name(), "rustfs");
     }
 }

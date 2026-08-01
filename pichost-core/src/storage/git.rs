@@ -276,3 +276,362 @@ impl StorageBackend for GitStorage {
         self.raw_url(key)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    type Responder =
+        Arc<dyn Fn(&str, &str) -> (u16, Vec<(String, String)>, String) + Send + Sync>;
+
+    fn test_storage(api_base: &str, provider: GitProvider) -> GitStorage {
+        GitStorage {
+            provider,
+            client: reqwest::Client::new(),
+            owner: "owner".into(),
+            repo: "repo".into(),
+            branch: "main".into(),
+            path_prefix: None,
+            token: "tok".into(),
+            raw_base_url: "127.0.0.1:9".into(),
+            api_base_url: api_base.into(),
+        }
+    }
+
+    async fn spawn_mock(responder: Responder) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let responder = responder.clone();
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = [0u8; 8192];
+                    let n = sock.read(&mut buf).await.unwrap();
+                    let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let mut parts = req.split_whitespace();
+                    let method = parts.next().unwrap_or("").to_string();
+                    let path = parts.next().unwrap_or("").to_string();
+                    let (code, headers, body) = responder(&method, &path);
+                    let mut resp = format!(
+                        "HTTP/1.1 {code} R\r\nConnection: close\r\nContent-Length: {}\r\n",
+                        body.len()
+                    );
+                    for (k, v) in headers {
+                        resp.push_str(&format!("{k}: {v}\r\n"));
+                    }
+                    resp.push_str("\r\n");
+                    resp.push_str(&body);
+                    sock.write_all(resp.as_bytes()).await.unwrap();
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    async fn closed_url() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        format!("http://{addr}")
+    }
+
+    fn github() -> GitStorage {
+        GitStorage::new(
+            GitProvider::GitHub,
+            "owner".into(),
+            "repo".into(),
+            "main".into(),
+            None,
+            "tok".into(),
+        )
+    }
+
+    fn gitcode() -> GitStorage {
+        GitStorage::new(
+            GitProvider::GitCode,
+            "owner".into(),
+            "repo".into(),
+            "main".into(),
+            None,
+            "tok".into(),
+        )
+    }
+
+    #[test]
+    fn backend_names() {
+        assert_eq!(github().backend_name(), "github");
+        assert_eq!(gitcode().backend_name(), "gitcode");
+    }
+
+    #[test]
+    fn public_url_formats() {
+        assert_eq!(
+            github().public_url("abc.png"),
+            "https://raw.githubusercontent.com/owner/repo/main/abc.png"
+        );
+        assert_eq!(
+            gitcode().public_url("abc.png"),
+            "https://raw.gitcode.com/owner/repo/main/abc.png"
+        );
+    }
+
+    #[test]
+    fn contents_url_formats() {
+        assert_eq!(
+            github().contents_url("p/x.png"),
+            "https://api.github.com/repos/owner/repo/contents/p/x.png"
+        );
+        assert_eq!(
+            gitcode().contents_url("p/x.png"),
+            "https://api.gitcode.com/api/v5/repos/owner/repo/contents/p/x.png"
+        );
+    }
+
+    #[test]
+    fn mime_to_ext_mapping() {
+        let cases = [
+            ("image/png", "png"),
+            ("image/jpeg", "jpg"),
+            ("image/gif", "gif"),
+            ("image/webp", "webp"),
+            ("image/svg+xml", "svg"),
+            ("image/avif", "avif"),
+            ("image/bmp", "bmp"),
+            ("text/plain", "bin"),
+        ];
+        for (mime, ext) in cases {
+            assert_eq!(GitStorage::mime_to_ext(mime), ext);
+        }
+    }
+
+    #[test]
+    fn build_commit_message_format() {
+        assert_eq!(GitStorage::build_commit_message("abc"), "Upload abc");
+    }
+
+    #[test]
+    fn github_no_size_limit() {
+        let s = github();
+        let big = vec![0u8; 20 * 1024 * 1024 + 1];
+        assert!(s.check_gitcode_size_limit(&big).is_ok());
+    }
+
+    #[test]
+    fn gitcode_size_limit() {
+        let s = gitcode();
+        let ok = vec![0u8; 20 * 1024 * 1024];
+        assert!(s.check_gitcode_size_limit(&ok).is_ok());
+        let big = vec![0u8; 20 * 1024 * 1024 + 1];
+        let err = s.check_gitcode_size_limit(&big).unwrap_err();
+        assert!(matches!(err, StorageError::PayloadTooLarge(_)));
+    }
+
+    #[test]
+    fn build_contents_body_json() {
+        let s = github();
+        let body = s.build_contents_body("k", b"hi");
+        assert_eq!(body["message"], "Upload k");
+        assert_eq!(body["content"], BASE64.encode(b"hi"));
+        assert_eq!(body["branch"], "main");
+    }
+
+    #[test]
+    fn build_path_pattern() {
+        let s = github();
+        let path = s.build_path("key123", "png");
+        assert!(path.contains("key123"));
+        assert!(path.ends_with(".png"));
+        let date = Utc::now().format("%Y/%m/%d").to_string();
+        assert!(path.contains(&date));
+    }
+
+    #[test]
+    fn build_path_uses_custom_prefix() {
+        let s = GitStorage::new(
+            GitProvider::GitHub,
+            "o".into(),
+            "r".into(),
+            "main".into(),
+            Some("myprefix".into()),
+            "t".into(),
+        );
+        assert!(s.build_path("k", "jpg").starts_with("myprefix/"));
+    }
+
+    #[test]
+    fn provider_derive_eq_and_clone() {
+        assert_eq!(GitProvider::GitHub, GitProvider::GitHub);
+        assert_ne!(GitProvider::GitHub, GitProvider::GitCode);
+        let c = GitProvider::GitCode.clone();
+        assert_eq!(c, GitProvider::GitCode);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_success_github_uses_put() {
+        let base = spawn_mock(Arc::new(|method, path| {
+            assert_eq!(method, "PUT");
+            assert!(path.contains("/repos/owner/repo/contents/"));
+            (201, vec![], "{}".into())
+        }))
+        .await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        let path = s.put("key1", b"data", "image/png").await.unwrap();
+        assert!(path.contains("key1") && path.ends_with(".png"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_success_status_200() {
+        let base = spawn_mock(Arc::new(|_, _| (200, vec![], "{}".into()))).await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        assert!(s.put("k2", b"d", "image/jpeg").await.unwrap().ends_with(".jpg"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_gitcode_uses_post() {
+        let base = spawn_mock(Arc::new(|method, path| {
+            assert_eq!(method, "POST");
+            assert!(path.contains("/repos/owner/repo/contents/"));
+            (201, vec![], "{}".into())
+        }))
+        .await;
+        let s = test_storage(&base, GitProvider::GitCode);
+        assert!(s.put("k3", b"d", "image/png").await.unwrap().contains("k3"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_rate_limited_reports_retry_after() {
+        let base = spawn_mock(Arc::new(|_, _| {
+            (429, vec![("retry-after".into(), "120".into())], "{}".into())
+        }))
+        .await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        let err = s.put("k4", b"d", "image/png").await.unwrap_err();
+        match err {
+            StorageError::WriteFailed(m) => {
+                assert!(m.contains("速率受限") && m.contains("120"));
+            }
+            other => panic!("expected WriteFailed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_rate_limited_defaults_60() {
+        let base = spawn_mock(Arc::new(|_, _| (429, vec![], "{}".into()))).await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        let err = s.put("k5", b"d", "image/png").await.unwrap_err();
+        match err {
+            StorageError::WriteFailed(m) => assert!(m.contains("60")),
+            other => panic!("expected WriteFailed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_api_error_includes_status_and_body() {
+        let base = spawn_mock(Arc::new(|_, _| (500, vec![], "boom".into()))).await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        let err = s.put("k6", b"d", "image/png").await.unwrap_err();
+        match err {
+            StorageError::WriteFailed(m) => {
+                assert!(m.contains("Git API 错误") && m.contains("500") && m.contains("boom"));
+            }
+            other => panic!("expected WriteFailed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_network_error_maps_to_write_failed() {
+        let base = closed_url().await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        let err = s.put("k7", b"d", "image/png").await.unwrap_err();
+        assert!(matches!(err, StorageError::WriteFailed(_)));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_gitcode_oversized_rejected() {
+        let base =
+            spawn_mock(Arc::new(|_, _| unreachable!("no request expected"))).await;
+        let s = test_storage(&base, GitProvider::GitCode);
+        let big = vec![0u8; 20 * 1024 * 1024 + 1];
+        let err = s.put("big", &big, "image/png").await.unwrap_err();
+        assert!(matches!(err, StorageError::PayloadTooLarge(_)));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn get_network_error_maps_to_read_failed() {
+        let base = closed_url().await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        let err = s.get("abc").await.unwrap_err();
+        assert!(matches!(err, StorageError::ReadFailed(_)));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn delete_existing_file_gets_sha_then_deletes() {
+        let base = spawn_mock(Arc::new(|method, _| {
+            if method == "DELETE" {
+                (200, vec![], "{}".into())
+            } else {
+                (200, vec![], r#"{"sha":"abc123"}"#.into())
+            }
+        }))
+        .await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        s.delete("abc.png").await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn delete_missing_file_is_ok() {
+        let base = spawn_mock(Arc::new(|_, _| (404, vec![], "{}".into()))).await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        s.delete("gone.png").await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn delete_without_sha_fails() {
+        let base = spawn_mock(Arc::new(|_, _| (200, vec![], "{}".into()))).await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        let err = s.delete("nsha.png").await.unwrap_err();
+        match err {
+            StorageError::WriteFailed(m) => assert!(m.contains("获取文件SHA失败")),
+            other => panic!("expected WriteFailed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn delete_failure_reports_status() {
+        let base = spawn_mock(Arc::new(|method, _| {
+            if method == "DELETE" {
+                (500, vec![], "{}".into())
+            } else {
+                (200, vec![], r#"{"sha":"abc123"}"#.into())
+            }
+        }))
+        .await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        let err = s.delete("fail.png").await.unwrap_err();
+        match err {
+            StorageError::WriteFailed(m) => assert!(m.contains("删除失败")),
+            other => panic!("expected WriteFailed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn exists_true_on_success() {
+        let base = spawn_mock(Arc::new(|_, path| {
+            assert!(path.contains("/repos/owner/repo/contents/"));
+            (200, vec![], "{}".into())
+        }))
+        .await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        assert!(s.exists("here.png").await.unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn exists_false_on_404() {
+        let base = spawn_mock(Arc::new(|_, _| (404, vec![], "{}".into()))).await;
+        let s = test_storage(&base, GitProvider::GitHub);
+        assert!(!s.exists("gone.png").await.unwrap());
+    }
+}
