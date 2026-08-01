@@ -119,11 +119,13 @@ async fn populate_user_stats_cache(
     total_images: i64,
     total_size: i64,
 ) {
+    // Overwrite (HSET) — repopulated from DB on cache miss; HINCRBY
+    // would accumulate and double-count.
     let _ = cache
-        .incr_user_stat(user_id, "total_images", total_images)
-        .await;
-    let _ = cache
-        .incr_user_stat(user_id, "total_size", total_size)
+        .set_user_stats(user_id, &[
+            ("total_images", Some(total_images)),
+            ("total_size", Some(total_size)),
+        ])
         .await;
 }
 

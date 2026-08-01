@@ -12,6 +12,7 @@ interface AdminStatsResponse {
   total_images: number
   total_size: number
   active_users_24h: number
+  total_quota: number | null
   storage_backends: Record<string, BackendStats>
 }
 
@@ -103,6 +104,7 @@ export default function AdminStats() {
                 <span style={{ color: 'var(--color-text-primary)' }}>{name}</span>
                 <span style={{ color: 'var(--color-text-muted)' }}>
                   {stats.total_images.toLocaleString()} images / {formatBytes(stats.total_size)}
+                  {data.total_quota ? ` / ${formatBytes(data.total_quota)}` : ''}
                 </span>
               </div>
               <div
@@ -112,7 +114,11 @@ export default function AdminStats() {
                 <div
                   className="h-full rounded-full transition-all"
                   style={{
-                    width: `${data.total_images > 0 ? (stats.total_images / data.total_images) * 100 : 0}%`,
+                    width: `${
+                      data.total_quota && data.total_quota > 0
+                        ? Math.min(100, (stats.total_size / data.total_quota) * 100)
+                        : 0
+                    }%`,
                     backgroundColor: name === 'local' ? 'var(--color-accent)' : '#a78bfa',
                   }}
                 />

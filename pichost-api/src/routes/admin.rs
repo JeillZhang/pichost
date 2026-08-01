@@ -132,6 +132,7 @@ struct StatsCacheParams {
     total_images: i64,
     total_size: i64,
     active_users_24h: i64,
+    total_quota: Option<i64>,
     local_images: i64,
     local_size: i64,
     rustfs_size: i64,
@@ -377,6 +378,13 @@ fn try_parse_cached_stats(stats_map: &HashMap<String, String>) -> Option<AdminSt
         total_size: parse("rustfs_size", 0),
     };
 
+    // Missing field invalidates the whole cache entry so an old-format
+    // cache (written before total_quota existed) is repopulated.
+    let total_quota = match stats_map.get("total_quota")? {
+        v if v.is_empty() => None,
+        v => v.parse::<i64>().ok(),
+    };
+
     let mut backends = HashMap::new();
     backends.insert("local".to_string(), local);
     backends.insert("rustfs".to_string(), rustfs);
@@ -385,7 +393,7 @@ fn try_parse_cached_stats(stats_map: &HashMap<String, String>) -> Option<AdminSt
     TOTAL_IMAGES.set(total_images);
     TOTAL_STORAGE_BYTES.set(total_size);
 
-    Some(AdminStats { total_users, total_images, total_size, active_users_24h, storage_backends: backends })
+    Some(AdminStats { total_users, total_images, total_size, active_users_24h, total_quota, storage_backends: backends })
 }
 
 async fn query_total_users(pool: &DbPool) -> Result<i64, AdminError> {
@@ -399,6 +407,21 @@ async fn query_total_users(pool: &DbPool) -> Result<i64, AdminError> {
                 Json(serde_json::json!({"error": "internal error"})),
             )
         })
+}
+
+async fn query_total_quota(pool: &DbPool) -> Result<Option<i64>, AdminError> {
+    sqlx::query_scalar(
+        "SELECT SUM(storage_quota)::BIGINT FROM users WHERE storage_quota IS NOT NULL",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Admin stats quota query failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "internal error"})),
+        )
+    })
 }
 
 async fn query_image_stats(pool: &DbPool) -> Result<(i64, i64), AdminError> {
@@ -452,18 +475,23 @@ async fn query_backend_stats(
 
 async fn populate_stats_cache(cache: &Cache, params: StatsCacheParams) {
     let StatsCacheParams {
-        total_users, total_images, total_size, active_users_24h,
+        total_users, total_images, total_size, active_users_24h, total_quota,
         local_images, local_size, rustfs_size,
     } = params;
-    let nil_uuid = uuid::Uuid::nil();
-    let _ = cache.incr_user_stat(&nil_uuid, "total_users", total_users).await;
-    let _ = cache.incr_user_stat(&nil_uuid, "total_images", total_images).await;
-    let _ = cache.incr_user_stat(&nil_uuid, "total_size", total_size).await;
-    let _ = cache.incr_user_stat(&nil_uuid, "active_users_24h", active_users_24h).await;
-    let _ = cache.incr_user_stat(&nil_uuid, "local_images", local_images).await;
-    let _ = cache.incr_user_stat(&nil_uuid, "local_size", local_size).await;
-    let _ = cache.incr_user_stat(&nil_uuid, "local_size", local_size).await;
-    let _ = cache.incr_user_stat(&nil_uuid, "rustfs_size", rustfs_size).await;
+    // Overwrite (HSET) — the cache is repopulated from DB on every miss,
+    // so accumulating with HINCRBY would double-count.
+    let _ = cache
+        .set_user_stats(&uuid::Uuid::nil(), &[
+            ("total_users", Some(total_users)),
+            ("total_images", Some(total_images)),
+            ("total_size", Some(total_size)),
+            ("active_users_24h", Some(active_users_24h)),
+            ("total_quota", total_quota),
+            ("local_images", Some(local_images)),
+            ("local_size", Some(local_size)),
+            ("rustfs_size", Some(rustfs_size)),
+        ])
+        .await;
 }
 
 fn build_backends_map(local: &BackendStats, rustfs: &BackendStats) -> HashMap<String, BackendStats> {
@@ -647,6 +675,8 @@ pub struct AdminStats {
     pub total_images: i64,
     pub total_size: i64,
     pub active_users_24h: i64,
+    /// Sum of all users' storage_quota — None when no quotas are set.
+    pub total_quota: Option<i64>,
     pub storage_backends: HashMap<String, BackendStats>,
 }
 
@@ -665,6 +695,7 @@ pub async fn get_admin_stats(
     let total_users = query_total_users(&state.pool).await?;
     let (total_images, total_size) = query_image_stats(&state.pool).await?;
     let active_users_24h = query_active_users_24h(&state.pool).await;
+    let total_quota = query_total_quota(&state.pool).await?;
 
     let local_stats = query_backend_stats(&state.pool, "local").await?;
     let rustfs_stats = query_backend_stats(&state.pool, "rustfs").await?;
@@ -674,12 +705,13 @@ pub async fn get_admin_stats(
         total_images,
         total_size,
         active_users_24h,
+        total_quota,
         storage_backends: build_backends_map(&local_stats, &rustfs_stats),
     };
 
     // Populate cache (best-effort)
     populate_stats_cache(&state.cache, StatsCacheParams {
-        total_users, total_images, total_size, active_users_24h,
+        total_users, total_images, total_size, active_users_24h, total_quota,
         local_images: local_stats.total_images,
         local_size: local_stats.total_size,
         rustfs_size: rustfs_stats.total_size,
