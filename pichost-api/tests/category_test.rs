@@ -18,10 +18,27 @@ fn test_category_serde_roundtrip() {
 
 #[test]
 fn test_image_category_id_optional() {
-    let json = r#"{"id":"00000000-0000-0000-0000-000000000001","user_id":"00000000-0000-0000-0000-000000000000","public_key":"abc123","original_name":"test.png","storage_key":"k","storage_backend":"local","mime_type":"image/png","file_size":100,"width":null,"height":null,"sha256":"abc","url":"http://x","status":"active","storage_config_id":null,"created_at":"2026-01-01T00:00:00Z","category_id":"00000000-0000-0000-0000-000000000002"}"#;
+    let json = concat!(
+        "{\"id\":\"00000000-0000-0000-0000-000000000001\",\"user_id\":\"00000000-0000-0000-0000-000000000000\",",
+        "\"public_key\":\"abc123\",\"original_name\":\"test.png\",",
+        "\"storage_key\":\"k\",\"storage_backend\":\"local\",",
+        "\"mime_type\":\"image/png\",\"file_size\":100,\"width\":null,\"height\":null,\"sha256\":\"abc\",",
+        "\"url\":\"http://x\",\"status\":\"active\",",
+        "\"storage_config_id\":null,\"created_at\":\"2026-01-01T00:00:00Z\",",
+        "\"category_id\":\"00000000-0000-0000-0000-000000000002\"}"
+    );
     let img: pichost_core::models::Image = serde_json::from_str(json).unwrap();
-    assert_eq!(img.category_id, Some(Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap()));
-    let json_no_cat = r#"{"id":"00000000-0000-0000-0000-000000000001","user_id":"00000000-0000-0000-0000-000000000000","public_key":"abc123","original_name":"test.png","storage_key":"k","storage_backend":"local","mime_type":"image/png","file_size":100,"width":null,"height":null,"sha256":"abc","url":"http://x","status":"active","storage_config_id":null,"created_at":"2026-01-01T00:00:00Z"}"#;
+    assert_eq!(
+        img.category_id,
+        Some(Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap())
+    );
+    let json_no_cat = concat!(
+        "{\"id\":\"00000000-0000-0000-0000-000000000001\",\"user_id\":\"00000000-0000-0000-0000-000000000000\",",
+        "\"public_key\":\"abc123\",\"original_name\":\"test.png\",",
+        "\"storage_key\":\"k\",\"storage_backend\":\"local\",",
+        "\"mime_type\":\"image/png\",\"file_size\":100,\"width\":null,\"height\":null,\"sha256\":\"abc\",",
+        "\"url\":\"http://x\",\"status\":\"active\",\"storage_config_id\":null,\"created_at\":\"2026-01-01T00:00:00Z\"}"
+    );
     let img2: pichost_core::models::Image = serde_json::from_str(json_no_cat).unwrap();
     assert_eq!(img2.category_id, None);
 }

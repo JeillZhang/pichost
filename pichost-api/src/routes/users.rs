@@ -5,11 +5,11 @@ use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use pichost_core::models::{ChangePasswordRequest, UpdateProfileRequest, UserProfile};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
+use pichost_core::models::{ChangePasswordRequest, UpdateProfileRequest, UserProfile};
 
 use crate::app::AppState;
 use crate::cache::Cache;
@@ -119,11 +119,65 @@ async fn populate_user_stats_cache(
     // Overwrite (HSET) — repopulated from DB on cache miss; HINCRBY
     // would accumulate and double-count.
     let _ = cache
-        .set_user_stats(user_id, &[
-            ("total_images", Some(total_images)),
-            ("total_size", Some(total_size)),
-        ])
+        .set_user_stats(
+            user_id,
+            &[
+                ("total_images", Some(total_images)),
+                ("total_size", Some(total_size)),
+            ],
+        )
         .await;
+}
+
+type ProfileRow = (
+    Uuid,
+    String,
+    Option<String>,
+    String,
+    String,
+    Option<i64>,
+    bool,
+    chrono::DateTime<chrono::Utc>,
+    chrono::DateTime<chrono::Utc>,
+    Option<serde_json::Value>,
+);
+
+const PROFILE_SELECT: &str = "SELECT id, username, email, storage_backend, storage_prefix, \
+    storage_quota, is_admin, created_at, updated_at, watermark_config FROM users WHERE id = $1";
+
+fn build_user_profile(row: ProfileRow) -> UserProfile {
+    UserProfile {
+        id: row.0,
+        username: row.1,
+        email: row.2,
+        storage_backend: row.3,
+        storage_prefix: row.4,
+        storage_quota: row.5,
+        is_admin: row.6,
+        created_at: row.7,
+        updated_at: row.8,
+        watermark_config: row.9.and_then(|v| {
+            serde_json::from_value::<pichost_core::models::WatermarkConfig>(v).ok()
+        }),
+    }
+}
+
+async fn fetch_profile_row(
+    pool: &PgPool,
+    user_id: Uuid,
+    log_msg: &str,
+) -> Result<Option<ProfileRow>, (StatusCode, Json<serde_json::Value>)> {
+    sqlx::query_as::<_, ProfileRow>(PROFILE_SELECT)
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("{log_msg}: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal server error"})),
+            )
+        })
 }
 
 /// GET /api/v1/users/me — current user's full profile
@@ -131,50 +185,21 @@ pub async fn get_my_profile(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
 ) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)> {
-    let row = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String, Option<i64>, bool, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>, Option<serde_json::Value>)>(
-        "SELECT id, username, email, storage_backend, storage_prefix, storage_quota, is_admin, created_at, updated_at, watermark_config FROM users WHERE id = $1"
-    )
-    .bind(user.id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("User profile query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
-    })?;
-
-    match row {
-        Some((id, username, email, storage_backend, storage_prefix, storage_quota, is_admin, created_at, updated_at, watermark_config)) => {
-            Ok(Json(UserProfile {
-                id,
-                username,
-                email,
-                storage_backend,
-                storage_prefix,
-                storage_quota,
-                is_admin,
-                created_at,
-                updated_at,
-                watermark_config: watermark_config.and_then(|v| {
-                    serde_json::from_value::<pichost_core::models::WatermarkConfig>(v).ok()
-                }),
-            }))
-        }
-        None => Err((
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "user not found"})),
-        )),
-    }
+    let row = fetch_profile_row(&state.pool, user.id, "User profile query failed")
+        .await?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "user not found"})),
+            )
+        })?;
+    Ok(Json(build_user_profile(row)))
 }
 
-/// PATCH /api/v1/users/me — update own profile
-pub async fn update_my_profile(
-    State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthUser>,
-    Json(payload): Json<UpdateProfileRequest>,
-) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)> {
+fn ensure_backend_exists(
+    state: &AppState,
+    payload: &UpdateProfileRequest,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     if let Some(ref backend) = payload.storage_backend {
         if state.router.get(backend).is_none() {
             return Err((
@@ -183,54 +208,75 @@ pub async fn update_my_profile(
             ));
         }
     }
+    Ok(())
+}
 
-    if let Some(ref username) = payload.username {
-        let conflict: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 AND id != $2)",
+async fn ensure_username_available(
+    pool: &PgPool,
+    user_id: Uuid,
+    username: Option<&str>,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let Some(username) = username else {
+        return Ok(());
+    };
+    let conflict: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 AND id != $2)",
+    )
+    .bind(username)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Username uniqueness check failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "internal server error"})),
         )
-        .bind(username)
-        .bind(user.id)
-        .fetch_one(&state.pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Username uniqueness check failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
-            )
-        })?;
-        if conflict {
-            return Err((
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({"error": "username already taken"})),
-            ));
-        }
+    })?;
+    if conflict {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": "username already taken"})),
+        ));
     }
+    Ok(())
+}
 
-    if let Some(ref email) = payload.email {
-        let conflict: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND id != $2)",
-        )
-        .bind(email)
-        .bind(user.id)
-        .fetch_one(&state.pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Email uniqueness check failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
-            )
-        })?;
-        if conflict {
-            return Err((
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({"error": "email already taken"})),
-            ));
-        }
+async fn ensure_email_available(
+    pool: &PgPool,
+    user_id: Uuid,
+    email: Option<&str>,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let Some(email) = email else {
+        return Ok(());
+    };
+    let conflict: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND id != $2)")
+            .bind(email)
+            .bind(user_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Email uniqueness check failed: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "internal server error"})),
+                )
+            })?;
+    if conflict {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": "email already taken"})),
+        ));
     }
+    Ok(())
+}
 
-    let (wm_provided, wm_value): (bool, Option<serde_json::Value>) = match payload.watermark_config {
+/// Serialize watermark_config into JSONB with absent/null/value semantics.
+fn serialize_watermark_config(
+    payload: &UpdateProfileRequest,
+) -> Result<(bool, Option<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
+    match &payload.watermark_config {
         Some(Some(cfg)) => {
             let json = serde_json::to_value(cfg).map_err(|e| {
                 tracing::warn!("Watermark config serialization failed: {e}");
@@ -239,12 +285,20 @@ pub async fn update_my_profile(
                     Json(serde_json::json!({"error": "invalid watermark config"})),
                 )
             })?;
-            (true, Some(json))
+            Ok((true, Some(json)))
         }
-        Some(None) => (true, None),
-        None => (false, None),
-    };
+        Some(None) => Ok((true, None)),
+        None => Ok((false, None)),
+    }
+}
 
+async fn apply_profile_update(
+    pool: &PgPool,
+    user_id: Uuid,
+    payload: &UpdateProfileRequest,
+    wm_provided: bool,
+    wm_value: &Option<serde_json::Value>,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     sqlx::query(
         "UPDATE users SET \
          username = COALESCE($1, username), \
@@ -258,10 +312,10 @@ pub async fn update_my_profile(
     .bind(payload.email.is_some())
     .bind(&payload.email)
     .bind(&payload.storage_backend)
-    .bind(user.id)
+    .bind(user_id)
     .bind(wm_provided)
-    .bind(&wm_value)
-    .execute(&state.pool)
+    .bind(wm_value)
+    .execute(pool)
     .await
     .map_err(|e| {
         if let sqlx::Error::Database(ref db_err) = e {
@@ -280,30 +334,110 @@ pub async fn update_my_profile(
             Json(serde_json::json!({"error": "internal server error"})),
         )
     })?;
+    Ok(())
+}
 
-    let row = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String, Option<i64>, bool, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>, Option<serde_json::Value>)>(
-        "SELECT id, username, email, storage_backend, storage_prefix, storage_quota, is_admin, created_at, updated_at, watermark_config FROM users WHERE id = $1"
-    )
-    .bind(user.id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("Profile re-fetch after update failed: {e}");
+/// PATCH /api/v1/users/me — update own profile
+pub async fn update_my_profile(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+    Json(payload): Json<UpdateProfileRequest>,
+) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)> {
+    ensure_backend_exists(&state, &payload)?;
+    ensure_username_available(&state.pool, user.id, payload.username.as_deref()).await?;
+    ensure_email_available(&state.pool, user.id, payload.email.as_deref()).await?;
+    let (wm_provided, wm_value) = serialize_watermark_config(&payload)?;
+    apply_profile_update(&state.pool, user.id, &payload, wm_provided, &wm_value).await?;
+    let row = fetch_profile_row(&state.pool, user.id, "Profile re-fetch after update failed")
+        .await?
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal server error"})),
+            )
+        })?;
+    Ok(Json(build_user_profile(row)))
+}
+
+async fn fetch_password_hash(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+    let current_hash: Option<String> =
+        sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Password hash fetch failed: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "internal server error"})),
+                )
+            })?;
+    current_hash.ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "user not found"})),
+        )
+    })
+}
+
+fn verify_current_password(
+    current_password: &str,
+    stored_hash: &str,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let parsed_hash = PasswordHash::new(stored_hash).map_err(|e| {
+        tracing::warn!("Invalid stored password hash: {e}");
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "internal server error"})),
         )
     })?;
+    Argon2::default()
+        .verify_password(current_password.as_bytes(), &parsed_hash)
+        .map_err(|_| {
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "current password incorrect"})),
+            )
+        })
+}
 
-    Ok(Json(UserProfile {
-        id: row.0, username: row.1, email: row.2,
-        storage_backend: row.3, storage_prefix: row.4,
-        storage_quota: row.5, is_admin: row.6,
-        created_at: row.7, updated_at: row.8,
-        watermark_config: row.9.and_then(|v| {
-            serde_json::from_value::<pichost_core::models::WatermarkConfig>(v).ok()
-        }),
-    }))
+fn hash_new_password(
+    new_password: &str,
+) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+    let salt = SaltString::generate(&mut OsRng);
+    Argon2::default()
+        .hash_password(new_password.as_bytes(), &salt)
+        .map(|h| h.to_string())
+        .map_err(|e| {
+            tracing::warn!("Password hashing failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal server error"})),
+            )
+        })
+}
+
+async fn update_password_hash(
+    pool: &PgPool,
+    user_id: Uuid,
+    new_hash: &str,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    sqlx::query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2")
+        .bind(new_hash)
+        .bind(user_id)
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Password update failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal server error"})),
+            )
+        })?;
+    Ok(())
 }
 
 /// POST /api/v1/users/me/password — change own password
@@ -318,65 +452,9 @@ pub async fn change_my_password(
             Json(serde_json::json!({"error": "new password must be at least 8 characters"})),
         ));
     }
-
-    let current_hash: String = sqlx::query_scalar(
-        "SELECT password_hash FROM users WHERE id = $1",
-    )
-    .bind(user.id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("Password hash fetch failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
-    })?
-    .ok_or_else(|| (
-        StatusCode::NOT_FOUND,
-        Json(serde_json::json!({"error": "user not found"})),
-    ))?;
-
-    let parsed_hash = PasswordHash::new(&current_hash).map_err(|e| {
-        tracing::warn!("Invalid stored password hash: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
-    })?;
-    Argon2::default()
-        .verify_password(payload.current_password.as_bytes(), &parsed_hash)
-        .map_err(|_| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "current password incorrect"})),
-            )
-        })?;
-
-    let salt = SaltString::generate(&mut OsRng);
-    let new_hash = Argon2::default()
-        .hash_password(payload.new_password.as_bytes(), &salt)
-        .map(|h| h.to_string())
-        .map_err(|e| {
-            tracing::warn!("Password hashing failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
-            )
-        })?;
-
-    sqlx::query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2")
-        .bind(&new_hash)
-        .bind(user.id)
-        .execute(&state.pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Password update failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
-            )
-        })?;
-
+    let current_hash = fetch_password_hash(&state.pool, user.id).await?;
+    verify_current_password(&payload.current_password, &current_hash)?;
+    let new_hash = hash_new_password(&payload.new_password)?;
+    update_password_hash(&state.pool, user.id, &new_hash).await?;
     Ok(Json(serde_json::json!({"message": "password updated"})))
 }

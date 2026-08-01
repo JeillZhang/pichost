@@ -32,6 +32,38 @@ pub enum PipelineError {
 
 use crate::queue::TaskPayload;
 
+async fn load_watermarked_image(
+    pool: &PgPool,
+    task: &TaskPayload,
+    raw_img: image::DynamicImage,
+) -> Result<image::DynamicImage, PipelineError> {
+    let watermark_config = fetch_watermark_config(pool, task).await?;
+    match watermark_config {
+        Some(ref wm_cfg) if wm_cfg.enabled && !wm_cfg.text.is_empty() => {
+            crate::watermark::apply_watermark(&raw_img, wm_cfg)
+                .map_err(PipelineError::Watermark)
+        }
+        _ => Ok(raw_img),
+    }
+}
+
+async fn fetch_watermark_config(
+    pool: &PgPool,
+    task: &TaskPayload,
+) -> Result<Option<pichost_core::models::WatermarkConfig>, PipelineError> {
+    let watermark_config: Option<pichost_core::models::WatermarkConfig> =
+        sqlx::query_scalar::<_, Option<serde_json::Value>>(
+            "SELECT watermark_config FROM users WHERE id = $1",
+        )
+        .bind(task.user_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| PipelineError::Database(format!("Failed to fetch watermark config: {e}")))?
+        .flatten()
+        .and_then(|v| serde_json::from_value(v).ok());
+    Ok(watermark_config)
+}
+
 pub async fn process_task(
     pool: &PgPool,
     router: &StorageRouter,
@@ -43,24 +75,7 @@ pub async fn process_task(
     let (raw_img, fmt, _bytes) = read_source_image(backend.as_ref(), task).await?;
     let (width, height) = (raw_img.width() as i32, raw_img.height() as i32);
 
-    // Fetch watermark config from user record for post-processing watermarking.
-    let watermark_config: Option<pichost_core::models::WatermarkConfig> = sqlx::query_scalar::<_, Option<serde_json::Value>>(
-        "SELECT watermark_config FROM users WHERE id = $1",
-    )
-    .bind(task.user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| PipelineError::Database(format!("Failed to fetch watermark config: {e}")))?
-    .flatten()
-    .and_then(|v| serde_json::from_value(v).ok());
-    // Apply watermark if configured
-    let img = match watermark_config {
-        Some(ref wm_cfg) if wm_cfg.enabled && !wm_cfg.text.is_empty() => {
-            crate::watermark::apply_watermark(&raw_img, wm_cfg)
-                .map_err(PipelineError::Watermark)?
-        }
-        _ => raw_img,
-    };
+    let img = load_watermarked_image(pool, task, raw_img).await?;
 
     let thumb_key = format!("{}/thumb.{}", task.user_id, task.image_id);
     let webp_key = format!("{}/webp.{}", task.user_id, task.image_id);
