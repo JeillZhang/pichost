@@ -4,3 +4,5 @@ storage-local/
 .omo/run-continuation
 *.tsbuildinfo
 .superpowers/
+# Playwright MCP debug artifacts
+.playwright-mcp/
