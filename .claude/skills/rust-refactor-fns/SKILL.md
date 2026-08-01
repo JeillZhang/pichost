@@ -98,6 +98,31 @@ the threshold, or compress functions imperfectly). Run the detection again,
 dispatch a second wave. Each iteration tackles fewer files. Usually 2–3
 waves total for a 50+ function codebase.
 
+## Test Code Exemption
+
+**Unit test code is NOT required to conform to the size/width thresholds.** This
+includes `#[cfg(test)]` modules in source files and standalone integration tests
+under `tests/`.
+
+Rationale:
+- Test fixtures often embed long JSON/SQL string literals that are impractical
+  to break without losing clarity (use `concat!()` only when it improves
+  readability and keeps the value byte-identical).
+- Test helper functions may legitimately exceed 50 lines; splitting them adds
+  noise without readability benefit.
+
+Practical rules when auditing:
+1. Filter out test files from the detection results before triaging. You may
+   point `find_large_fns.py` / `find_long_lines.py` at a source directory with
+   `--dir pichost-api/src` or simply ignore `tests/` and `#[cfg(test)]` hits.
+2. Never dispatch a refactor agent solely to shrink test functions or test-data
+   lines.
+3. If a long test line can be broken safely (`concat!()` for string literals,
+   unwrapped struct literals), do it opportunistically — but never change the
+   runtime value of test data, and verify tests still pass.
+4. `cargo test --workspace` must stay green; test code still must pass
+   `cargo clippy --workspace -- -D warnings`.
+
 ## Common Refactoring Patterns
 
 ### Pattern 1: Extract validation helpers

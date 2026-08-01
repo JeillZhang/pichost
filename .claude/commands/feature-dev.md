@@ -92,6 +92,7 @@ Invoke `superpowers:subagent-driven-development` skill.
 - `cargo clippy --workspace -- -D warnings` must be zero.
 - `cargo test --workspace` must pass (except pre-existing ignored tests).
 - If the task touches frontend: `npm run build` must pass.
+- If the task adds/changes a frontend feature: also update/extend the matching E2E spec (rule 3 of Phase 4 Step 4) and run `npm run e2e` for the affected spec(s) — the full suite runs once at Phase 4.
 
 **Persistence:** Track progress in `.superpowers/sdd/progress.md`. If the session is interrupted, resume from the last completed task.
 
@@ -195,58 +196,87 @@ curl -sf http://localhost/metrics | grep -q "pichost"
 test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost/u/nonexistent)" = "404"
 ```
 
-#### Step 4: Browser E2E Smoke Test (if web-ui/ changed)
+#### Step 4: Browser E2E Tests (REQUIRED if web-ui/ changed)
 
-If the feature touches frontend code, run an automated browser test to verify UI pages load, render, and navigate without errors. This uses Playwright to drive a real Chrome instance.
+web-ui ships a full Playwright E2E suite in `web-ui/e2e/` (specs, page-objects,
+helpers, fixtures), run with `npm run e2e`. Playwright's `webServer` config
+auto-resets the test DB/Redis, starts the Rust backend, and starts the Vite dev
+server — so only PostgreSQL + Redis need to be running.
 
 ```bash
-# Install Playwright if not already available
-cd web-ui
-npx playwright install chromium 2>&1 | tail -5
+# 1. Start only the datastores (Playwright boots its own API + Vite on :3000/:5173)
+docker compose up -d postgres redis
 
-# Write a smoke test file (auto-generated, deleted after run)
-cat > e2e-smoke.spec.ts << 'TEST'
-import { test, expect } from '@playwright/test';
-
-const BASE = 'http://localhost';
-
-test.describe('UI smoke test', () => {
-  test('login page loads without console errors', async ({ page }) => {
-    const errors: string[] = [];
-    page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()); });
-    page.on('pageerror', err => errors.push(err.message));
-    await page.goto(BASE, { waitUntil: 'networkidle' });
-    // Should see login/register — app is not authenticated
-    await expect(page.locator('body')).toBeVisible();
-    expect(errors).toEqual([]);
-  });
-
-  test('public image page returns 404 gracefully', async ({ page }) => {
-    const errors: string[] = [];
-    page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()); });
-    page.on('pageerror', err => errors.push(err.message));
-    await page.goto(BASE + '/u/nonexistent', { waitUntil: 'networkidle' });
-    // Should show a 404 page, not a blank crash
-    await expect(page.locator('body')).toBeVisible();
-    expect(errors).toEqual([]);
-  });
-});
-TEST
-
-# Run the smoke tests
-npx playwright test e2e-smoke.spec.ts --browser=chromium --reporter=list 2>&1
-
-# Clean up
-rm -f e2e-smoke.spec.ts
+# 2. Run the full E2E suite
+cd web-ui && npm run e2e
 ```
 
-**Failure handling**: If any E2E test fails, treat it as a CRITICAL finding. Diagnose console errors or page crashes, fix the root cause, and re-run. Do NOT proceed to Phase 5.
+**E2E policy — applies to EVERY feature that touches web-ui:**
+
+1. **Gate**: E2E tests MUST pass before the feature is considered complete.
+   A failing E2E test blocks finishing (Phases 5–7) — same severity as a
+   failing unit/integration test.
+2. **Adjust failing cases to match the intended behavior**: E2E specs encode the
+   expected UX. If a case fails because the feature/UI was intentionally
+   changed (new copy, renamed option, different flow, moved control), UPDATE the
+   spec to match the new expected behavior — do NOT paper over the failure or
+   delete the case. If the failure reveals a real bug, fix the code instead.
+   After adjusting, re-run and confirm green.
+3. **New UI feature options require new E2E cases**: whenever a feature adds a
+   user-facing option/control/flow (a new setting, a new button, a new page
+   section), design and add a Playwright spec (or extend an existing spec +
+   page-object) that drives that option end-to-end and asserts the expected
+   outcome. Follow the existing suite structure: `e2e/specs/*.spec.ts` +
+   `e2e/page-objects/*.po.ts` + `e2e/helpers/*.ts`.
+
+**Failure handling**: If any E2E test fails, treat it as a CRITICAL finding.
+First apply rule 2 (is the spec stale, or is the code broken?), fix the root
+cause, and re-run until green. Do NOT proceed to Phase 5.
+
+**Cleanup after E2E (mandatory, run promptly — do not leave test resources
+behind):** Playwright's `webServer` auto-terminates the API + Vite processes it
+spawned, but containers, test storage, and report artifacts persist and MUST be
+removed before proceeding:
+
+```bash
+# Stop the datastore containers started only for the tests
+docker compose stop postgres redis
+
+# Remove Playwright report + trace/video artifacts
+rm -rf web-ui/playwright-report web-ui/test-results
+
+# Remove the E2E test storage directory and the config.toml written by
+# e2e/reset-test-env.mjs (only if these did not exist before the test run —
+# a pre-existing config.toml is real user config and must be left intact)
+rm -rf storage-local-test
+[ -f config.toml ] && echo "note: config.toml present — verify it is the user's real config before touching" || true
+```
+
+**Teardown rule**: ANY container, directory, or file created solely for a test
+must be cleaned up immediately after that test completes — never carried into
+the next phase or left on disk at finish time.
 
 #### Step 5: Teardown
 
+Tear down ALL test resources — containers, temp storage, report artifacts —
+promptly after Phase 4 finishes. Nothing test-created may survive to Phase 5.
+
 ```bash
+# Stop the full stack (containers created for integration/E2E testing)
 docker compose down
+
+# Remove E2E artifacts (playwright report/traces/videos, test storage)
+rm -rf web-ui/playwright-report web-ui/test-results storage-local-test
+
+# Remove the config.toml written by e2e/reset-test-env.mjs if it did not
+# exist before the test run (a pre-existing config.toml is real user config —
+# verify before touching it)
+# e.g. git clean -f config.toml   # only if it was test-generated
 ```
+
+Verify no test containers remain: `docker compose ps` (expect empty). If the
+test was run with `docker compose stop postgres redis` only (Step 4), the same
+cleanup applies — leftover containers/files must not leak into later work.
 
 #### Step 6: Failure handling
 
@@ -259,6 +289,7 @@ docker compose down
 **If Docker is not available** (e.g., CI without Docker, local dev without Docker installed):
 - Skip Phase 4 but log a warning: "Integration tests skipped — Docker not available. Only unit tests verified."
 - The unit tests (`cargo test --workspace` without DB) already serve as the primary correctness gate.
+- Cleanup still applies: remove any test artifacts created locally (`storage-local-test/`, `playwright-report/`, `test-results/`, test-generated `config.toml`).
 
 ### Phase 5: Final Verification
 
@@ -268,9 +299,16 @@ docker compose down
 cargo clippy --workspace -- -D warnings   # Zero warnings required
 cargo test --workspace                     # All non-ignored must pass
 cd web-ui && npm run build                 # if web-ui/ changed
+cd web-ui && npm run e2e                   # if web-ui/ changed — full E2E suite must pass
 ```
 
 **Version bump check**: if frontend changed, verify `web-ui/package.json` version matches `Cargo.toml` workspace version. If not bumped, update both now: patch for fixes, minor for features.
+
+**Test resource cleanup check**: confirm no test-created containers, directories,
+or files remain before finishing:
+- `docker compose ps` → no leftover test containers
+- No `web-ui/playwright-report/`, `web-ui/test-results/`, `storage-local-test/` on disk
+- `config.toml` present only if it pre-existed (real user config), not test-generated
 
 ### Phase 6: Auto-Sync Documentation (BEFORE PR/Create Options)
 
@@ -292,7 +330,7 @@ Invoke `superpowers:finishing-a-development-branch` skill.
 GIT_MASTER=1 git status  # expect: "nothing to commit, working tree clean"
 ```
 
-**E2E browser test**: if frontend changed, verify Phase 4 E2E smoke test passed (Playwright + Chromium, no console errors).
+**E2E browser test**: if frontend changed, verify Phase 4 E2E suite passed (`npm run e2e`, all specs green, including any new specs for new UI options).
 
 **Present the 4 options:**
 1. **Merge** — merge into base branch, delete the feature branch (`git branch -d feat/<plan-name>`).
@@ -309,8 +347,8 @@ GIT_MASTER=1 git status  # expect: "nothing to commit, working tree clean"
 | Tier | Git Isolation | TDD | Execution | Review | Integration Testing |
 |------|--------------|-----|-----------|--------|---------------------|
 | trivial | Feat branch on current repo | RED→GREEN→REFACTOR enforced | Inline (no subagent) | Self-review only | Skip (Docker optional) |
-| standard | Feat branch on current repo | RED→GREEN→REFACTOR enforced | Subagent per task (sequential) | 2 reviewers (code-reviewer + language reviewer) | Full: docker compose + integration tests + E2E browser smoke test (if web-ui/) |
-| large | Feat branch on current repo | RED→GREEN→REFACTOR enforced | Subagent per task (parallel independent, sequential dependent) | 3 reviewers (+ security-reviewer) | Full: docker compose + integration tests + smoke tests + E2E browser smoke test (if web-ui/) |
+| standard | Feat branch on current repo | RED→GREEN→REFACTOR enforced | Subagent per task (sequential) | 2 reviewers (code-reviewer + language reviewer) | Full: docker compose + integration tests + E2E suite (if web-ui/ touched, incl. new/adjusted specs) |
+| large | Feat branch on current repo | RED→GREEN→REFACTOR enforced | Subagent per task (parallel independent, sequential dependent) | 3 reviewers (+ security-reviewer) | Full: docker compose + integration tests + E2E suite (if web-ui/ touched, incl. new/adjusted specs) |
 
 ---
 
@@ -349,9 +387,20 @@ cd web-ui && npm run build                 # tsc -b && vite build
 # Verify web-ui/package.json version matches Cargo.toml workspace version.
 # If not bumped, bump both: patch for fixes, minor for features.
 
-# E2E browser smoke test (if web-ui/ changed)
-# Runs in Phase 4 via docker compose. Verifies pages load and navigate
-# without console errors using Playwright + Chromium.
+# E2E browser tests (if web-ui/ changed)
+# Runs in Phase 4 via Playwright (web-ui/playwright.config.ts auto-starts
+# backend + Vite after resetting test DB/Redis). Requires PG + Redis running:
+#   docker compose up -d postgres redis
+#   cd web-ui && npm run e2e
+# The full suite MUST pass. Failing cases are adjusted to the intended
+# behavior (rule 2) and new UI options get new specs (rule 3) — see Phase 4
+# Step 4 for the full E2E policy.
+
+# Test resource cleanup (after E2E / integration tests, ALWAYS):
+#   docker compose stop postgres redis   # stop test containers promptly
+#   rm -rf web-ui/playwright-report web-ui/test-results storage-local-test
+#   # remove test-generated config.toml only if it didn't pre-exist
+# Never leave test-created containers/files behind at finish time.
 ```
 
 **Integration tests** (11 tests in `pichost-api/tests/` require DB/Redis/S3): these run in Phase 4 via docker compose. Until Phase 4, they are expected to be skipped or fail — do NOT treat them as failures during Phase 2 unit testing.
