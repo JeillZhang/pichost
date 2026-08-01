@@ -1073,3 +1073,78 @@ mod rename_tests {
         assert!(result.is_ok());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_query(sort: &str, order: &str) -> ImageListQuery {
+        ImageListQuery {
+            page: 1,
+            per_page: 20,
+            sort: sort.to_string(),
+            order: order.to_string(),
+            search: String::new(),
+            storage_config_id: None,
+            category_id: None,
+        }
+    }
+
+    #[test]
+    fn test_check_image_status() {
+        assert!(check_image_status("active"));
+        assert!(check_image_status("ready"));
+        assert!(!check_image_status("pending"));
+        assert!(!check_image_status("failed"));
+        assert!(!check_image_status("processing"));
+    }
+
+    #[test]
+    fn test_validate_batch_ids() {
+        let err = validate_batch_ids(&[]).unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        let many: Vec<Uuid> = (0..101).map(|_| Uuid::new_v4()).collect();
+        let err = validate_batch_ids(&many).unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        let ok: Vec<Uuid> = (0..100).map(|_| Uuid::new_v4()).collect();
+        assert!(validate_batch_ids(&ok).is_ok());
+        assert!(validate_batch_ids(&[Uuid::new_v4()]).is_ok());
+    }
+
+    #[test]
+    fn test_validate_batch_move() {
+        let err = validate_batch_move(&[]).unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        let many: Vec<Uuid> = (0..101).map(|_| Uuid::new_v4()).collect();
+        assert!(validate_batch_move(&many).is_err());
+        let ok: Vec<Uuid> = (0..100).map(|_| Uuid::new_v4()).collect();
+        assert!(validate_batch_move(&ok).is_ok());
+    }
+
+    #[test]
+    fn test_validate_url_not_empty() {
+        assert!(validate_url_not_empty("").is_err());
+        assert!(validate_url_not_empty("   ").is_err());
+        assert!(validate_url_not_empty("http://x/y.png").is_ok());
+    }
+
+    #[test]
+    fn test_resolve_sort() {
+        assert_eq!(resolve_sort(&sample_query("file_size", "asc")), ("file_size", "ASC"));
+        assert_eq!(resolve_sort(&sample_query("original_name", "ASC")), ("original_name", "ASC"));
+        assert_eq!(resolve_sort(&sample_query("created_at", "desc")), ("created_at", "DESC"));
+        assert_eq!(resolve_sort(&sample_query("bogus", "bogus")), ("created_at", "DESC"));
+    }
+
+    #[test]
+    fn test_mime_for_thumb_key() {
+        assert_eq!(mime_for_thumb_key("a/b.png"), "image/png");
+        assert_eq!(mime_for_thumb_key("a/b.jpg"), "image/jpeg");
+        assert_eq!(mime_for_thumb_key("a/b"), "image/jpeg");
+    }
+
+    #[test]
+    fn test_map_rows_to_results_empty() {
+        assert!(map_rows_to_results(vec![]).is_empty());
+    }
+}

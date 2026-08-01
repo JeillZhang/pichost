@@ -13,7 +13,7 @@
 |---|---|---|
 | Build all | `cargo build --workspace` | |
 | Check only api | `cargo check -p pichost-api` | Fast compile-check |
-| Test all | `cargo test --workspace` | 70 pass, 10 ignored (need DB/Redis/S3) |
+| Test all | `cargo test --workspace` | 313 pass without infra; 555 pass + 0 fail with `-- --include-ignored` (Docker PG+Redis+MinIO) |
 | Lint | `cargo clippy --workspace -- -D warnings` | Zero warnings required |
 | Run API server | `cargo run -p pichost-api` | Requires PostgreSQL + Redis |
 | Frontend dev | `cd web-ui && npm run dev` | Vite proxies `/api`, `/u` → `localhost:3000` |
@@ -174,9 +174,13 @@ All paths below are relative to `/api/v1/` prefix unless otherwise noted. The `/
 
 ## Testing
 
-- **Unit tests** (38 pass): `storage_test.rs` (4), `gallery_test.rs` (8), `category_test.rs` (5), `admin_test.rs` (6 ignored — need DB/Redis), `pichost-api` unit (11), `pichost-core` (8), `health_test.rs` (1 ignored), `rustfs_test.rs` (2 pass + 3 ignored — need S3).
+- **Full suite**: `cargo test --workspace` → **313 pass, 0 fail** without infra (242 DB/Redis/S3 tests `#[ignore]`-gated). With Docker PG+Redis+MinIO running: `cargo test --workspace -- --include-ignored` → **555 pass, 0 fail**.
+- **Coverage**: `cargo llvm-cov --workspace --ignore-filename-regex 'tests/|test_' -- --include-ignored` → **91.56% line coverage**. `cargo-llvm-cov` must be installed (`cargo install cargo-llvm-cov`).
+- **Test infrastructure**: `pichost-api/tests/common/mod.rs` harness builds a real `AppState` (PG+Redis) + production router (`configure_app`) and drives it via `tower::ServiceExt::oneshot`. The router-assembly functions live in `pichost-api/src/app.rs` (moved from `main.rs`) so integration tests exercise the exact production routing.
+- **Docker test services**: `postgres:18-alpine` (:5432), `redis:8-alpine` (:6379), `minio/minio` (:9000, bucket `pichost`, minioadmin/minioadmin). Used for the previously-ignored DB/Redis/S3 integration tests.
+- **Test conventions**: async tests use `#[tokio::test(flavor = "multi_thread", worker_threads = 4)]` (current-thread runtime deadlocks deadpool-redis/sqlx). Each test creates its own small PG pool (≤5 conns). Env-sensitive tests isolate `PICHOST_*` vars via a `PichostEnvGuard` snapshot/restore helper. Config-endpoint tests use `serial_test::serial` and clean up `config.toml`.
 - **Run focused**: `cargo test -p pichost-api test_image_list` — matches test name prefix. No frontend tests.
-- Integration tests in `pichost-api/tests/` require PostgreSQL + Redis (ignored by default).
+- Integration test files in `pichost-api/tests/`: `auth_test`, `images_test`, `users_test`, `categories_test`, `admin_test`, `cache_test`, `gaps_*`, `gaps2_*` — run against real PG+Redis (Docker).
 
 ## Frontend (web-ui/)
 

@@ -967,3 +967,188 @@ pub async fn restore_admin_config(
         "from": body.backup_file,
     })))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::Deserialize;
+
+    fn user_row() -> UserRow {
+        (
+            Uuid::new_v4(),
+            "alice".into(),
+            Some("a@b.c".into()),
+            true,
+            "local".into(),
+            chrono::Utc::now(),
+            Some(1024),
+            None,
+        )
+    }
+
+    #[test]
+    fn test_map_user_rows() {
+        let infos = map_user_rows(vec![user_row()]);
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].username, "alice");
+        assert_eq!(infos[0].email.as_deref(), Some("a@b.c"));
+        assert_eq!(infos[0].storage_quota, Some(1024));
+        assert!(infos[0].is_admin);
+    }
+
+    fn empty_body() -> UpdateUserBody {
+        UpdateUserBody {
+            username: None,
+            email: None,
+            password: None,
+            is_admin: None,
+            storage_backend: None,
+            storage_quota: None,
+            watermark_config: None,
+        }
+    }
+
+    #[test]
+    fn test_merge_user_fields_all_none_keeps_existing() {
+        let existing = ("bob".into(), Some("b@c.d".into()), false, "local".into(), Some(5), None);
+        let merged = merge_user_fields(&empty_body(), existing);
+        assert_eq!(merged.0, "bob");
+        assert_eq!(merged.1, Some("b@c.d".into()));
+        assert!(!merged.2);
+        assert_eq!(merged.4, Some(5));
+    }
+
+    #[test]
+    fn test_merge_user_fields_updates() {
+        let existing = ("bob".into(), None, false, "local".into(), Some(5), None);
+        let mut body = empty_body();
+        body.username = Some("alice".into());
+        body.is_admin = Some(true);
+        body.storage_quota = Some(10);
+        let merged = merge_user_fields(&body, existing);
+        assert_eq!(merged.0, "alice");
+        assert!(merged.2);
+        assert_eq!(merged.4, Some(10));
+    }
+
+    #[test]
+    fn test_merge_user_fields_quota_zero_clears() {
+        let existing = ("bob".into(), None, false, "local".into(), Some(5), None);
+        let mut body = empty_body();
+        body.storage_quota = Some(0);
+        let merged = merge_user_fields(&body, existing);
+        assert_eq!(merged.4, None);
+    }
+
+    #[test]
+    fn test_merge_user_fields_watermark_null_clears() {
+        let existing = ("bob".into(), None, false, "local".into(), None, Some(serde_json::json!({"enabled": true})));
+        let mut body = empty_body();
+        body.watermark_config = Some(None);
+        let merged = merge_user_fields(&body, existing);
+        assert_eq!(merged.5, None);
+    }
+
+    #[test]
+    fn test_merge_user_fields_watermark_absent_keeps() {
+        let existing = ("bob".into(), None, false, "local".into(), None, Some(serde_json::json!({"enabled": true})));
+        let merged = merge_user_fields(&empty_body(), existing);
+        assert!(merged.5.is_some());
+    }
+
+    fn stats_map() -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        for (k, v) in [
+            ("total_users", "10"),
+            ("total_images", "20"),
+            ("total_size", "30"),
+            ("active_users_24h", "2"),
+            ("total_quota", "100"),
+            ("local_images", "15"),
+            ("local_size", "25"),
+            ("rustfs_size", "5"),
+        ] {
+            map.insert(k.to_string(), v.to_string());
+        }
+        map
+    }
+
+    #[test]
+    fn test_try_parse_cached_stats_complete() {
+        let stats = try_parse_cached_stats(&stats_map()).unwrap();
+        assert_eq!(stats.total_users, 10);
+        assert_eq!(stats.total_images, 20);
+        assert_eq!(stats.total_size, 30);
+        assert_eq!(stats.active_users_24h, 2);
+        assert_eq!(stats.total_quota, Some(100));
+        assert_eq!(stats.storage_backends.len(), 2);
+        assert_eq!(stats.storage_backends["local"].total_images, 15);
+    }
+
+    #[test]
+    fn test_try_parse_cached_stats_missing_quota() {
+        let mut map = stats_map();
+        map.remove("total_quota");
+        assert!(try_parse_cached_stats(&map).is_none());
+    }
+
+    #[test]
+    fn test_try_parse_cached_stats_unparseable() {
+        let mut map = stats_map();
+        map.insert("total_users".into(), "abc".into());
+        assert!(try_parse_cached_stats(&map).is_none());
+    }
+
+    #[test]
+    fn test_build_backends_map() {
+        let local = BackendStats { total_images: 1, total_size: 2 };
+        let rustfs = BackendStats { total_images: 3, total_size: 4 };
+        let m = build_backends_map(&local, &rustfs);
+        assert_eq!(m.len(), 2);
+        assert_eq!(m["local"].total_images, 1);
+        assert_eq!(m["local"].total_size, 2);
+        assert_eq!(m["rustfs"].total_images, 3);
+        assert_eq!(m["rustfs"].total_size, 4);
+    }
+
+    #[test]
+    fn test_mask_url() {
+        assert_eq!(
+            mask_url("postgres://user:pass@host:5432/db"),
+            "postgres://user:***@host:5432/db"
+        );
+        assert_eq!(mask_url("redis://:secret@r:6379"), "redis://:***@r:6379");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_hash_password_if_provided() {
+        assert_eq!(hash_password_if_provided(&None).await.unwrap(), None);
+        let err = hash_password_if_provided(&Some("short".into())).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        let hash = hash_password_if_provided(&Some("long-enough-pass".into())).await.unwrap().unwrap();
+        assert!(hash.starts_with("$argon2"));
+    }
+
+    #[derive(Deserialize)]
+    struct WmTestBody {
+        #[serde(default, deserialize_with = "deserialize_optional_jsonb")]
+        watermark_config: Option<Option<serde_json::Value>>,
+    }
+
+    #[test]
+    fn test_deserialize_optional_jsonb() {
+        let b: WmTestBody = serde_json::from_str(r#"{"watermark_config": null}"#).unwrap();
+        assert_eq!(b.watermark_config, Some(None));
+        let b: WmTestBody = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(b.watermark_config, None);
+        let b: WmTestBody =
+            serde_json::from_str(r#"{"watermark_config": {"enabled": true}}"#).unwrap();
+        assert!(b.watermark_config.unwrap().is_some());
+    }
+
+    #[test]
+    fn test_config_file_path() {
+        let path = config_file_path();
+        assert_eq!(path.file_name().unwrap(), "config.toml");
+    }
+}

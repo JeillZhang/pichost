@@ -246,4 +246,135 @@ mod tests {
         let router = super::StorageRouter::new(backends, "local".into());
         assert_eq!(router.default_name(), "local");
     }
+
+    fn user_config(provider: &str, config: serde_json::Value) -> crate::models::UserStorageConfig {
+        crate::models::UserStorageConfig {
+            id: uuid::Uuid::new_v4(),
+            user_id: uuid::Uuid::new_v4(),
+            name: "cfg".into(),
+            provider: provider.into(),
+            is_default: false,
+            config,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn git_config(token_encrypted: &str) -> serde_json::Value {
+        serde_json::json!({
+            "token_encrypted": token_encrypted,
+            "repo": "owner/repo",
+            "branch": "main",
+            "path_prefix": null,
+        })
+    }
+
+    #[test]
+    fn test_router_get() {
+        let router = setup_router();
+        assert_eq!(router.get("local").unwrap().backend_name(), "local");
+        assert_eq!(router.get("rustfs").unwrap().backend_name(), "rustfs");
+        assert!(router.get("nope").is_none());
+    }
+
+    #[test]
+    fn test_router_for_config_local() {
+        let router = setup_router();
+        let cfg = user_config("local", serde_json::json!({}));
+        let backend = router.for_config(&cfg, &[0u8; 32]).unwrap();
+        assert_eq!(backend.backend_name(), "local");
+    }
+
+    #[test]
+    fn test_router_get_or_create_git_success_and_cache() {
+        let router = setup_router();
+        let key = [7u8; 32];
+        let token = crate::crypto::encrypt_token("ghp_token123", &key).unwrap();
+        let cfg = user_config("github", git_config(&token));
+        let backend = router.get_or_create_git(&cfg, &key).unwrap();
+        assert_eq!(backend.backend_name(), "github");
+        let again = router.for_config(&cfg, &key).unwrap();
+        assert!(Arc::ptr_eq(&backend, &again));
+        assert!(router.get(&cfg.id.to_string()).is_some());
+    }
+
+    fn expect_config_err(result: Result<Arc<dyn StorageBackend>, StorageError>) -> StorageError {
+        match result {
+            Err(e) => e,
+            Ok(_) => panic!("expected config error"),
+        }
+    }
+
+    #[test]
+    fn test_router_get_or_create_git_invalid_config_json() {
+        let router = setup_router();
+        let cfg = user_config("github", serde_json::json!({"foo": 1}));
+        let err = expect_config_err(router.get_or_create_git(&cfg, &[0u8; 32]));
+        assert!(matches!(err, StorageError::Config(_)));
+    }
+
+    #[test]
+    fn test_router_get_or_create_git_bad_repo_format() {
+        let router = setup_router();
+        let key = [7u8; 32];
+        let token = crate::crypto::encrypt_token("t", &key).unwrap();
+        let cfg = user_config(
+            "github",
+            serde_json::json!({
+                "token_encrypted": token,
+                "repo": "norepo",
+                "branch": "main",
+            }),
+        );
+        let err = expect_config_err(router.get_or_create_git(&cfg, &key));
+        assert!(matches!(err, StorageError::Config(_)));
+    }
+
+    #[test]
+    fn test_router_get_or_create_git_unknown_provider() {
+        let router = setup_router();
+        let key = [7u8; 32];
+        let token = crate::crypto::encrypt_token("t", &key).unwrap();
+        let cfg = user_config("bitbucket", git_config(&token));
+        let err = expect_config_err(router.get_or_create_git(&cfg, &key));
+        assert!(matches!(err, StorageError::Config(_)));
+    }
+
+    #[test]
+    fn test_router_get_or_create_git_token_decrypt_fails() {
+        let router = setup_router();
+        let good = [7u8; 32];
+        let wrong = [8u8; 32];
+        let token = crate::crypto::encrypt_token("secret", &good).unwrap();
+        let cfg = user_config("github", git_config(&token));
+        let err = expect_config_err(router.get_or_create_git(&cfg, &wrong));
+        assert!(matches!(err, StorageError::Config(_)));
+    }
+
+    #[test]
+    fn test_router_evict() {
+        let router = setup_router();
+        let key = [7u8; 32];
+        let token = crate::crypto::encrypt_token("t", &key).unwrap();
+        let cfg = user_config("gitcode", git_config(&token));
+        router.get_or_create_git(&cfg, &key).unwrap();
+        assert!(router.get(&cfg.id.to_string()).is_some());
+        router.evict(&cfg.id.to_string());
+        assert!(router.get(&cfg.id.to_string()).is_none());
+    }
+
+    #[test]
+    fn test_router_default_backend_falls_back_to_first() {
+        let mut backends: HashMap<String, Arc<dyn StorageBackend>> = HashMap::new();
+        backends.insert("rustfs".into(), Arc::new(MockBackend("rustfs")));
+        let router = super::StorageRouter::new(backends, "missing".into());
+        assert_eq!(router.default_backend().backend_name(), "rustfs");
+    }
+
+    #[test]
+    #[should_panic(expected = "must have at least one backend")]
+    fn test_router_default_backend_panics_when_empty() {
+        let router = super::StorageRouter::new(HashMap::new(), "local".into());
+        router.default_backend();
+    }
 }

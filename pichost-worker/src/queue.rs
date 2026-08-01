@@ -321,3 +321,228 @@ async fn recover_single_task(
 
     Ok(Some(task))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use deadpool_redis::Runtime;
+
+    static REDIS_LOCK: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+        std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+    fn test_pool() -> Pool {
+        deadpool_redis::Config::from_url("redis://localhost:6379/1")
+            .create_pool(Some(Runtime::Tokio1))
+            .unwrap()
+    }
+
+    fn sample_task() -> TaskPayload {
+        TaskPayload {
+            task_id: Uuid::new_v4(),
+            image_id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            storage_backend: "local".into(),
+            storage_config_id: None,
+            storage_backend_name: "Local".into(),
+            source_key: "source.png".into(),
+            source_mime: "image/png".into(),
+            retry_count: 0,
+            max_retries: 3,
+        }
+    }
+
+    async fn enqueue_and_dequeue_own(pool: &Pool, task: &TaskPayload) -> TaskPayload {
+        loop {
+            enqueue_task(pool, task).await.unwrap();
+            match dequeue_task(pool, 1).await.unwrap() {
+                Some(got) if got.task_id == task.task_id => return got,
+                Some(got) => {
+                    ack_task(pool, got.task_id).await.unwrap();
+                }
+                None => {}
+            }
+        }
+    }
+
+    async fn drain_own(pool: &Pool, task_id: Uuid) {
+        loop {
+            match dequeue_task(pool, 0).await.unwrap() {
+                Some(got) if got.task_id == task_id => {
+                    ack_task(pool, task_id).await.unwrap();
+                    return;
+                }
+                Some(got) => {
+                    ack_task(pool, got.task_id).await.unwrap();
+                }
+                None => return,
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_task_updated_at_valid() {
+        let dt = parse_task_updated_at("2026-01-01T00:00:00Z", Uuid::new_v4()).unwrap();
+        assert_eq!(
+            dt,
+            chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc)
+        );
+    }
+
+    #[test]
+    fn test_parse_task_updated_at_invalid() {
+        assert!(parse_task_updated_at("garbage", Uuid::new_v4()).is_none());
+    }
+
+    #[test]
+    fn test_parse_task_updated_at_utc_normalized() {
+        let dt = parse_task_updated_at("2026-01-01T08:00:00+08:00", Uuid::new_v4()).unwrap();
+        assert_eq!(
+            dt,
+            chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc)
+        );
+    }
+
+    #[test]
+    fn test_task_key_format() {
+        let id = Uuid::new_v4();
+        assert_eq!(task_key(id), format!("pichost:task:{id}"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_enqueue_dequeue_ack() {
+        let _guard = REDIS_LOCK.lock().await;
+        let pool = test_pool();
+        let task = sample_task();
+        let got = enqueue_and_dequeue_own(&pool, &task).await;
+        assert_eq!(got.task_id, task.task_id);
+        assert_eq!(got.retry_count, 0);
+        ack_task(&pool, task.task_id).await.unwrap();
+        let mut conn = pool.get().await.unwrap();
+        let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
+        assert_eq!(status.as_deref(), Some("done"));
+        let ids: Vec<String> = conn.lrange(KEY_PROCESSING, 0, -1).await.unwrap();
+        assert!(!ids.contains(&task.task_id.to_string()));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_dequeue_empty_returns_none() {
+        let _guard = REDIS_LOCK.lock().await;
+        let pool = test_pool();
+        assert!(dequeue_task(&pool, 1).await.unwrap().is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_dequeue_invalid_uuid() {
+        let _guard = REDIS_LOCK.lock().await;
+        let pool = test_pool();
+        let mut conn = pool.get().await.unwrap();
+        conn.lpush::<_, _, ()>(KEY_PENDING, "not-a-uuid").await.unwrap();
+        drop(conn);
+        assert!(matches!(
+            dequeue_task(&pool, 0).await,
+            Err(QueueError::InvalidUuid(_))
+        ));
+        let mut conn = pool.get().await.unwrap();
+        conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, "not-a-uuid").await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_dequeue_orphaned_task() {
+        let _guard = REDIS_LOCK.lock().await;
+        let pool = test_pool();
+        let orphan_id = Uuid::new_v4();
+        let mut conn = pool.get().await.unwrap();
+        conn.lpush::<_, _, ()>(KEY_PENDING, orphan_id.to_string()).await.unwrap();
+        drop(conn);
+        assert!(matches!(
+            dequeue_task(&pool, 0).await,
+            Err(QueueError::MissingData(id)) if id == orphan_id
+        ));
+        let mut conn = pool.get().await.unwrap();
+        let ids: Vec<String> = conn.lrange(KEY_PROCESSING, 0, -1).await.unwrap();
+        assert!(!ids.contains(&orphan_id.to_string()));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_nack_retry() {
+        let _guard = REDIS_LOCK.lock().await;
+        let pool = test_pool();
+        let task = sample_task();
+        let got = enqueue_and_dequeue_own(&pool, &task).await;
+        assert_eq!(nack_task(&pool, &got, "boom").await.unwrap(), NackAction::Retry);
+        let mut conn = pool.get().await.unwrap();
+        let key = task_key(task.task_id);
+        let status: Option<String> = conn.hget(&key, "status").await.unwrap();
+        assert_eq!(status.as_deref(), Some("pending"));
+        let data: Option<String> = conn.hget(&key, "data").await.unwrap();
+        let stored: TaskPayload = serde_json::from_str(&data.unwrap()).unwrap();
+        assert_eq!(stored.retry_count, 1);
+        let err: Option<String> = conn.hget(&key, "error").await.unwrap();
+        assert_eq!(err.as_deref(), Some("boom"));
+        let pending: Vec<String> = conn.lrange(KEY_PENDING, 0, -1).await.unwrap();
+        assert!(pending.contains(&task.task_id.to_string()));
+        drop(conn);
+        drain_own(&pool, task.task_id).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_nack_dead_letter() {
+        let _guard = REDIS_LOCK.lock().await;
+        let pool = test_pool();
+        let mut task = sample_task();
+        task.retry_count = 3;
+        task.max_retries = 3;
+        let got = enqueue_and_dequeue_own(&pool, &task).await;
+        assert_eq!(nack_task(&pool, &got, "fatal").await.unwrap(), NackAction::DeadLetter);
+        let mut conn = pool.get().await.unwrap();
+        let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
+        assert_eq!(status.as_deref(), Some("dead"));
+        let dead: Vec<String> = conn.lrange(KEY_DEAD, 0, -1).await.unwrap();
+        assert!(dead.contains(&task.task_id.to_string()));
+        conn.lrem::<_, _, ()>(KEY_DEAD, 1, task.task_id.to_string()).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_recover_stale_tasks() {
+        let _guard = REDIS_LOCK.lock().await;
+        let pool = test_pool();
+        let task = sample_task();
+        let got = enqueue_and_dequeue_own(&pool, &task).await;
+        assert_eq!(got.task_id, task.task_id);
+        let mut conn = pool.get().await.unwrap();
+        conn.hset::<_, _, _, ()>(
+            &task_key(task.task_id),
+            "updated_at",
+            "2020-01-01T00:00:00Z",
+        )
+        .await
+        .unwrap();
+        conn.lpush::<_, _, ()>(KEY_PROCESSING, Uuid::new_v4().to_string())
+            .await
+            .unwrap();
+        conn.lpush::<_, _, ()>(KEY_PROCESSING, "garbage").await.unwrap();
+        drop(conn);
+        let recovered = recover_stale_tasks(&pool, 10).await.unwrap();
+        assert!(recovered.iter().any(|t| t.task_id == task.task_id));
+        drain_own(&pool, task.task_id).await;
+        let mut conn = pool.get().await.unwrap();
+        conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, "garbage").await.unwrap();
+        let orphan: Vec<String> = conn.lrange(KEY_PROCESSING, 0, -1).await.unwrap();
+        for id in orphan {
+            if Uuid::parse_str(&id).is_ok() {
+                conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, id).await.unwrap();
+            }
+        }
+    }
+}

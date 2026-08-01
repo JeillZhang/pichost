@@ -110,4 +110,78 @@ mod tests {
         assert_eq!(mask_token("ghp_abcdefgh12345678"), "ghp_****5678");
         assert_eq!(mask_token("short"), "****");
     }
+
+    #[test]
+    fn decode_key_valid_32_bytes() {
+        let raw = [7u8; 32];
+        let encoded = BASE64.encode(raw);
+        let key = decode_key(&encoded).unwrap();
+        assert_eq!(key, raw);
+    }
+
+    #[test]
+    fn decode_key_wrong_length() {
+        let encoded = BASE64.encode([1u8; 16]);
+        let err = decode_key(&encoded).unwrap_err();
+        assert!(matches!(err, CryptoError::InvalidKey(16)));
+    }
+
+    #[test]
+    fn decode_key_invalid_base64() {
+        let err = decode_key("!!!not-base64!!!").unwrap_err();
+        assert!(matches!(err, CryptoError::InvalidKey(0)));
+    }
+
+    #[test]
+    fn decrypt_token_invalid_base64() {
+        let key = test_key();
+        let err = decrypt_token("###", &key).unwrap_err();
+        assert!(matches!(err, CryptoError::Decrypt));
+    }
+
+    #[test]
+    fn decrypt_token_truncated() {
+        let key = test_key();
+        let err = decrypt_token(&BASE64.encode([0u8; 10]), &key).unwrap_err();
+        assert!(matches!(err, CryptoError::Decrypt));
+    }
+
+    #[test]
+    fn decrypt_token_corrupted_ciphertext() {
+        let key = test_key();
+        let encrypted = encrypt_token("hello", &key).unwrap();
+        let mut bytes = BASE64.decode(&encrypted).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xFF;
+        let err = decrypt_token(&BASE64.encode(bytes), &key).unwrap_err();
+        assert!(matches!(err, CryptoError::Decrypt));
+    }
+
+    #[test]
+    fn decrypt_token_non_utf8_plaintext() {
+        let key = test_key();
+        let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+        let nonce = Nonce::from_slice(&[0u8; 12]);
+        let ct = cipher.encrypt(nonce, b"\xff\xfe\xfd".as_slice()).unwrap();
+        let mut combined = nonce.to_vec();
+        combined.extend_from_slice(&ct);
+        let err = decrypt_token(&BASE64.encode(combined), &key).unwrap_err();
+        assert!(matches!(err, CryptoError::Decrypt));
+    }
+
+    #[test]
+    fn crypto_error_display() {
+        assert_eq!(
+            CryptoError::Encrypt("boom".into()).to_string(),
+            "encryption failed: boom"
+        );
+        assert_eq!(
+            CryptoError::Decrypt.to_string(),
+            "decryption failed: invalid key or corrupted data"
+        );
+        assert_eq!(
+            CryptoError::InvalidKey(7).to_string(),
+            "invalid key length: expected 32 bytes, got 7"
+        );
+    }
 }

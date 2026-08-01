@@ -100,3 +100,106 @@ impl From<CryptoError> for AppError {
         Self::Internal(format!("crypto error: {e}"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status(err: AppError) -> StatusCode {
+        err.into_response().status()
+    }
+
+    #[test]
+    fn storage_error_display() {
+        assert_eq!(StorageError::NotFound("a".into()).to_string(), "file not found: a");
+        assert_eq!(
+            StorageError::WriteFailed("w".into()).to_string(),
+            "write failed: w"
+        );
+        assert_eq!(StorageError::ReadFailed("r".into()).to_string(), "read failed: r");
+        assert_eq!(
+            StorageError::ConnectionFailed("c".into()).to_string(),
+            "connection failed: c"
+        );
+        assert_eq!(StorageError::Config("cfg".into()).to_string(), "config error: cfg");
+        assert_eq!(
+            StorageError::PayloadTooLarge("big".into()).to_string(),
+            "payload too large: big"
+        );
+    }
+
+    #[test]
+    fn app_error_display() {
+        assert_eq!(
+            AppError::Authentication("x".into()).to_string(),
+            "authentication failed: x"
+        );
+        assert_eq!(
+            AppError::Authorization("x".into()).to_string(),
+            "not authorized: x"
+        );
+        assert_eq!(AppError::NotFound("x".into()).to_string(), "not found: x");
+        assert_eq!(
+            AppError::Validation("x".into()).to_string(),
+            "validation failed: x"
+        );
+        assert_eq!(AppError::Upload("x".into()).to_string(), "upload failed: x");
+        assert_eq!(AppError::RateLimited.to_string(), "rate limited");
+        assert_eq!(
+            AppError::Storage(StorageError::ReadFailed("x".into())).to_string(),
+            "storage error: read failed: x"
+        );
+        assert_eq!(AppError::Internal("x".into()).to_string(), "internal error: x");
+    }
+
+    #[test]
+    fn constructors() {
+        assert!(matches!(
+            AppError::bad_request("m"),
+            AppError::Validation(_)
+        ));
+        assert!(matches!(AppError::not_found("m"), AppError::NotFound(_)));
+        assert!(matches!(AppError::internal("m"), AppError::Internal(_)));
+    }
+
+    #[test]
+    fn into_response_status_map() {
+        assert_eq!(status(AppError::Authentication("a".into())), StatusCode::UNAUTHORIZED);
+        assert_eq!(status(AppError::Authorization("a".into())), StatusCode::FORBIDDEN);
+        assert_eq!(status(AppError::NotFound("a".into())), StatusCode::NOT_FOUND);
+        assert_eq!(status(AppError::Validation("a".into())), StatusCode::BAD_REQUEST);
+        assert_eq!(status(AppError::Upload("a".into())), StatusCode::BAD_REQUEST);
+        assert_eq!(status(AppError::RateLimited), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            status(AppError::Storage(StorageError::PayloadTooLarge("a".into()))),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        assert_eq!(
+            status(AppError::Storage(StorageError::ReadFailed("a".into()))),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            status(AppError::Storage(StorageError::Config("a".into()))),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            status(AppError::Internal("a".into())),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[test]
+    fn from_sqlx_error() {
+        let err: AppError = sqlx::Error::RowNotFound.into();
+        assert!(matches!(err, AppError::Internal(msg) if msg == "database error"));
+    }
+
+    #[test]
+    fn from_crypto_error() {
+        let err: AppError = CryptoError::Decrypt.into();
+        assert!(matches!(
+            err,
+            AppError::Internal(msg) if msg == "crypto error: decryption failed: invalid key or corrupted data"
+        ));
+    }
+}

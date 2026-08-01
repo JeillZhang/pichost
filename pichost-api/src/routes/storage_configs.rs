@@ -388,3 +388,114 @@ pub async fn set_default(
 
     Ok(Json(build_response(&config)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_detail(detail: serde_json::Value) -> UserStorageConfig {
+        UserStorageConfig {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            name: "git".into(),
+            provider: "github".into(),
+            is_default: false,
+            config: detail,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn test_build_response_with_detail() {
+        let cfg = config_with_detail(serde_json::json!({
+            "repo": "owner/repo",
+            "branch": "dev",
+            "path_prefix": "pic",
+            "token_encrypted": "ghp_abcdefgh12345678",
+        }));
+        let resp = build_response(&cfg);
+        assert_eq!(resp.id, cfg.id);
+        assert_eq!(resp.name, "git");
+        assert_eq!(resp.provider, "github");
+        assert_eq!(resp.repo, "owner/repo");
+        assert_eq!(resp.branch, "dev");
+        assert_eq!(resp.path_prefix.as_deref(), Some("pic"));
+        assert_eq!(resp.token_masked, "ghp_****5678");
+    }
+
+    #[test]
+    fn test_build_response_empty_detail() {
+        let cfg = config_with_detail(serde_json::json!({}));
+        let resp = build_response(&cfg);
+        assert_eq!(resp.repo, "");
+        assert_eq!(resp.branch, "main");
+        assert!(resp.path_prefix.is_none());
+        assert_eq!(resp.token_masked, "****");
+    }
+
+    #[test]
+    fn test_encrypt_token_from_config() {
+        let key = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
+        let encrypted = encrypt_token_from_config("ghp_token123", key).unwrap();
+        assert!(!encrypted.is_empty());
+        assert!(encrypt_token_from_config("x", "not-base64!").is_err());
+    }
+
+    #[test]
+    fn test_build_config_json() {
+        let req = CreateConfigRequest {
+            name: "git".into(),
+            provider: "github".into(),
+            token: "t".into(),
+            repo: "owner/repo".into(),
+            branch: None,
+            path_prefix: Some("pic".into()),
+            is_default: None,
+        };
+        let json = build_config_json(&req, "encrypted".into());
+        assert_eq!(json["token_encrypted"], "encrypted");
+        assert_eq!(json["repo"], "owner/repo");
+        assert_eq!(json["branch"], "main");
+        assert_eq!(json["path_prefix"], "pic");
+    }
+
+    fn update_req(repo: Option<&str>, branch: Option<&str>, path_prefix: Option<&str>) -> UpdateConfigRequest {
+        UpdateConfigRequest {
+            name: None,
+            token: None,
+            repo: repo.map(String::from),
+            branch: branch.map(String::from),
+            path_prefix: path_prefix.map(String::from),
+        }
+    }
+
+    #[test]
+    fn test_merge_config_detail_partial() {
+        let detail = serde_json::json!({"repo": "a/b", "branch": "main"});
+        let merged = merge_config_detail(detail, &update_req(Some("c/d"), None, Some("p")), None);
+        assert_eq!(merged["repo"], "c/d");
+        assert_eq!(merged["branch"], "main");
+        assert_eq!(merged["path_prefix"], "p");
+        assert!(merged.get("token_encrypted").is_none());
+    }
+
+    #[test]
+    fn test_merge_config_detail_with_token() {
+        let detail = serde_json::json!({"repo": "a/b"});
+        let merged = merge_config_detail(detail, &update_req(None, Some("dev"), None), Some("enc".into()));
+        assert_eq!(merged["branch"], "dev");
+        assert_eq!(merged["repo"], "a/b");
+        assert_eq!(merged["token_encrypted"], "enc");
+    }
+
+    #[test]
+    fn test_api_base_for_provider() {
+        assert_eq!(api_base_for_provider("github"), Some("https://api.github.com"));
+        assert_eq!(
+            api_base_for_provider("gitcode"),
+            Some("https://api.gitcode.com/api/v5")
+        );
+        assert_eq!(api_base_for_provider("other"), None);
+    }
+}

@@ -15,3 +15,29 @@ pub fn html_escape(s: &str) -> String {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_html_escape_special_chars() {
+        assert_eq!(html_escape("&"), "&amp;");
+        assert_eq!(html_escape("<"), "&lt;");
+        assert_eq!(html_escape(">"), "&gt;");
+        assert_eq!(html_escape("\""), "&quot;");
+    }
+
+    #[test]
+    fn test_html_escape_combined() {
+        assert_eq!(
+            html_escape("<a href=\"x\">&</a>"),
+            "&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;"
+        );
+    }
+
+    #[test]
+    fn test_html_escape_normal_text() {
+        assert_eq!(html_escape("plain text 123"), "plain text 123");
+    }
+}

@@ -3043,13 +3043,14 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pichost-api"
-version = "0.17.3"
+version = "0.17.4"
 dependencies = [
  "argon2",
  "axum",
  "chrono",
  "deadpool-redis",
  "dotenvy",
+ "http-body-util",
  "image 0.25.10",
  "infer",
  "jsonwebtoken",
@@ -3064,6 +3065,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+ "serial_test",
  "sha2 0.10.9",
  "sqlx",
  "tempfile",
@@ -3080,7 +3082,7 @@ dependencies = [
 
 [[package]]
 name = "pichost-core"
-version = "0.17.3"
+version = "0.17.4"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -3104,7 +3106,7 @@ dependencies = [
 
 [[package]]
 name = "pichost-worker"
-version = "0.17.3"
+version = "0.17.4"
 dependencies = [
  "ab_glyph",
  "chrono",
@@ -4061,6 +4063,31 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "serial_test"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "699f4197115b8a7e7ff19c9a315a4bd6fffec26cc4626ef45ecaea389e081c6d"
+dependencies = [
+ "futures-executor",
+ "futures-util",
+ "log",
+ "once_cell",
+ "parking_lot",
+ "serial_test_derive",
+]
+
+[[package]]
+name = "serial_test_derive"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94e153fc76e1c6a068703d6d29c508a0b15c061c4b7e43da59cc097bc342673c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -250,3 +250,556 @@ async fn update_image_record(
 fn some_if(flag: bool, val: &str) -> Option<&str> {
     if flag { Some(val) } else { None }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pichost_core::config::AppConfig;
+    use pichost_core::error::StorageError;
+    use pichost_core::storage::local::LocalStorage;
+    use std::collections::HashMap;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::Mutex;
+
+    struct MockBackend {
+        items: Mutex<Vec<(String, Vec<u8>)>>,
+    }
+
+    impl MockBackend {
+        fn new() -> Self {
+            Self { items: Mutex::new(Vec::new()) }
+        }
+        fn stored(&self, key: &str) -> Option<Vec<u8>> {
+            self.items
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, d)| d.clone())
+        }
+    }
+
+    impl StorageBackend for MockBackend {
+        fn put<'l0, 'l1, 'l2, 'l3, 'a>(
+            &'l0 self,
+            key: &'l1 str,
+            data: &'l2 [u8],
+            _ct: &'l3 str,
+        ) -> Pin<Box<dyn Future<Output = Result<String, StorageError>> + Send + 'a>>
+        where
+            'l0: 'a,
+            'l1: 'a,
+            'l2: 'a,
+            'l3: 'a,
+            Self: 'a,
+        {
+            Box::pin(async move {
+                self.items.lock().unwrap().push((key.to_string(), data.to_vec()));
+                Ok(key.to_string())
+            })
+        }
+        fn get<'l0, 'l1, 'a>(
+            &'l0 self,
+            key: &'l1 str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, StorageError>> + Send + 'a>>
+        where
+            'l0: 'a,
+            'l1: 'a,
+            Self: 'a,
+        {
+            Box::pin(async move {
+                Ok(self.stored(key).unwrap_or_default())
+            })
+        }
+        fn delete<'l0, 'l1, 'a>(
+            &'l0 self,
+            key: &'l1 str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>>
+        where
+            'l0: 'a,
+            'l1: 'a,
+            Self: 'a,
+        {
+            Box::pin(async move {
+                self.items.lock().unwrap().retain(|(k, _)| k != key);
+                Ok(())
+            })
+        }
+        fn exists<'l0, 'l1, 'a>(
+            &'l0 self,
+            key: &'l1 str,
+        ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>>
+        where
+            'l0: 'a,
+            'l1: 'a,
+            Self: 'a,
+        {
+            Box::pin(async move {
+                Ok(self.items.lock().unwrap().iter().any(|(k, _)| k == key))
+            })
+        }
+        fn public_url(&self, key: &str) -> String {
+            format!("/u/{key}")
+        }
+        fn backend_name(&self) -> &str {
+            "mock"
+        }
+    }
+
+    fn sample_task() -> TaskPayload {
+        TaskPayload {
+            task_id: uuid::Uuid::new_v4(),
+            image_id: uuid::Uuid::new_v4(),
+            user_id: uuid::Uuid::new_v4(),
+            storage_backend: "local".into(),
+            storage_config_id: None,
+            storage_backend_name: "Local".into(),
+            source_key: "source.png".into(),
+            source_mime: "image/png".into(),
+            retry_count: 0,
+            max_retries: 3,
+        }
+    }
+
+    fn png_bytes() -> Vec<u8> {
+        let img = image::DynamicImage::new_rgba8(8, 8);
+        let mut buf = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .unwrap();
+        buf
+    }
+
+    #[test]
+    fn test_some_if() {
+        assert_eq!(some_if(true, "x"), Some("x"));
+        assert_eq!(some_if(false, "x"), None);
+    }
+
+    #[test]
+    fn test_resolve_encryption_key_none() {
+        assert_eq!(resolve_encryption_key(&AppConfig::default()), [0u8; 32]);
+    }
+
+    #[test]
+    fn test_resolve_encryption_key_valid() {
+        let valid = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
+        assert_eq!(pichost_core::crypto::decode_key(valid).unwrap(), [1u8; 32]);
+        let cfg = AppConfig {
+            token_encryption_key: Some(valid.to_string()),
+            ..AppConfig::default()
+        };
+        assert_eq!(resolve_encryption_key(&cfg), [1u8; 32]);
+    }
+
+    #[test]
+    fn test_resolve_encryption_key_invalid_base64() {
+        let cfg = AppConfig {
+            token_encryption_key: Some("!!!not-base64!!!".to_string()),
+            ..AppConfig::default()
+        };
+        assert_eq!(resolve_encryption_key(&cfg), [0u8; 32]);
+    }
+
+    #[tokio::test]
+    async fn test_read_source_image_ok() {
+        let backend = MockBackend::new();
+        backend.put("source.png", &png_bytes(), "image/png").await.unwrap();
+        let task = sample_task();
+        let (img, fmt, bytes) = read_source_image(&backend, &task).await.unwrap();
+        assert_eq!(fmt, image::ImageFormat::Png);
+        assert_eq!((img.width(), img.height()), (8, 8));
+        assert!(!bytes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_read_source_image_decode_error() {
+        let backend = MockBackend::new();
+        backend.put("bad", b"not an image at all", "image/png").await.unwrap();
+        let task = sample_task();
+        let err = read_source_image(&backend, &task).await.unwrap_err();
+        assert!(matches!(err, PipelineError::Decode(_)));
+    }
+
+    #[tokio::test]
+    async fn test_process_image_variants_png() {
+        let backend = MockBackend::new();
+        let img = image::DynamicImage::new_rgba8(16, 16);
+        let cfg = AppConfig::default();
+        let result = process_image_variants(
+            &img,
+            image::ImageFormat::Png,
+            &backend,
+            "thumb",
+            "webp",
+            &cfg,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, (true, true));
+        assert!(backend.stored("thumb").is_some());
+        assert!(backend.stored("webp").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_process_image_variants_gif_none_written() {
+        let backend = MockBackend::new();
+        let img = image::DynamicImage::new_rgba8(16, 16);
+        let cfg = AppConfig::default();
+        let result = process_image_variants(
+            &img,
+            image::ImageFormat::Gif,
+            &backend,
+            "thumb",
+            "webp",
+            &cfg,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, (false, false));
+        assert!(backend.stored("thumb").is_none());
+        assert!(backend.stored("webp").is_none());
+    }
+
+    #[test]
+    fn test_pipeline_error_display() {
+        assert_eq!(PipelineError::StorageRead("r".into()).to_string(), "storage read failed: r");
+        assert_eq!(PipelineError::StorageWrite("w".into()).to_string(), "storage write failed: w");
+        assert_eq!(PipelineError::Decode("d".into()).to_string(), "image decode failed: d");
+        assert_eq!(PipelineError::Thumbnail("t".into()).to_string(), "thumbnail generation failed: t");
+        assert_eq!(PipelineError::Webp("v".into()).to_string(), "webp conversion failed: v");
+        assert_eq!(PipelineError::Watermark("m".into()).to_string(), "watermark error: m");
+        assert_eq!(PipelineError::Database("b".into()).to_string(), "database update failed: b");
+        assert_eq!(PipelineError::BackendResolution("z".into()).to_string(), "backend resolution failed: z");
+    }
+
+    #[tokio::test]
+    async fn test_mock_backend_misc_methods() {
+        let backend = MockBackend::new();
+        backend.put("k", b"v", "text/plain").await.unwrap();
+        assert!(backend.exists("k").await.unwrap());
+        assert!(!backend.exists("nope").await.unwrap());
+        assert_eq!(backend.public_url("k"), "/u/k");
+        assert_eq!(backend.backend_name(), "mock");
+        backend.delete("k").await.unwrap();
+        assert!(!backend.exists("k").await.unwrap());
+    }
+
+    const TEST_DB_URL: &str = "postgres://pichost:pichost@localhost:5432/pichost";
+
+    type ImageRow = (
+        i32,
+        i32,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+    );
+
+    async fn test_pg_pool() -> sqlx::PgPool {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(5)
+            .connect(TEST_DB_URL)
+            .await
+            .unwrap();
+        sqlx::migrate!("../migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn insert_user_with_watermark(
+        pool: &sqlx::PgPool,
+        watermark: Option<serde_json::Value>,
+    ) -> uuid::Uuid {
+        let user_id = uuid::Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO users (id, username, password_hash, watermark_config) \
+             VALUES ($1, $2, 'x', $3)",
+        )
+        .bind(user_id)
+        .bind(format!("wm_test_{user_id}"))
+        .bind(watermark)
+        .execute(pool)
+        .await
+        .unwrap();
+        user_id
+    }
+
+    async fn insert_image(pool: &sqlx::PgPool, user_id: uuid::Uuid) -> uuid::Uuid {
+        let image_id = uuid::Uuid::new_v4();
+        let pk = format!("{:x}", image_id)[..16].to_string();
+        sqlx::query(
+            "INSERT INTO images (id, user_id, public_key, original_name, storage_key, \
+             storage_backend, mime_type, file_size, sha256, url, status) \
+             VALUES ($1, $2, $3, 'n', 'source.png', 'local', 'image/png', 1, $4, 'u', 'active')",
+        )
+        .bind(image_id)
+        .bind(user_id)
+        .bind(pk)
+        .bind("a".repeat(64))
+        .execute(pool)
+        .await
+        .unwrap();
+        image_id
+    }
+
+    async fn cleanup_user(pool: &sqlx::PgPool, user_id: uuid::Uuid) {
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(user_id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    fn task_for(user_id: uuid::Uuid, image_id: uuid::Uuid) -> TaskPayload {
+        let mut t = sample_task();
+        t.user_id = user_id;
+        t.image_id = image_id;
+        t
+    }
+
+    fn canvas(w: u32, h: u32) -> image::DynamicImage {
+        image::DynamicImage::new_rgba8(w, h)
+    }
+
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let p = std::env::temp_dir().join(format!("phw-pipe-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&p).unwrap();
+            Self(p)
+        }
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn local_router(dir: &TempDir) -> StorageRouter {
+        let local: Arc<dyn StorageBackend> = Arc::new(LocalStorage::new(
+            dir.path().to_path_buf(),
+            "http://localhost:3000".into(),
+        ));
+        let mut backends: HashMap<String, Arc<dyn StorageBackend>> = HashMap::new();
+        backends.insert("local".into(), local);
+        StorageRouter::new(backends, "local".into())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_fetch_watermark_config_some() {
+        let pool = test_pg_pool().await;
+        let user_id = insert_user_with_watermark(
+            &pool,
+            Some(serde_json::json!({
+                "enabled": true, "text": "@test", "position": "bottom-right"
+            })),
+        )
+        .await;
+        let task = task_for(user_id, uuid::Uuid::new_v4());
+        let cfg = fetch_watermark_config(&pool, &task).await.unwrap().unwrap();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.text, "@test");
+        assert_eq!(
+            cfg.position,
+            pichost_core::models::WatermarkPosition::BottomRight
+        );
+        cleanup_user(&pool, user_id).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_fetch_watermark_config_none_and_invalid() {
+        let pool = test_pg_pool().await;
+        let plain = insert_user_with_watermark(&pool, None).await;
+        let bad = insert_user_with_watermark(
+            &pool,
+            Some(serde_json::json!({"enabled": "not-a-bool"})),
+        )
+        .await;
+        let t1 = task_for(plain, uuid::Uuid::new_v4());
+        let t2 = task_for(bad, uuid::Uuid::new_v4());
+        assert!(fetch_watermark_config(&pool, &t1).await.unwrap().is_none());
+        assert!(fetch_watermark_config(&pool, &t2).await.unwrap().is_none());
+        cleanup_user(&pool, plain).await;
+        cleanup_user(&pool, bad).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_load_watermarked_image_enabled() {
+        let pool = test_pg_pool().await;
+        let user_id = insert_user_with_watermark(
+            &pool,
+            Some(serde_json::json!({"enabled": true, "text": "@test"})),
+        )
+        .await;
+        let task = task_for(user_id, uuid::Uuid::new_v4());
+        let raw = canvas(200, 100);
+        let out = load_watermarked_image(&pool, &task, raw.clone()).await.unwrap();
+        assert_ne!(out.to_rgba8().into_raw(), raw.to_rgba8().into_raw());
+        cleanup_user(&pool, user_id).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_load_watermarked_image_disabled_returns_clone() {
+        let pool = test_pg_pool().await;
+        let user_id = insert_user_with_watermark(
+            &pool,
+            Some(serde_json::json!({"enabled": false, "text": "@test"})),
+        )
+        .await;
+        let task = task_for(user_id, uuid::Uuid::new_v4());
+        let raw = canvas(64, 64);
+        let out = load_watermarked_image(&pool, &task, raw.clone()).await.unwrap();
+        assert_eq!(out.to_rgba8().into_raw(), raw.to_rgba8().into_raw());
+        cleanup_user(&pool, user_id).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_update_image_record_writes_variants() {
+        let pool = test_pg_pool().await;
+        let user_id = insert_user_with_watermark(&pool, None).await;
+        let image_id = insert_image(&pool, user_id).await;
+        let task = task_for(user_id, image_id);
+        update_image_record(
+            &pool, &task, 200, 100, "t/thumb", "t/webp", true, true,
+            "http://localhost",
+        )
+        .await
+        .unwrap();
+        let row: ImageRow = sqlx::query_as(
+            "SELECT width, height, thumbnail_key, thumbnail_url, webp_key, webp_url, status \
+             FROM images WHERE id = $1",
+        )
+        .bind(image_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((row.0, row.1), (200, 100));
+        assert_eq!(row.2.as_deref(), Some("t/thumb"));
+        assert!(row.3.as_deref().unwrap().starts_with("http://localhost/u/thumb-"));
+        assert_eq!(row.4.as_deref(), Some("t/webp"));
+        assert!(row.5.as_deref().unwrap().starts_with("http://localhost/u/webp-"));
+        assert_eq!(row.6, "ready");
+        cleanup_user(&pool, user_id).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_update_image_record_no_variants_null_keys() {
+        let pool = test_pg_pool().await;
+        let user_id = insert_user_with_watermark(&pool, None).await;
+        let image_id = insert_image(&pool, user_id).await;
+        let task = task_for(user_id, image_id);
+        update_image_record(&pool, &task, 10, 20, "t", "w", false, false, "http://localhost")
+            .await
+            .unwrap();
+        let row: (Option<String>, Option<String>, String) = sqlx::query_as(
+            "SELECT thumbnail_key, webp_key, status FROM images WHERE id = $1",
+        )
+        .bind(image_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(row.0.is_none());
+        assert!(row.1.is_none());
+        assert_eq!(row.2, "ready");
+        cleanup_user(&pool, user_id).await;
+    }
+
+    async fn insert_storage_config(
+        pool: &sqlx::PgPool,
+        user_id: uuid::Uuid,
+    ) -> uuid::Uuid {
+        let config_id = uuid::Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO user_storage_configs (id, user_id, name, provider, config) \
+             VALUES ($1, $2, 'cfg', 'local', '{}'::jsonb)",
+        )
+        .bind(config_id)
+        .bind(user_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        config_id
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_fetch_storage_config_found_and_missing() {
+        let pool = test_pg_pool().await;
+        let user_id = insert_user_with_watermark(&pool, None).await;
+        let config_id = insert_storage_config(&pool, user_id).await;
+        let cfg = fetch_storage_config(&pool, &config_id).await.unwrap();
+        assert_eq!(cfg.id, config_id);
+        assert_eq!(cfg.provider, "local");
+        let err = fetch_storage_config(&pool, &uuid::Uuid::new_v4()).await.unwrap_err();
+        assert!(matches!(err, PipelineError::BackendResolution(_)));
+        cleanup_user(&pool, user_id).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_resolve_backend_local_and_config() {
+        let pool = test_pg_pool().await;
+        let user_id = insert_user_with_watermark(&pool, None).await;
+        let config_id = insert_storage_config(&pool, user_id).await;
+        let dir = TempDir::new();
+        let router = local_router(&dir);
+        let cfg = AppConfig::default();
+
+        let plain = task_for(user_id, uuid::Uuid::new_v4());
+        let backend = resolve_backend(&pool, &router, &cfg, &plain).await.unwrap();
+        assert_eq!(backend.backend_name(), "local");
+
+        let mut with_cfg = task_for(user_id, uuid::Uuid::new_v4());
+        with_cfg.storage_config_id = Some(config_id);
+        let backend = resolve_backend(&pool, &router, &cfg, &with_cfg).await.unwrap();
+        assert_eq!(backend.backend_name(), "local");
+        cleanup_user(&pool, user_id).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_process_task_end_to_end() {
+        let pool = test_pg_pool().await;
+        let user_id = insert_user_with_watermark(&pool, None).await;
+        let image_id = insert_image(&pool, user_id).await;
+
+        let dir = TempDir::new();
+        let router = local_router(&dir);
+        let img = canvas(200, 100);
+        let mut buf = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .unwrap();
+        std::fs::write(dir.path().join("source.png"), &buf).unwrap();
+
+        let task = task_for(user_id, image_id);
+        let cfg = AppConfig::default();
+        process_task(&pool, &router, &cfg, &task).await.unwrap();
+
+        let row: (i32, i32, Option<String>, Option<String>, String) = sqlx::query_as(
+            "SELECT width, height, thumbnail_key, webp_key, status FROM images WHERE id = $1",
+        )
+        .bind(image_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((row.0, row.1), (200, 100));
+        assert_eq!(row.4, "ready");
+        let thumb_key = row.2.unwrap();
+        let webp_key = row.3.unwrap();
+        assert!(dir.path().join(&thumb_key).exists());
+        assert!(dir.path().join(&webp_key).exists());
+        cleanup_user(&pool, user_id).await;
+    }
+}

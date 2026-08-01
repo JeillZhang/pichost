@@ -235,3 +235,453 @@ async fn handle_dead_letter(
         .execute(pool)
         .await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use deadpool_redis::redis::AsyncCommands;
+    use pichost_core::config::AppConfig;
+
+    static REDIS_LOCK: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+        std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+    const TEST_DB_URL: &str = "postgres://pichost:pichost@localhost:5432/pichost";
+    const KEY_DEAD: &str = "pichost:tasks:dead";
+
+    fn test_redis_pool() -> RedisPool {
+        RedisConfig::from_url("redis://localhost:6379/2")
+            .create_pool(Some(Runtime::Tokio1))
+            .unwrap()
+    }
+
+    async fn test_pg_pool() -> sqlx::PgPool {
+        let pool = db::create_pool(TEST_DB_URL, 4).await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    fn sample_task() -> queue::TaskPayload {
+        queue::TaskPayload {
+            task_id: uuid::Uuid::new_v4(),
+            image_id: uuid::Uuid::new_v4(),
+            user_id: uuid::Uuid::new_v4(),
+            storage_backend: "local".into(),
+            storage_config_id: None,
+            storage_backend_name: "Local".into(),
+            source_key: "source.png".into(),
+            source_mime: "image/png".into(),
+            retry_count: 0,
+            max_retries: 3,
+        }
+    }
+
+    fn task_key(task_id: uuid::Uuid) -> String {
+        format!("pichost:task:{task_id}")
+    }
+
+    async fn enqueue_and_dequeue_own(
+        redis: &RedisPool,
+        task: &queue::TaskPayload,
+    ) -> queue::TaskPayload {
+        loop {
+            queue::enqueue_task(redis, task).await.unwrap();
+            match queue::dequeue_task(redis, 1).await.unwrap() {
+                Some(got) if got.task_id == task.task_id => return got,
+                Some(got) => {
+                    queue::ack_task(redis, got.task_id).await.unwrap();
+                }
+                None => {}
+            }
+        }
+    }
+
+    async fn drain_own(redis: &RedisPool, task_id: uuid::Uuid) {
+        loop {
+            match queue::dequeue_task(redis, 0).await.unwrap() {
+                Some(t) if t.task_id == task_id => {
+                    queue::ack_task(redis, task_id).await.unwrap();
+                    return;
+                }
+                Some(t) => {
+                    queue::ack_task(redis, t.task_id).await.unwrap();
+                }
+                None => return,
+            }
+        }
+    }
+
+    async fn insert_user_image(pool: &sqlx::PgPool) -> (uuid::Uuid, uuid::Uuid) {
+        let user_id = uuid::Uuid::new_v4();
+        let image_id = uuid::Uuid::new_v4();
+        sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'x')")
+            .bind(user_id)
+            .bind(format!("test_{user_id}"))
+            .execute(pool)
+            .await
+            .unwrap();
+        let pk = format!("{:x}", image_id)[..16].to_string();
+        sqlx::query(
+            "INSERT INTO images (id, user_id, public_key, original_name, storage_key, \
+             storage_backend, mime_type, file_size, sha256, url, status) \
+             VALUES ($1, $2, $3, 'n', 'k', 'local', 'image/png', 1, $4, 'u', 'active')",
+        )
+        .bind(image_id)
+        .bind(user_id)
+        .bind(pk)
+        .bind("a".repeat(64))
+        .execute(pool)
+        .await
+        .unwrap();
+        (user_id, image_id)
+    }
+
+    async fn cleanup_rows(pool: &sqlx::PgPool, image_id: uuid::Uuid, user_id: uuid::Uuid) {
+        sqlx::query("DELETE FROM images WHERE id = $1")
+            .bind(image_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(user_id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_handle_task_result_ack() {
+        let _guard = REDIS_LOCK.lock().await;
+        let redis = test_redis_pool();
+        let pool = test_pg_pool().await;
+        let cfg = AppConfig::default();
+        let task = sample_task();
+        let got = enqueue_and_dequeue_own(&redis, &task).await;
+        handle_task_result(0, &pool, &redis, got, Ok(Ok(())), &cfg).await;
+        let mut conn = redis.get().await.unwrap();
+        let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
+        assert_eq!(status.as_deref(), Some("done"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_handle_task_result_nack_retry() {
+        let _guard = REDIS_LOCK.lock().await;
+        let redis = test_redis_pool();
+        let pool = test_pg_pool().await;
+        let cfg = AppConfig::default();
+        let task = sample_task();
+        let got = enqueue_and_dequeue_own(&redis, &task).await;
+        handle_task_result(
+            0, &pool, &redis, got,
+            Ok(Err(pipeline::PipelineError::Decode("boom".into()))),
+            &cfg,
+        )
+        .await;
+        let mut conn = redis.get().await.unwrap();
+        let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
+        assert_eq!(status.as_deref(), Some("pending"));
+        let data: Option<String> = conn.hget(task_key(task.task_id), "data").await.unwrap();
+        let stored: queue::TaskPayload = serde_json::from_str(&data.unwrap()).unwrap();
+        assert_eq!(stored.retry_count, 1);
+        drop(conn);
+        drain_own(&redis, task.task_id).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_handle_task_result_dead_letter() {
+        let _guard = REDIS_LOCK.lock().await;
+        let redis = test_redis_pool();
+        let pool = test_pg_pool().await;
+        let cfg = AppConfig::default();
+        let (user_id, image_id) = insert_user_image(&pool).await;
+        let mut task = sample_task();
+        task.image_id = image_id;
+        task.user_id = user_id;
+        task.retry_count = 3;
+        task.max_retries = 3;
+        let got = enqueue_and_dequeue_own(&redis, &task).await;
+        handle_task_result(
+            0, &pool, &redis, got,
+            Ok(Err(pipeline::PipelineError::Decode("fatal".into()))),
+            &cfg,
+        )
+        .await;
+        let mut conn = redis.get().await.unwrap();
+        let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
+        assert_eq!(status.as_deref(), Some("dead"));
+        let dead: Vec<String> = conn.lrange(KEY_DEAD, 0, -1).await.unwrap();
+        assert!(dead.contains(&task.task_id.to_string()));
+        conn.lrem::<_, _, ()>(KEY_DEAD, 1, task.task_id.to_string()).await.unwrap();
+        drop(conn);
+        let (ut_status,): (String,) =
+            sqlx::query_as("SELECT status FROM upload_tasks WHERE image_id = $1 ORDER BY created_at DESC LIMIT 1")
+                .bind(image_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(ut_status, "failed");
+        let (img_status,): (String,) =
+            sqlx::query_as("SELECT status FROM images WHERE id = $1")
+                .bind(image_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(img_status, "failed");
+        cleanup_rows(&pool, image_id, user_id).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_handle_dead_letter_writes_db() {
+        let pool = test_pg_pool().await;
+        let (user_id, image_id) = insert_user_image(&pool).await;
+        handle_dead_letter(&pool, image_id, 4, 3, "boom").await;
+        let (ut_status,): (String,) =
+            sqlx::query_as("SELECT status FROM upload_tasks WHERE image_id = $1 ORDER BY created_at DESC LIMIT 1")
+                .bind(image_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(ut_status, "failed");
+        let (img_status,): (String,) =
+            sqlx::query_as("SELECT status FROM images WHERE id = $1")
+                .bind(image_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(img_status, "failed");
+        cleanup_rows(&pool, image_id, user_id).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_init_worker_state() {
+        let redis = test_redis_pool();
+        let pool = test_pg_pool().await;
+        let cfg = Arc::new(AppConfig::default());
+        let state = init_worker_state(pool, redis, cfg).await.expect("state init");
+        assert_eq!(state.config.worker.concurrency, 4);
+        assert!(state.router.get("local").is_some());
+        assert!(state.router.backend_count() >= 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_spawn_workers() {
+        let _guard = REDIS_LOCK.lock().await;
+        let redis = test_redis_pool();
+        let pool = test_pg_pool().await;
+        let cfg = Arc::new(AppConfig::default());
+        let state = init_worker_state(pool, redis, cfg).await.unwrap();
+        let handles = spawn_workers(state);
+        assert_eq!(handles.len(), 4);
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+        for h in handles {
+            h.abort();
+        }
+    }
+
+    fn exhausted_redis_pool() -> RedisPool {
+        let mut rc = RedisConfig::from_url("redis://localhost:6379/2");
+        let mut pc = deadpool_redis::PoolConfig::new(1);
+        pc.timeouts.wait = Some(std::time::Duration::from_millis(50));
+        rc.pool = Some(pc);
+        rc.create_pool(Some(Runtime::Tokio1)).unwrap()
+    }
+
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let p = std::env::temp_dir().join(format!("phw-main-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&p).unwrap();
+            Self(p)
+        }
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_handle_task_result_timeout_nacks() {
+        let _guard = REDIS_LOCK.lock().await;
+        let redis = test_redis_pool();
+        let pool = test_pg_pool().await;
+        let cfg = AppConfig::default();
+        let task = sample_task();
+        let got = enqueue_and_dequeue_own(&redis, &task).await;
+        let elapsed = tokio::time::timeout(
+            tokio::time::Duration::from_millis(1),
+            std::future::pending::<()>(),
+        )
+        .await
+        .unwrap_err();
+        handle_task_result(0, &pool, &redis, got, Err(elapsed), &cfg).await;
+        let mut conn = redis.get().await.unwrap();
+        let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
+        assert_eq!(status.as_deref(), Some("pending"));
+        let data: Option<String> = conn.hget(task_key(task.task_id), "data").await.unwrap();
+        let stored: queue::TaskPayload = serde_json::from_str(&data.unwrap()).unwrap();
+        assert_eq!(stored.retry_count, 1);
+        drop(conn);
+        drain_own(&redis, task.task_id).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_handle_task_result_redis_errors() {
+        let _guard = REDIS_LOCK.lock().await;
+        let normal = test_redis_pool();
+        let pool = test_pg_pool().await;
+        let cfg = AppConfig::default();
+
+        let task = sample_task();
+        let got = enqueue_and_dequeue_own(&normal, &task).await;
+        let exhausted = exhausted_redis_pool();
+        let held = exhausted.get().await.unwrap();
+        handle_task_result(0, &pool, &exhausted, got, Ok(Ok(())), &cfg).await;
+        let mut conn = normal.get().await.unwrap();
+        let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
+        assert_eq!(status.as_deref(), Some("processing"));
+        drop(held);
+
+        let task2 = sample_task();
+        let got2 = enqueue_and_dequeue_own(&normal, &task2).await;
+        let exhausted2 = exhausted_redis_pool();
+        let held2 = exhausted2.get().await.unwrap();
+        handle_task_result(
+            0, &pool, &exhausted2, got2,
+            Ok(Err(pipeline::PipelineError::Decode("boom".into()))),
+            &cfg,
+        )
+        .await;
+        let mut conn = normal.get().await.unwrap();
+        let status: Option<String> = conn.hget(task_key(task2.task_id), "status").await.unwrap();
+        assert_eq!(status.as_deref(), Some("processing"));
+        drop(held2);
+
+        queue::ack_task(&normal, task.task_id).await.unwrap();
+        queue::ack_task(&normal, task2.task_id).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_worker_loop_deadletters_failed_task() {
+        let _guard = REDIS_LOCK.lock().await;
+        let redis = test_redis_pool();
+        let pool = test_pg_pool().await;
+        let mut cfg = AppConfig::default();
+        cfg.worker.queue_poll_timeout = 1;
+        let cfg = Arc::new(cfg);
+
+        let orphan = uuid::Uuid::new_v4();
+        let mut conn = redis.get().await.unwrap();
+        conn.lpush::<_, _, ()>("pichost:tasks:pending", orphan.to_string())
+            .await
+            .unwrap();
+        drop(conn);
+
+        let mut task = sample_task();
+        task.retry_count = 3;
+        task.max_retries = 3;
+        queue::enqueue_task(&redis, &task).await.unwrap();
+
+        let dir = TempDir::new();
+        let local: Arc<dyn StorageBackend> = Arc::new(LocalStorage::new(
+            dir.path().to_path_buf(),
+            "http://localhost:3000".into(),
+        ));
+        let mut backends: HashMap<String, Arc<dyn StorageBackend>> = HashMap::new();
+        backends.insert("local".into(), local);
+        let router = Arc::new(StorageRouter::new(backends, "local".into()));
+
+        let result = tokio::time::timeout(
+            tokio::time::Duration::from_secs(4),
+            worker_loop(0, pool.clone(), redis.clone(), cfg, router),
+        )
+        .await;
+        assert!(result.is_err());
+
+        let mut conn = redis.get().await.unwrap();
+        let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
+        assert_eq!(status.as_deref(), Some("dead"));
+        let dead: Vec<String> = conn.lrange(KEY_DEAD, 0, -1).await.unwrap();
+        assert!(dead.contains(&task.task_id.to_string()));
+        conn.lrem::<_, _, ()>(KEY_DEAD, 1, task.task_id.to_string())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_init_worker_state_recover_stale() {
+        let _guard = REDIS_LOCK.lock().await;
+        let redis = test_redis_pool();
+        let pool = test_pg_pool().await;
+        let cfg = Arc::new(AppConfig::default());
+        let task = sample_task();
+        let got = enqueue_and_dequeue_own(&redis, &task).await;
+        let mut conn = redis.get().await.unwrap();
+        conn.hset::<_, _, _, ()>(
+            &task_key(got.task_id),
+            "updated_at",
+            "2020-01-01T00:00:00Z",
+        )
+        .await
+        .unwrap();
+        drop(conn);
+        let state = init_worker_state(pool, redis, cfg).await.expect("state init");
+        assert!(state.router.get("local").is_some());
+        drain_own(&state.redis, got.task_id).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_init_worker_state_with_rustfs() {
+        let _guard = REDIS_LOCK.lock().await;
+        let redis = test_redis_pool();
+        let pool = test_pg_pool().await;
+        let mut cfg = AppConfig::default();
+        cfg.storage.rustfs = Some(pichost_core::config::RustfsStorageConfig {
+            endpoint: "http://localhost:9000".into(),
+            bucket: "test".into(),
+            access_key: "minioadmin".into(),
+            secret_key: "minioadmin".into(),
+            region: "us-east-1".into(),
+            use_ssl: false,
+            public_endpoint: None,
+        });
+        let state = init_worker_state(pool, redis, Arc::new(cfg)).await.expect("state init");
+        assert!(state.router.get("rustfs").is_some());
+        assert!(state.router.get("local").is_some());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_queue_helper_loop_paths() {
+        let _guard = REDIS_LOCK.lock().await;
+        let redis = test_redis_pool();
+        let foreign = sample_task();
+        let own = sample_task();
+        queue::enqueue_task(&redis, &foreign).await.unwrap();
+        queue::enqueue_task(&redis, &own).await.unwrap();
+        let got = enqueue_and_dequeue_own(&redis, &own).await;
+        assert_eq!(got.task_id, own.task_id);
+        queue::ack_task(&redis, own.task_id).await.unwrap();
+
+        let foreign2 = sample_task();
+        let own2 = sample_task();
+        queue::enqueue_task(&redis, &foreign2).await.unwrap();
+        queue::enqueue_task(&redis, &own2).await.unwrap();
+        drain_own(&redis, own2.task_id).await;
+    }
+}

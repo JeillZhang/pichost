@@ -143,3 +143,168 @@ pub async fn rate_limit_public(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use axum::middleware;
+    use axum::Router;
+    use tower::ServiceExt;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_rl_key() {
+        assert_eq!(rl_key("auth", "1.2.3.4"), "rl:auth:1.2.3.4");
+    }
+
+    #[test]
+    fn test_extract_client_ip_no_xff() {
+        let req = Request::builder().body(Body::empty()).unwrap();
+        assert_eq!(extract_client_ip(&req), "unknown");
+    }
+
+    #[test]
+    fn test_extract_client_ip_single() {
+        let req = Request::builder()
+            .header("x-forwarded-for", "1.2.3.4")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(extract_client_ip(&req), "1.2.3.4");
+    }
+
+    #[test]
+    fn test_extract_client_ip_first_of_many() {
+        let req = Request::builder()
+            .header("x-forwarded-for", "1.2.3.4, 5.6.7.8")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(extract_client_ip(&req), "1.2.3.4");
+    }
+
+    #[test]
+    fn test_too_many_response() {
+        let (status, json) = too_many_response(42);
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(json.0["error"], "rate limit exceeded, retry after 42s");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_check_rate_limit_against_redis() {
+        let pool = crate::cache::create_pool("redis://localhost:6379", 2);
+        let cache = crate::cache::Cache::new(pool);
+        let key = format!("unit-test-{}", Uuid::new_v4());
+        for _ in 0..3 {
+            assert!(check_rate_limit(&cache, "test", &key, 3, 60).await.is_ok());
+        }
+        let err = check_rate_limit(&cache, "test", &key, 3, 60).await.unwrap_err();
+        assert!(err > 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_check_rate_limit_redis_down_opens() {
+        let cache = crate::cache::Cache::new(crate::cache::create_pool(
+            "redis://127.0.0.1:1",
+            1,
+        ));
+        let res = check_rate_limit(&cache, "auth", "1.2.3.4", 10, 60).await;
+        assert_eq!(res, Ok(10));
+    }
+
+    fn rate_state(max: u32) -> Arc<AppState> {
+        use pichost_core::StorageRouter;
+        let mut cfg = pichost_core::config::AppConfig::default();
+        cfg.rate_limit.auth_max = max;
+        cfg.rate_limit.upload_max = max;
+        cfg.rate_limit.general_max = max;
+        cfg.rate_limit.public_max = max;
+        Arc::new(AppState {
+            pool: sqlx::postgres::PgPoolOptions::new()
+                .max_connections(1)
+                .connect_lazy("postgres://pichost:pichost@localhost:5432/pichost")
+                .unwrap(),
+            cache: Arc::new(crate::cache::Cache::new(crate::cache::create_pool(
+                "redis://localhost:6379",
+                2,
+            ))),
+            config: Arc::new(cfg),
+            router: Arc::new(StorageRouter::new(
+                std::collections::HashMap::new(),
+                "local".into(),
+            )),
+        })
+    }
+
+    fn unique_xff() -> String {
+        let uuid = Uuid::new_v4();
+        let b = uuid.as_bytes();
+        format!("10.{}.{}.{}", b[0], b[1], b[2])
+    }
+
+    async fn hit_twice(app: Router, xff: &str) -> (StatusCode, StatusCode) {
+        let req = || {
+            Request::builder()
+                .uri("/")
+                .header("x-forwarded-for", xff)
+                .body(Body::empty())
+                .unwrap()
+        };
+        let first = app.clone().oneshot(req()).await.unwrap().status();
+        let second = app.clone().oneshot(req()).await.unwrap().status();
+        (first, second)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_rate_limit_auth_middleware_429() {
+        let state = rate_state(1);
+        let app = Router::new()
+            .route("/", axum::routing::get(|| async { "ok" }))
+            .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_auth))
+            .with_state(state);
+        let (first, second) = hit_twice(app, &unique_xff()).await;
+        assert_eq!(first, StatusCode::OK);
+        assert_eq!(second, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_rate_limit_upload_middleware_429() {
+        let state = rate_state(1);
+        let app = Router::new()
+            .route("/", axum::routing::get(|| async { "ok" }))
+            .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_upload))
+            .with_state(state);
+        let (first, second) = hit_twice(app, &unique_xff()).await;
+        assert_eq!(first, StatusCode::OK);
+        assert_eq!(second, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_rate_limit_general_middleware_429() {
+        let state = rate_state(1);
+        let app = Router::new()
+            .route("/", axum::routing::get(|| async { "ok" }))
+            .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_general))
+            .with_state(state);
+        let (first, second) = hit_twice(app, &unique_xff()).await;
+        assert_eq!(first, StatusCode::OK);
+        assert_eq!(second, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_rate_limit_public_middleware_429() {
+        let state = rate_state(1);
+        let app = Router::new()
+            .route("/", axum::routing::get(|| async { "ok" }))
+            .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_public))
+            .with_state(state);
+        let (first, second) = hit_twice(app, &unique_xff()).await;
+        assert_eq!(first, StatusCode::OK);
+        assert_eq!(second, StatusCode::TOO_MANY_REQUESTS);
+    }
+}
