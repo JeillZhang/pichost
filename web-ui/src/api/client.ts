@@ -394,7 +394,7 @@ export async function deleteCategory(id: string): Promise<void> {
 
 export async function moveImageToCategory(
   imageId: string,
-  categoryId: string,
+  categoryId: string | null,
 ): Promise<{ message: string }> {
   return api.post(`images/${imageId}/move`, {
     json: { category_id: categoryId },

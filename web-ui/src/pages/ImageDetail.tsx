@@ -70,7 +70,7 @@ export default function ImageDetail() {
   })
 
   const moveMutation = useMutation({
-    mutationFn: ({ imageId, categoryId }: { imageId: string; categoryId: string }) =>
+    mutationFn: ({ imageId, categoryId }: { imageId: string; categoryId: string | null }) =>
       moveImageToCategory(imageId, categoryId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['image', id] })
@@ -250,10 +250,8 @@ export default function ImageDetail() {
           <select
             value={img.category_id ?? ''}
             onChange={(e) => {
-              const categoryId = e.target.value
-              if (categoryId) {
-                moveMutation.mutate({ imageId: id!, categoryId })
-              }
+              // Empty string ("None") → null removes the category.
+              moveMutation.mutate({ imageId: id!, categoryId: e.target.value || null })
             }}
             disabled={moveMutation.isPending}
             className="input-field disabled:opacity-50"
