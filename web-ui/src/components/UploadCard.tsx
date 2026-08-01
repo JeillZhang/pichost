@@ -34,13 +34,11 @@ export default function UploadCard({ task }: UploadCardProps) {
         <p className="truncate text-sm" style={{ color: 'var(--color-text-primary)' }}>
           {task.file.name}
         </p>
-        {task.status === 'done' &&
-          task.result?.storage_configs &&
-          task.result.storage_configs.length > 0 && (
-            <p className="truncate text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              {task.result.storage_configs.map((c) => `→ ${c.name}`).join(' · ')}
-            </p>
-          )}
+        {task.status === 'done' && task.result?.storage_config && (
+          <p className="truncate text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            → {task.result.storage_config.name}
+          </p>
+        )}
         <div className="mt-1.5 flex items-center gap-2">
           {/* Progress bar */}
           {(task.status === 'pending' || task.status === 'uploading') && (

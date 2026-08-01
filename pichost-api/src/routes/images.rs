@@ -730,6 +730,8 @@ pub async fn delete_image(
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "failed to delete image"})))
         })?;
 
+    let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
+
     tracing::info!(image_id = %id, user_id = %user.id, "image deleted");
     Ok(Json(json!({"message": "image deleted", "id": id})))
 }
@@ -772,6 +774,10 @@ pub async fn batch_delete(
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "failed to delete images"})))
         })?
         .rows_affected() as usize;
+
+    for image_id in &body.ids {
+        let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", image_id)).await;
+    }
 
     let failed = body.ids.len().saturating_sub(deleted);
     tracing::info!(user_id = %user.id, requested = body.ids.len(), deleted, failed, "batch delete");
@@ -822,6 +828,9 @@ pub async fn move_image(
     if result.rows_affected() == 0 {
         return Err((StatusCode::NOT_FOUND, Json(json!({"error": "Image not found"}))));
     }
+
+    let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
+
     Ok(Json(json!({"message": "Image moved to category"})))
 }
 
@@ -878,6 +887,10 @@ pub async fn batch_move_images(
     .map_err(|e| {
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
     })?;
+
+    for image_id in &body.image_ids {
+        let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", image_id)).await;
+    }
 
     Ok(Json(json!({
         "message": "Images moved to category",
