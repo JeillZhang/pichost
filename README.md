@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.17.1** — P4-G/H/I complete. Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI), system config management (admin config API + config.toml read/write).
+**v0.17.3** — P4-G/H/I complete. Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI), system config management (admin config API + config.toml read/write).
 
 ## Stack
 

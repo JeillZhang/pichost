@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.17.1` — P4-I complete. System config management (admin config API + config.toml read/write), Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI).
+- Version: `0.17.3` — P4-I complete. System config management (admin config API + config.toml read/write), Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI).
 
 ## Key Commands
 
@@ -41,7 +41,9 @@
   - OAuth: `PICHOST_AUTH_OAUTH_GITHUB_CLIENT_ID`, `..._SECRET`, same for Google
   - `PICHOST_STORAGE_LOCAL_BASE_PATH` — local storage dir; `PICHOST_STORAGE_RUSTFS_ENDPOINT`/`..._BUCKET`/`..._REGION`/`..._ACCESS_KEY`/`..._SECRET_KEY` — S3-compatible storage
   - `PICHOST_STORAGE_MAX_USER_CONFIGS` — max Git storage configs per user (default 5)
-  - `PICHOST_AUTH_TOKEN_ENCRYPTION_KEY` — AES-256-GCM key for Git token encryption
+  - `PICHOST_TOKEN_ENCRYPTION_KEY` — AES-256-GCM key for Git token encryption (base64-encoded, 32 bytes)
+  - Rate limit overrides: `PICHOST_RATE_LIMIT_AUTH_MAX`, `PICHOST_RATE_LIMIT_UPLOAD_MAX`, `PICHOST_RATE_LIMIT_GENERAL_MAX`, `PICHOST_RATE_LIMIT_PUBLIC_MAX`
+- **Config separator**: `.env.example` uses `__` double-underscore for nested keys (`PICHOST_AUTH__JWT_SECRET` → `auth.jwt_secret`). Single `_` also works for 2-segment flat keys (`PICHOST_DATABASE_URL` → `database.url`). Docker compose (both `docker-compose.yml` and `docker-compose.prod.yml`) uses single `_`.
 - No `config.toml` in repo — env vars are the intended override mechanism.
 
 ## CRATE BOUNDARIES
@@ -75,7 +77,7 @@
 - **LocalStorage**: filesystem-based, base path `./storage-local/` (configurable).
 - **RustfsStorage**: S3-compatible object storage via `aws-sdk-s3`. Supports custom endpoint for non-AWS providers (MinIO, etc.).
 - **GitStorage**: push files to GitHub/GitCode repositories via Contents REST API. No clone-commit-push — API direct write.
-  - Tokens encrypted at rest via AES-256-GCM (`PICHOST_AUTH_TOKEN_ENCRYPTION_KEY`).
+  - Tokens encrypted at rest via AES-256-GCM (`PICHOST_TOKEN_ENCRYPTION_KEY`).
   - Per-user storage configs stored in `user_storage_configs` table, managed via `/api/v1/users/me/storage-configs` CRUD.
   - Rate limits: GitHub 5,000 req/h, GitCode 400 req/min. 429 → retry-after.
   - Size limits: GitCode 20 MB, GitHub 100 MB (PicHost's own 50 MB cap applies first).
@@ -122,10 +124,13 @@
 - Worker: 2 replicas, independent Redis `BRPOP` consumers.
 - API is stateless (state in PostgreSQL + Redis) — scale horizontally.
 - Postgres/Redis ports not exposed to host — internal Docker network only.
+- Two compose files: `docker-compose.yml` (local dev/S3) and `docker-compose.prod.yml` (production S3, `.env`-driven).
 - Bare-metal packaging: `scripts/pichost-api.service` + `scripts/pichost-worker.service` (systemd, `User=pichost`, `EnvironmentFile=/etc/pichost/.env`), install/uninstall via `scripts/install.sh` / `scripts/uninstall.sh`.
-- Release CI: `.github/workflows/release.yml` — `v*` tags trigger build of x86_64-unknown-linux-gnu, cargo test + clippy, then package `.tar.gz` with binaries/web-ui/migrations/nginx/scripts.
+- CI: `.github/workflows/release.yml` — `v*` tags → build x86_64-unknown-linux-gnu, test + clippy, package `.tar.gz`. Also `.github/workflows/e2e.yml` (Playwright E2E, PG+Redis service containers).
 
 ## API Endpoints Summary
+
+All paths below are relative to `/api/v1/` prefix unless otherwise noted. The `/u/`, `/metrics`, and `/health` paths are at root level (no `/api/v1/` prefix).
 
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
@@ -170,10 +175,8 @@
 ## Testing
 
 - **Unit tests** (38 pass): `storage_test.rs` (4), `gallery_test.rs` (8), `category_test.rs` (5), `admin_test.rs` (6 ignored — need DB/Redis), `pichost-api` unit (11), `pichost-core` (8), `health_test.rs` (1 ignored), `rustfs_test.rs` (2 pass + 3 ignored — need S3).
-- **Run focused**: `cargo test -p pichost-api test_image_list` — matches test name prefix.
-- **pichost-core tests** need `tokio` features `["rt", "macros"]`.
+- **Run focused**: `cargo test -p pichost-api test_image_list` — matches test name prefix. No frontend tests.
 - Integration tests in `pichost-api/tests/` require PostgreSQL + Redis (ignored by default).
-- No frontend tests.
 
 ## Frontend (web-ui/)
 
