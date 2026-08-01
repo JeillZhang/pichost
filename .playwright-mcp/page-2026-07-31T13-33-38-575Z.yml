@@ -1,0 +1,44 @@
+- generic [ref=e2]:
+  - navigation [ref=e21]:
+    - generic [ref=e22]:
+      - link "PicHost" [ref=e23] [cursor=pointer]:
+        - /url: /dashboard
+      - generic [ref=e24]:
+        - link "Dashboard" [ref=e25] [cursor=pointer]:
+          - /url: /dashboard
+        - link "Gallery" [ref=e26] [cursor=pointer]:
+          - /url: /gallery
+        - link "Admin" [ref=e27] [cursor=pointer]:
+          - /url: /admin
+      - generic [ref=e28]:
+        - generic [ref=e29]:
+          - text: Logged in as
+          - generic [ref=e30]: tester
+          - generic [ref=e31]: Admin
+        - 'button "Theme: system. Click to cycle." [ref=e32]'
+        - button "Logout" [ref=e35]
+  - main [ref=e39]:
+    - generic [ref=e40]:
+      - generic [ref=e44]:
+        - text: You are an administrator.
+        - button "Go to Admin Panel" [ref=e45]
+      - generic [ref=e46] [cursor=pointer]:
+        - button "Choose File" [ref=e47]
+        - generic [ref=e48]:
+          - paragraph [ref=e52]: Drag & drop images, or click to select
+          - paragraph [ref=e53]: PNG, JPEG, GIF, WebP, SVG, AVIF, BMP — up to 50 MB each
+      - generic [ref=e55]:
+        - textbox "Paste image URL..." [ref=e57]
+        - button "Upload" [disabled] [ref=e58]
+      - generic [ref=e60]:
+        - generic [ref=e61]: "Preprocessing: Off"
+        - link "Configure..." [ref=e62] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=e64]:
+        - generic [ref=e65]: Storage
+        - generic [ref=e66]: 0 B / 1.0 GB
+      - generic [ref=e68]: No images yet. Upload one above!
+  - region "Notifications alt+T":
+    - list:
+      - listitem [ref=e69]:
+        - generic [ref=e73]: Logged in!

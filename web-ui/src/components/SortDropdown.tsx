@@ -20,12 +20,13 @@ export default function SortDropdown({
   onOrderChange,
 }: SortDropdownProps) {
   return (
-    <div className="flex items-center gap-2">
-      <ArrowUpDown className="h-4 w-4 text-[var(--color-text-muted)]" />
+    <div className="flex items-center gap-1.5">
+      <ArrowUpDown className="h-4 w-4" style={{ color: 'var(--color-text-muted)' }} />
       <select
         value={sort}
         onChange={(e) => onSortChange(e.target.value)}
-        className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-glass)] px-2 py-2 text-sm text-[var(--color-text-primary)] backdrop-blur-sm focus:border-[var(--color-accent)] focus:outline-none"
+        className="input-field w-auto appearance-none py-2 text-sm"
+        style={{ paddingRight: '1.75rem' }}
       >
         {SORT_OPTIONS.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -35,7 +36,7 @@ export default function SortDropdown({
       </select>
       <button
         onClick={() => onOrderChange(order === 'asc' ? 'desc' : 'asc')}
-        className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-glass)] px-2 py-2 text-sm text-[var(--color-text-primary)] backdrop-blur-sm hover:bg-[var(--color-surface-hover)]"
+        className="input-field flex w-10 items-center justify-center px-0 py-2 text-sm transition-colors duration-150 hover:bg-[var(--glass-bg-hover)]"
         aria-label={`Sort ${order === 'asc' ? 'descending' : 'ascending'}`}
       >
         {order === 'asc' ? '↑' : '↓'}

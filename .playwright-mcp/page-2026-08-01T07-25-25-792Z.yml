@@ -1,0 +1,35 @@
+- generic [ref=e2]:
+  - navigation [ref=e21]:
+    - generic [ref=e22]:
+      - link "PicHost" [ref=e23] [cursor=pointer]:
+        - /url: /dashboard
+      - generic [ref=e25]:
+        - link "Dashboard" [ref=e26] [cursor=pointer]:
+          - /url: /dashboard
+        - link "Gallery" [ref=e27] [cursor=pointer]:
+          - /url: /gallery
+      - generic [ref=e28]:
+        - 'button "Theme: system. Click to cycle." [ref=e29]'
+        - generic [ref=e32]: uitest02
+  - main [ref=e39]:
+    - generic [ref=e40]:
+      - generic [ref=e41] [cursor=pointer]:
+        - button "Choose File" [ref=e42]
+        - generic [ref=e48]:
+          - paragraph [ref=e49]: Drag & drop images, or click to select
+          - paragraph [ref=e50]: PNG, JPEG, GIF, WebP, SVG, AVIF, BMP — up to 50 MB each
+      - generic [ref=e52]:
+        - textbox "Paste image URL..." [ref=e54]
+        - button "Upload" [disabled] [ref=e55]
+      - generic [ref=e57]:
+        - generic [ref=e58]: "EXIF: On"
+        - link "Configure..." [ref=e59] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=e64]:
+        - generic [ref=e65]: Storage
+        - generic [ref=e66]: 0 B / 1.0 GB
+      - generic [ref=e68]: No images yet. Upload one above!
+  - region "Notifications alt+T":
+    - list:
+      - listitem [ref=e69]:
+        - generic [ref=e73]: Logged in!

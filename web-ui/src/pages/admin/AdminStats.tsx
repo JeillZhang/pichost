@@ -34,10 +34,10 @@ interface StatCard {
 }
 
 const statCards: StatCard[] = [
-  { key: 'total_users', label: 'Total Users', icon: Users, color: '#3b82f6' },
-  { key: 'total_images', label: 'Total Images', icon: ImageIcon, color: '#8b5cf6' },
-  { key: 'total_size', label: 'Total Storage', icon: HardDrive, color: '#22c55e', format: (v: number) => formatBytes(v) },
-  { key: 'active_users_24h', label: 'Active (24h)', icon: Activity, color: '#f59e0b' },
+  { key: 'total_users', label: 'Total Users', icon: Users, color: 'var(--color-accent)' },
+  { key: 'total_images', label: 'Total Images', icon: ImageIcon, color: '#a78bfa' },
+  { key: 'total_size', label: 'Total Storage', icon: HardDrive, color: 'var(--color-success)', format: (v: number) => formatBytes(v) },
+  { key: 'active_users_24h', label: 'Active (24h)', icon: Activity, color: 'var(--color-warning)' },
 ]
 
 export default function AdminStats() {
@@ -113,7 +113,7 @@ export default function AdminStats() {
                   className="h-full rounded-full transition-all"
                   style={{
                     width: `${data.total_images > 0 ? (stats.total_images / data.total_images) * 100 : 0}%`,
-                    backgroundColor: name === 'local' ? '#3b82f6' : '#8b5cf6',
+                    backgroundColor: name === 'local' ? 'var(--color-accent)' : '#a78bfa',
                   }}
                 />
               </div>

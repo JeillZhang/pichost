@@ -1,81 +1,165 @@
-/* ── Theme Tokens ──────────────────────────── */
-/* Dark theme is the default (:root)            */
-/* Light theme is activated via .light class    */
-/* ──────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════
+   PicHost Design System — Theme Tokens
 
+   Dark theme is the default (:root).
+   Light theme is activated via .light class on <html>.
+
+   Design: Refined Glassmorphism with warm-cool depth.
+   Avoids flat AI-generated aesthetics through intentional
+   surface layering, subtle border highlights, and a
+   distinctive indigo accent palette.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Dark Theme (default) ──────────────────── */
 :root {
-  /* Backgrounds */
-  --color-bg: #030712;
-  --color-surface: rgba(17, 24, 39, 0.5);
+  /* ── Core Backgrounds ── */
+  --color-bg: #0a0a10;
+  --color-bg-subtle: #0f0f1a;
+  --color-surface: rgba(255, 255, 255, 0.04);
   --color-surface-hover: rgba(255, 255, 255, 0.08);
-  --color-surface-elevated: rgba(17, 24, 39, 0.8);
+  --color-surface-elevated: rgba(255, 255, 255, 0.06);
   --color-surface-glass: rgba(255, 255, 255, 0.03);
 
-  /* Borders */
-  --color-border: rgba(75, 85, 99, 0.3);
-  --color-border-hover: rgba(75, 85, 99, 0.6);
+  /* ── Glassmorphism (Dark) ── */
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-bg-hover: rgba(255, 255, 255, 0.09);
+  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-border-strong: rgba(255, 255, 255, 0.12);
+  --glass-highlight: rgba(255, 255, 255, 0.05);
+  --glass-blur: 16px;
+  --glass-saturate: 120%;
+  --glass-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.45),
+    0 1px 3px rgba(0, 0, 0, 0.25);
+  --glass-shadow-sm:
+    0 2px 8px rgba(0, 0, 0, 0.3),
+    0 1px 2px rgba(0, 0, 0, 0.2);
 
-  /* Text */
-  --color-text-primary: #f9fafb;
-  --color-text-secondary: #9ca3af;
-  --color-text-muted: #6b7280;
+  /* ── Borders ── */
+  --color-border: rgba(255, 255, 255, 0.07);
+  --color-border-hover: rgba(255, 255, 255, 0.14);
+  --color-border-strong: rgba(255, 255, 255, 0.10);
 
-  /* Accent */
-  --color-accent: #3b82f6;
-  --color-accent-hover: #2563eb;
-  --color-accent-subtle: rgba(59, 130, 246, 0.1);
+  /* ── Text ── */
+  --color-text-primary: #f5f5f4;
+  --color-text-secondary: #a8a29e;
+  --color-text-muted: #78716c;
+  --color-text-on-accent: #f5f5f4;
 
-  /* Danger */
-  --color-danger: #ef4444;
-  --color-danger-hover: #dc2626;
-  --color-danger-subtle: rgba(239, 68, 68, 0.1);
+  /* ── Accent — Indigo-Violet ── */
+  --color-accent: #a5b4fc;
+  --color-accent-hover: #818cf8;
+  --color-accent-active: #6366f1;
+  --color-accent-subtle: rgba(165, 180, 252, 0.10);
+  --color-accent-glow: rgba(165, 180, 252, 0.18);
+  --color-accent-strong: rgba(165, 180, 252, 0.30);
 
-  /* Success */
-  --color-success: #22c55e;
-  --color-success-hover: #16a34a;
-  --color-success-subtle: rgba(34, 197, 94, 0.1);
+  /* ── Accent Gradient ── */
+  --color-accent-gradient: linear-gradient(135deg, #a5b4fc 0%, #c084fc 50%, #a5b4fc 100%);
+  --color-accent-gradient-hover: linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #818cf8 100%);
 
-  /* Glassmorphism */
-  --glass-bg: rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(255, 255, 255, 0.06);
-  --glass-blur: 12px;
-  --glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  /* ── Semantic Colors ── */
+  --color-danger: #fca5a5;
+  --color-danger-hover: #f87171;
+  --color-danger-active: #ef4444;
+  --color-danger-subtle: rgba(252, 165, 165, 0.10);
+  --color-danger-border: rgba(252, 165, 165, 0.20);
 
-  /* Radii */
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
+  --color-success: #86efac;
+  --color-success-hover: #4ade80;
+  --color-success-active: #22c55e;
+  --color-success-subtle: rgba(134, 239, 172, 0.10);
+
+  --color-warning: #fde68a;
+  --color-warning-hover: #fbbf24;
+  --color-warning-subtle: rgba(253, 230, 138, 0.10);
+
+  /* ── Radii ── */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 24px var(--color-accent-glow);
+
+  /* ── Transitions ── */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ── Light Theme ──────────────────────────── */
+/* ── Light Theme ───────────────────────────── */
 .light {
-  --color-bg: #f9fafb;
-  --color-surface: rgba(255, 255, 255, 0.7);
-  --color-surface-hover: rgba(243, 244, 246, 0.95);
-  --color-surface-elevated: rgba(255, 255, 255, 0.95);
-  --color-surface-glass: rgba(0, 0, 0, 0.02);
+  /* ── Core Backgrounds ── */
+  --color-bg: #f8f8fb;
+  --color-bg-subtle: #f3f2f7;
+  --color-surface: rgba(0, 0, 0, 0.03);
+  --color-surface-hover: rgba(0, 0, 0, 0.06);
+  --color-surface-elevated: rgba(255, 255, 255, 0.90);
+  --color-surface-glass: rgba(255, 255, 255, 0.40);
 
-  --color-border: rgba(209, 213, 219, 0.6);
-  --color-border-hover: rgba(156, 163, 175, 0.8);
-
-  --color-text-primary: #111827;
-  --color-text-secondary: #4b5563;
-  --color-text-muted: #9ca3af;
-
-  --color-accent: #2563eb;
-  --color-accent-hover: #1d4ed8;
-  --color-accent-subtle: rgba(37, 99, 235, 0.08);
-
-  --color-danger: #dc2626;
-  --color-danger-hover: #b91c1c;
-  --color-danger-subtle: rgba(220, 38, 38, 0.08);
-
-  --color-success: #16a34a;
-  --color-success-hover: #15803d;
-  --color-success-subtle: rgba(22, 163, 74, 0.1);
-
-  --glass-bg: rgba(255, 255, 255, 0.5);
+  /* ── Glassmorphism (Light) ── */
+  --glass-bg: rgba(255, 255, 255, 0.65);
+  --glass-bg-hover: rgba(255, 255, 255, 0.85);
   --glass-border: rgba(0, 0, 0, 0.06);
-  --glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  --glass-border-strong: rgba(0, 0, 0, 0.10);
+  --glass-highlight: rgba(255, 255, 255, 0.80);
+  --glass-blur: 16px;
+  --glass-saturate: 150%;
+  --glass-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.06),
+    0 1px 3px rgba(0, 0, 0, 0.04);
+  --glass-shadow-sm:
+    0 1px 4px rgba(0, 0, 0, 0.04),
+    0 1px 2px rgba(0, 0, 0, 0.03);
+
+  /* ── Borders ── */
+  --color-border: rgba(0, 0, 0, 0.06);
+  --color-border-hover: rgba(0, 0, 0, 0.12);
+  --color-border-strong: rgba(0, 0, 0, 0.08);
+
+  /* ── Text ── */
+  --color-text-primary: #1c1917;
+  --color-text-secondary: #57534e;
+  --color-text-muted: #a8a29e;
+  --color-text-on-accent: #ffffff;
+
+  /* ── Accent — Indigo (darker for light bg) ── */
+  --color-accent: #6366f1;
+  --color-accent-hover: #4f46e5;
+  --color-accent-active: #4338ca;
+  --color-accent-subtle: rgba(99, 102, 241, 0.08);
+  --color-accent-glow: rgba(99, 102, 241, 0.15);
+  --color-accent-strong: rgba(99, 102, 241, 0.22);
+
+  /* ── Accent Gradient ── */
+  --color-accent-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #6366f1 100%);
+  --color-accent-gradient-hover: linear-gradient(135deg, #4f46e5 0%, #9333ea 50%, #4f46e5 100%);
+
+  /* ── Semantic Colors ── */
+  --color-danger: #ef4444;
+  --color-danger-hover: #dc2626;
+  --color-danger-active: #b91c1c;
+  --color-danger-subtle: rgba(239, 68, 68, 0.08);
+  --color-danger-border: rgba(239, 68, 68, 0.18);
+
+  --color-success: #22c55e;
+  --color-success-hover: #16a34a;
+  --color-success-active: #15803d;
+  --color-success-subtle: rgba(34, 197, 94, 0.08);
+
+  --color-warning: #f59e0b;
+  --color-warning-hover: #d97706;
+  --color-warning-subtle: rgba(245, 158, 11, 0.08);
+
+  /* ── Shadows (Light) ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.08);
+  --shadow-glow: 0 0 32px var(--color-accent-glow);
 }

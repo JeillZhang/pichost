@@ -31,7 +31,10 @@ export default function UrlUploadInput({ onUpload }: UrlUploadInputProps) {
   return (
     <div className="flex items-center gap-2">
       <div className="relative flex-1">
-        <Link className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
+        <Link
+          className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
+          style={{ color: 'var(--color-text-muted)' }}
+        />
         <input
           type="url"
           value={url}
@@ -39,13 +42,14 @@ export default function UrlUploadInput({ onUpload }: UrlUploadInputProps) {
           onKeyDown={handleKeyDown}
           placeholder="Paste image URL..."
           disabled={loading}
-          className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] py-1.5 pl-9 pr-3 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] backdrop-blur-sm focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-50"
+          className="input-field pl-9 text-sm"
+          style={{ paddingTop: '0.375rem', paddingBottom: '0.375rem' }}
         />
       </div>
       <button
         onClick={handleSubmit}
         disabled={!url.trim() || loading}
-        className="shrink-0 rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        className="btn-accent shrink-0 px-3 py-1.5 text-sm"
       >
         {loading ? '...' : 'Upload'}
       </button>

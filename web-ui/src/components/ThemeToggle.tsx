@@ -15,10 +15,8 @@ export default function ThemeToggle() {
   return (
     <button
       onClick={toggleTheme}
-      className="rounded-lg p-2 transition-colors"
+      className="rounded-lg p-2 transition-all duration-200 hover:bg-[var(--glass-bg)] hover:text-[var(--color-text-secondary)]"
       style={{ color: 'var(--color-text-muted)' }}
-      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-surface)'; e.currentTarget.style.color = 'var(--color-text-secondary)' }}
-      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
       title={`Theme: ${theme}. Click to cycle.`}
     >
       <Icon className="h-4 w-4" />

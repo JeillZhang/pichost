@@ -1,0 +1,98 @@
+- generic [ref=f6e2]:
+  - navigation [ref=f6e3]:
+    - generic [ref=f6e4]:
+      - link "PicHost" [ref=f6e5] [cursor=pointer]:
+        - /url: /dashboard
+      - generic [ref=f6e6]:
+        - link "Dashboard" [ref=f6e7] [cursor=pointer]:
+          - /url: /dashboard
+        - link "Gallery" [ref=f6e8] [cursor=pointer]:
+          - /url: /gallery
+        - link "Admin" [ref=f6e9] [cursor=pointer]:
+          - /url: /admin
+      - generic [ref=f6e10]:
+        - generic [ref=f6e11]:
+          - text: Logged in as
+          - generic [ref=f6e12]: tester
+          - generic [ref=f6e13]: Admin
+        - 'button "Theme: system. Click to cycle." [ref=f6e14]'
+        - button "Logout" [ref=f6e17]
+  - main [ref=f6e21]:
+    - generic [ref=f6e22]:
+      - heading "Settings" [level=2] [ref=f6e23]
+      - generic [ref=f6e24]:
+        - button "Profile" [expanded] [ref=f6e25] [cursor=pointer]
+        - generic [ref=f6e157]:
+          - generic [ref=f6e158]:
+            - generic [ref=f6e159]:
+              - generic [ref=f6e160]: Username
+              - textbox [ref=f6e161]: tester
+            - generic [ref=f6e162]:
+              - generic [ref=f6e163]: Email
+              - textbox [active] [ref=f6e164]: tester-updated@example.com
+          - button "Save Profile" [ref=f6e165]
+      - button "Password" [ref=f6e33] [cursor=pointer]
+      - button "Storage Usage" [ref=f6e41] [cursor=pointer]
+      - button "Storage Backends" [ref=f6e48] [cursor=pointer]
+      - generic [ref=f6e63]:
+        - button "Watermark" [expanded] [ref=f6e64] [cursor=pointer]
+        - generic [ref=f6e108]:
+          - heading "Default Watermark" [level=3] [ref=f6e114]
+          - generic [ref=f6e115]:
+            - checkbox "Enable watermark" [ref=f6e116]
+            - text: Enable watermark
+          - group [ref=f6e117]:
+            - generic [ref=f6e118]:
+              - generic [ref=f6e119]: Watermark Text
+              - textbox "© Your Name" [disabled] [ref=f6e120]
+            - generic [ref=f6e121]:
+              - generic [ref=f6e122]: Font
+              - combobox [disabled] [ref=f6e123]:
+                - option "NotoSansSC-Regular" [disabled] [selected]
+                - option "NotoSans-Regular" [disabled]
+                - option "Arial" [disabled]
+                - option "DejaVuSans" [disabled]
+                - option "FiraCode-Regular" [disabled]
+            - generic [ref=f6e124]:
+              - generic [ref=f6e125]: Font Size
+              - spinbutton [disabled] [ref=f6e126]: "48"
+            - generic [ref=f6e127]:
+              - generic [ref=f6e128]: Color
+              - textbox "rgba(255, 255, 255, 0.5)" [disabled] [ref=f6e129]
+            - generic [ref=f6e130]:
+              - generic [ref=f6e131]: Rotation (-30°)
+              - slider [disabled] [ref=f6e132]: "-30"
+            - generic [ref=f6e133]:
+              - generic [ref=f6e134]: Scale (0.15)
+              - slider [disabled] [ref=f6e135]: "0.15"
+            - generic [ref=f6e136]:
+              - generic [ref=f6e137]: Position
+              - combobox [disabled] [ref=f6e138]:
+                - option "top-left" [disabled]
+                - option "top-right" [disabled]
+                - option "bottom-left" [disabled]
+                - option "bottom-right" [disabled] [selected]
+                - option "center" [disabled]
+                - option "tile" [disabled]
+            - generic [ref=f6e139]:
+              - generic [ref=f6e140]:
+                - generic [ref=f6e141]: Margin X
+                - spinbutton [disabled] [ref=f6e142]: "20"
+              - generic [ref=f6e143]:
+                - generic [ref=f6e144]: Margin Y
+                - spinbutton [disabled] [ref=f6e145]: "20"
+          - generic [ref=f6e146]:
+            - button "Save" [ref=f6e147]
+            - button "Clear" [ref=f6e152]
+      - button "Preprocessing" [ref=f6e72] [cursor=pointer]
+      - generic [ref=f6e80]:
+        - button "OAuth" [expanded] [ref=f6e81] [cursor=pointer]
+        - generic [ref=f6e101]:
+          - heading "OAuth Accounts" [level=3] [ref=f6e102]
+          - paragraph [ref=f6e103]: Link your GitHub or Google account for one-click login.
+          - generic [ref=f6e104]:
+            - link "Link GitHub" [ref=f6e105] [cursor=pointer]:
+              - /url: /api/v1/auth/oauth/github
+            - link "Link Google" [ref=f6e106] [cursor=pointer]:
+              - /url: /api/v1/auth/oauth/google
+  - region "Notifications alt+T"

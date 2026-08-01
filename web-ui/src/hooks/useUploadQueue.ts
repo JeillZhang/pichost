@@ -45,8 +45,34 @@ function supportsOffscreenCanvas(): boolean {
   return _supportsOffscreenCanvas
 }
 
-async function preprocessFile(file: File, prefs: any): Promise<File> {
-  if (!needsProcessing(prefs)) return file
+/** Extract only serializable prefs — store state includes setter functions
+ *  that break structured clone when sent to a Web Worker. */
+function serializablePrefs(raw: ReturnType<typeof usePreprocessingStore.getState>) {
+  return {
+    stripExif: raw.stripExif,
+    resize: { ...raw.resize },
+    formatConvert: { ...raw.formatConvert },
+    compression: { ...raw.compression },
+    rotate: { ...raw.rotate },
+  }
+}
+
+/** Check whether actual canvas/worker work is needed.  If only stripExif is on
+ *  and the file is not JPEG the operation is a no-op — skip the worker. */
+function isWorkerNeeded(prefs: ReturnType<typeof serializablePrefs>, file: File): boolean {
+  if (!needsProcessing(prefs)) return false
+  const canvasNeeded =
+    prefs.resize.enabled ||
+    prefs.formatConvert.enabled ||
+    prefs.compression.enabled ||
+    prefs.rotate.enabled
+  if (canvasNeeded) return true
+  // Only stripExif is on → worker only needed for JPEG
+  return prefs.stripExif && file.type === 'image/jpeg'
+}
+
+async function preprocessFile(file: File, prefs: ReturnType<typeof serializablePrefs>): Promise<File> {
+  if (!isWorkerNeeded(prefs, file)) return file
 
   if (!supportsOffscreenCanvas()) {
     const { processFile: mainProcess } = await import('../workers/imageProcessor')
@@ -72,12 +98,15 @@ export function useUploadQueue() {
   const [tasks, setTasks] = useState<Map<string, UploadTask>>(new Map())
   const activeRef = useRef(0)
   const pendingRef = useRef<string[]>([])
-  // Keep a ref-sync of tasks so processNext never reads stale closure state
   const tasksRef = useRef(tasks)
   tasksRef.current = tasks
-  const mountedRef = useRef(true)
 
+  // Track mount state to avoid scheduling processNext after unmount.
+  // State updates (.then/.catch) are NOT gated on this — React 18+
+  // safely ignores setState on unmounted components.
+  const mountedRef = useRef(true)
   useEffect(() => {
+    mountedRef.current = true
     return () => {
       mountedRef.current = false
     }
@@ -98,23 +127,19 @@ export function useUploadQueue() {
     while (activeRef.current < MAX_CONCURRENT && pendingRef.current.length > 0) {
       const id = pendingRef.current.shift()!
       const task = tasksRef.current.get(id)
-      if (!task) {
-        // ID invalidated or task removed before processing — skip
-        continue
-      }
+      if (!task) continue
+
       activeRef.current += 1
       updateTask(id, { status: 'uploading', progress: 0 })
+
       uploadImage(task.file, task.storageConfigIds)
         .then((result) => {
-          if (mountedRef.current) {
-            updateTask(id, { status: 'done', progress: 100, result })
-          }
+          updateTask(id, { status: 'done', progress: 100, result })
         })
         .catch((e: unknown) => {
-          if (mountedRef.current) {
-            const msg = e instanceof Error ? e.message : 'Upload failed'
-            updateTask(id, { status: 'error', progress: 0, error: msg })
-          }
+          const msg = e instanceof Error ? e.message : 'Upload failed'
+          console.error('[upload] failed:', msg, e)
+          updateTask(id, { status: 'error', progress: 0, error: msg })
         })
         .finally(() => {
           activeRef.current -= 1
@@ -129,9 +154,9 @@ export function useUploadQueue() {
     async (files: File[], storageConfigIds?: string[]) => {
       if (files.length === 0) return
 
-      const prefs = usePreprocessingStore.getState()
+      const prefs = serializablePrefs(usePreprocessingStore.getState())
 
-      // First, create tasks with 'processing' status so UI shows immediately
+      // Create tasks with 'processing' status so UI shows immediately
       const ids: string[] = []
       setTasks((prev) => {
         const next = new Map(prev)
@@ -152,17 +177,33 @@ export function useUploadQueue() {
         return next
       })
 
-      // Process files in parallel
-      const processedFiles = await Promise.all(
-        files.map((f, i) =>
-          preprocessFile(f, prefs).then((pf) => ({ index: i, file: pf })),
-        ),
-      )
+      // Preprocess in parallel — errors here leave tasks in 'processing'
+      // state which the user can see and retry by re-uploading.
+      let processed: { index: number; file: File }[]
+      try {
+        processed = await Promise.all(
+          files.map((f, i) =>
+            preprocessFile(f, prefs).then((pf) => ({ index: i, file: pf })),
+          ),
+        )
+      } catch (err) {
+        console.error('[preprocess] failed:', err)
+        const msg = err instanceof Error ? err.message : 'Preprocessing failed'
+        setTasks((prev) => {
+          const next = new Map(prev)
+          for (const id of ids) {
+            const t = next.get(id)
+            if (t) next.set(id, { ...t, status: 'error', error: msg, processingStatus: 'failed' })
+          }
+          return next
+        })
+        return
+      }
 
-      // Update tasks with processed files, change status to 'pending'
+      // Update tasks with processed files, move to 'pending'
       setTasks((prev) => {
         const next = new Map(prev)
-        for (const { index, file } of processedFiles) {
+        for (const { index, file } of processed) {
           const id = ids[index]
           const existing = next.get(id)
           if (existing) {
@@ -178,7 +219,9 @@ export function useUploadQueue() {
       })
 
       pendingRef.current.push(...ids)
-      setTimeout(() => processNext(), 0)
+      setTimeout(() => {
+        if (mountedRef.current) processNext()
+      }, 0)
     },
     [processNext],
   )

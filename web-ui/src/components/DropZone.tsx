@@ -56,23 +56,45 @@ export default function DropZone({ onUpload }: DropZoneProps) {
   return (
     <div
       {...getRootProps()}
-      className={`cursor-pointer rounded-xl border-2 border-dashed p-12 text-center transition-colors ${
+      className={`glass group relative cursor-pointer overflow-hidden rounded-xl border-2 border-dashed p-12 text-center transition-all duration-300 ${
         isDragActive
-          ? 'border-[var(--color-accent)] bg-[var(--color-accent-subtle)]'
-          : 'border-[var(--color-border)] bg-[var(--glass-bg)] hover:border-[var(--color-border-hover)]'
+          ? 'scale-[1.01] border-[var(--color-accent)] bg-[var(--color-accent-subtle)] shadow-[var(--shadow-glow)]'
+          : 'border-[var(--color-border)] hover:border-[var(--glass-border-strong)] hover:bg-[var(--glass-bg-hover)]'
       }`}
     >
       <input {...getInputProps()} />
-      <div className="flex flex-col items-center gap-2 text-gray-400">
-        <Upload className="h-8 w-8" />
-        <p className="text-sm">
-          {isDragActive
-            ? 'Drop images here'
-            : 'Drag & drop images, or click to select'}
-        </p>
-        <p className="text-xs text-gray-600">
-          PNG, JPEG, GIF, WebP, SVG, AVIF, BMP — up to 50 MB each
-        </p>
+
+      {/* Subtle inner glow — visible on hover */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+        style={{
+          background:
+            'radial-gradient(ellipse 50% 50% at 50% 50%, var(--color-accent-subtle) 0%, transparent 70%)',
+        }}
+      />
+
+      <div className="relative flex flex-col items-center gap-3">
+        <div
+          className={`flex h-14 w-14 items-center justify-center rounded-2xl transition-all duration-300 ${
+            isDragActive
+              ? 'scale-110 bg-[var(--color-accent-subtle)] text-[var(--color-accent)]'
+              : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] group-hover:scale-105 group-hover:text-[var(--color-text-secondary)]'
+          }`}
+        >
+          <Upload className="h-6 w-6" />
+        </div>
+        <div>
+          <p
+            className={`text-sm font-medium transition-colors duration-200 ${
+              isDragActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)]'
+            }`}
+          >
+            {isDragActive ? 'Drop images here' : 'Drag & drop images, or click to select'}
+          </p>
+          <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            PNG, JPEG, GIF, WebP, SVG, AVIF, BMP — up to 50 MB each
+          </p>
+        </div>
       </div>
     </div>
   )

@@ -1,13 +1,289 @@
+/* ── Fonts ─────────────────────────────────── */
+/* Inter: primary body + UI font
+   Outfit: distinctive geometric headings */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
+
 @import "tailwindcss";
 @import "./theme.css";
 
+/* ── Tailwind dark mode variant ─────────────── */
 @variant dark (&:where(.dark, .dark *));
 
+/* ── Base Styles ────────────────────────────── */
 @layer base {
+  html {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color-scheme: dark;
+  }
+
+  .light {
+    color-scheme: light;
+  }
+
   body {
-    @apply min-h-screen;
+    min-height: 100vh;
     background-color: var(--color-bg);
     color: var(--color-text-primary);
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  /* ── Heading font ── */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  /* ── Selection ── */
+  ::selection {
+    background-color: var(--color-accent-subtle);
+    color: var(--color-accent);
+  }
+
+  /* ── Focus ring ── */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* ── Scrollbar (Webkit) ── */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border-strong);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-border-hover);
+  }
+
+  /* ── Scrollbar (Firefox) ── */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+}
+
+/* ── Ambient Background ────────────────────── */
+@layer base {
+  /* Subtle ambient light blobs behind the page content.
+     Only active in dark mode for the atmospheric feel. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 60% 50% at 20% 10%, rgba(99, 102, 241, 0.04) 0%, transparent 70%),
+      radial-gradient(ellipse 50% 40% at 80% 80%, rgba(168, 85, 247, 0.03) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 50% at 50% 50%, rgba(129, 140, 248, 0.02) 0%, transparent 70%);
+  }
+
+  /* Light mode: softer ambient */
+  .light body::before {
+    background:
+      radial-gradient(ellipse 60% 50% at 10% 0%, rgba(99, 102, 241, 0.03) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 40% at 90% 100%, rgba(168, 85, 247, 0.02) 0%, transparent 70%);
+  }
+}
+
+/* ── Glass Utility Classes ─────────────────── */
+@layer components {
+  /* Standard glass card */
+  .glass {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    border-radius: var(--radius-lg);
+    box-shadow: var(--glass-shadow-sm);
+    transition: border-color var(--transition-base), box-shadow var(--transition-base);
+  }
+  .glass:hover {
+    border-color: var(--glass-border-strong);
+    box-shadow: var(--glass-shadow);
+  }
+
+  /* Glass card without hover lift */
+  .glass-static {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    border-radius: var(--radius-lg);
+    box-shadow: var(--glass-shadow-sm);
+  }
+
+  /* Glass surface with top highlight — elevated feel */
+  .glass-elevated {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-top-color: var(--glass-border-strong);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    border-radius: var(--radius-lg);
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      var(--glass-shadow);
+  }
+
+  /* Glass navbar — fixed/sticky with bottom border */
+  .glass-nav {
+    background: var(--glass-bg);
+    border-bottom: 1px solid var(--glass-border);
+    backdrop-filter: blur(var(--glass-blur)) saturate(calc(var(--glass-saturate) * 1.5));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(calc(var(--glass-saturate) * 1.5));
+  }
+
+  /* Glass dialog/modal overlay */
+  .glass-modal {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-top-color: var(--glass-border-strong);
+    backdrop-filter: blur(calc(var(--glass-blur) * 1.25)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.25)) saturate(var(--glass-saturate));
+    border-radius: var(--radius-xl);
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      var(--shadow-lg);
+  }
+
+  /* ── Accent button ── */
+  .btn-accent {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: 'Inter', system-ui, sans-serif;
+    color: white;
+    background: var(--color-accent-gradient);
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition:
+      opacity var(--transition-fast),
+      transform var(--transition-fast),
+      box-shadow var(--transition-fast);
+  }
+  .btn-accent:hover {
+    opacity: 0.92;
+    box-shadow: var(--shadow-glow);
+  }
+  .btn-accent:active {
+    transform: scale(0.98);
+  }
+  .btn-accent:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  /* ── Ghost button ── */
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: 'Inter', system-ui, sans-serif;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast),
+      border-color var(--transition-fast);
+  }
+  .btn-ghost:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text-primary);
+    border-color: var(--color-border-hover);
+  }
+  .btn-ghost:active {
+    transform: scale(0.98);
+  }
+
+  /* ── Input field ── */
+  .input-field {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    font-family: 'Inter', system-ui, sans-serif;
+    color: var(--color-text-primary);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .input-field::placeholder {
+    color: var(--color-text-muted);
+  }
+  .input-field:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px var(--color-accent-subtle);
+    outline: none;
+  }
+
+  /* Dropdown options — ensure readability in dark mode */
+  .input-field option {
+    color: var(--color-text-primary);
+    background-color: var(--color-bg);
+  }
+
+  /* ── Badge ── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    font-family: 'Inter', system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--glass-border);
+  }
+
+  /* ── Divider ── */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--color-border);
+    margin: 0;
+  }
+}
+
+/* ── Upload progress bar pulse ──────────────── */
+@keyframes uploadPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── Motion: Reduced ───────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

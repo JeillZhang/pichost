@@ -26,11 +26,11 @@ export default function App() {
     return (
       <div
         className="flex min-h-screen items-center justify-center"
-        style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-muted)' }}
+        style={{ backgroundColor: 'var(--color-bg)' }}
       >
         <div
           className="h-8 w-8 animate-spin rounded-full border-2"
-          style={{ borderColor: 'var(--color-border)', borderTopColor: 'var(--color-accent)' }}
+          style={{ borderColor: 'var(--glass-border)', borderTopColor: 'var(--color-accent)' }}
         />
       </div>
     )

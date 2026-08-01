@@ -63,10 +63,7 @@ export default function Dashboard() {
 
   const handleUrlUpload = useCallback(
     async (url: string) => {
-      await uploadFromUrl(
-        url,
-        selectedConfigIds.length > 0 ? selectedConfigIds : undefined,
-      )
+      await uploadFromUrl(url, selectedConfigIds.length > 0 ? selectedConfigIds : undefined)
       queryClient.invalidateQueries({ queryKey: ['images'] })
     },
     [selectedConfigIds, queryClient],
@@ -104,9 +101,6 @@ export default function Dashboard() {
     selectedConfigIds.length < 2 &&
     selectedConfigIds.length < storageConfigs.length
 
-  const selectCls =
-    'w-full appearance-none rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] px-3 py-2 pr-8 text-sm text-[var(--color-text-primary)] backdrop-blur-sm focus:border-[var(--color-accent)] focus:outline-none'
-
   // Invalidate when any upload completes
   const prevDoneCount = useRef(0)
   const doneCount = queue.filter((t) => t.status === 'done').length
@@ -126,10 +120,10 @@ export default function Dashboard() {
       {/* Admin banner */}
       {user?.is_admin && (
         <div
-          className="mb-4 flex items-center gap-2 rounded-lg px-4 py-3 text-sm"
+          className="glass mb-4 flex items-center gap-2 rounded-lg px-4 py-3 text-sm"
           style={{
+            borderColor: 'var(--color-accent-strong)',
             backgroundColor: 'var(--color-accent-subtle)',
-            border: '1px solid var(--color-accent)',
             color: 'var(--color-accent)',
           }}
         >
@@ -138,7 +132,7 @@ export default function Dashboard() {
             You are an administrator.{' '}
             <button
               onClick={() => navigate('/admin')}
-              className="font-medium underline underline-offset-2 hover:opacity-80"
+              className="font-semibold underline underline-offset-2 hover:opacity-80"
             >
               Go to Admin Panel
             </button>
@@ -150,13 +144,17 @@ export default function Dashboard() {
       {storageConfigs && storageConfigs.length > 0 && (
         <div className="mb-4 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-[var(--color-text-muted)]">
+            <span
+              className="text-xs font-semibold uppercase tracking-wider"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
               Storage Backend
             </span>
             {canAddSlot && (
               <button
                 onClick={handleAddSlot}
-                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--color-accent)] hover:bg-[var(--color-accent-subtle)]"
+                className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-colors duration-150 hover:bg-[var(--color-accent-subtle)]"
+                style={{ color: 'var(--color-accent)' }}
               >
                 <Plus className="h-3 w-3" />
                 Add 2nd backend
@@ -169,7 +167,7 @@ export default function Dashboard() {
                 <select
                   value={selectedId}
                   onChange={(e) => handleSlotChange(idx, e.target.value)}
-                  className={selectCls}
+                  className="input-field appearance-none pr-8"
                 >
                   {availableForSlot(idx).map((cfg) => (
                     <option key={cfg.id} value={cfg.id}>
@@ -177,12 +175,16 @@ export default function Dashboard() {
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
+                <ChevronDown
+                  className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2"
+                  style={{ color: 'var(--color-text-muted)' }}
+                />
               </div>
               {selectedConfigIds.length > 1 && (
                 <button
                   onClick={() => handleRemoveSlot(idx)}
-                  className="shrink-0 rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)]"
+                  className="shrink-0 rounded-lg p-1.5 transition-colors duration-150 hover:bg-[var(--color-surface-hover)]"
+                  style={{ color: 'var(--color-text-muted)' }}
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -192,7 +194,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* DropZone — always active, accepts multiple files */}
+      {/* DropZone */}
       <DropZone onUpload={handleUpload} />
 
       <div className="mt-3">
@@ -206,20 +208,22 @@ export default function Dashboard() {
 
       {/* Upload queue */}
       {queue.length > 0 && (
-        <div className="mt-4 space-y-2">
+        <div className="mt-5 space-y-2">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-[var(--color-text-secondary)]">
+            <h2 className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
               Uploads
               {hasActiveUploads && (
-                <span className="ml-2 text-xs text-[var(--color-text-muted)]">
-                  {queue.filter((t) => t.status === 'pending' || t.status === 'uploading').length} active
+                <span className="ml-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  {queue.filter((t) => t.status === 'pending' || t.status === 'uploading').length}{' '}
+                  active
                 </span>
               )}
             </h2>
             {queue.some((t) => t.status === 'done' || t.status === 'error') && (
               <button
                 onClick={clearQueue}
-                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)]"
+                className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors duration-150 hover:bg-[var(--color-surface-hover)]"
+                style={{ color: 'var(--color-text-muted)' }}
               >
                 <Trash2 className="h-3 w-3" />
                 Clear done
@@ -234,23 +238,27 @@ export default function Dashboard() {
 
       {/* Storage usage bar */}
       {stats && stats.storage_quota != null && (
-        <div className="mt-4 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-3 backdrop-blur-sm">
-          <div className="mb-1 flex items-center justify-between text-xs">
-            <span className="text-[var(--color-text-muted)]">Storage</span>
-            <span className="text-[var(--color-text-secondary)]">
+        <div className="glass mt-5 rounded-lg p-3">
+          <div className="mb-1.5 flex items-center justify-between text-xs">
+            <span style={{ color: 'var(--color-text-muted)' }}>Storage</span>
+            <span style={{ color: 'var(--color-text-secondary)' }}>
               {formatBytes(stats.total_size)} / {formatBytes(stats.storage_quota)}
             </span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-[var(--color-border)]">
+          <div
+            className="h-2 overflow-hidden rounded-full"
+            style={{ backgroundColor: 'var(--color-surface)' }}
+          >
             <div
               className="h-full rounded-full transition-all duration-500"
               style={{
                 width: `${Math.min(100, (stats.total_size / stats.storage_quota) * 100)}%`,
-                backgroundColor: stats.total_size / stats.storage_quota > 0.9
-                  ? 'var(--color-error, #ef4444)'
-                  : stats.total_size / stats.storage_quota > 0.7
-                    ? 'var(--color-warning, #f59e0b)'
-                    : 'var(--color-accent)',
+                backgroundColor:
+                  stats.total_size / stats.storage_quota > 0.9
+                    ? 'var(--color-danger)'
+                    : stats.total_size / stats.storage_quota > 0.7
+                      ? 'var(--color-warning)'
+                      : 'var(--color-accent)',
               }}
             />
           </div>
@@ -260,29 +268,34 @@ export default function Dashboard() {
       {/* Recent images */}
       {images && images.length > 0 && (
         <div className="mt-8">
-          <h2 className="mb-3 text-sm font-medium text-[var(--color-text-secondary)]">Recent</h2>
+          <h2
+            className="mb-3 text-sm font-semibold uppercase tracking-wider"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            Recent
+          </h2>
           <div className="space-y-2">
             {images.map((img) => (
               <div
                 key={img.id}
-                className="flex items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-3 backdrop-blur-sm"
+                className="glass group flex items-center gap-3 rounded-lg p-3"
               >
                 <img
                   src={img.url}
                   alt={img.original_name}
-                  className="h-12 w-12 shrink-0 rounded object-cover"
+                  className="h-12 w-12 shrink-0 rounded-lg object-cover ring-1 ring-white/5"
                 />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-[var(--color-text-primary)]">
+                  <p className="truncate text-sm" style={{ color: 'var(--color-text-primary)' }}>
                     {img.original_name}
                   </p>
-                  <p className="text-xs text-[var(--color-text-muted)]">
+                  <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                     {(img.file_size / 1024).toFixed(1)} KB
                   </p>
                 </div>
                 <button
                   onClick={() => navigate(`/images/${img.id}`)}
-                  className="shrink-0 rounded px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)]"
+                  className="btn-ghost shrink-0 px-3 py-1.5 text-xs"
                 >
                   Detail
                 </button>
@@ -294,7 +307,7 @@ export default function Dashboard() {
 
       {/* Empty state */}
       {images && images.length === 0 && queue.length === 0 && (
-        <div className="mt-8 text-center text-sm text-[var(--color-text-muted)]">
+        <div className="mt-8 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
           No images yet. Upload one above!
         </div>
       )}
