@@ -74,14 +74,11 @@ fn try_cached_stats(
     quota: Option<i64>,
 ) -> Option<UserStats> {
     let stats_map = cache_stats?;
-    let total_images = stats_map
-        .get("total_images")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let total_size = stats_map
-        .get("total_size")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+    // Missing or unparseable fields mean the cache entry is empty/stale —
+    // return None so the caller queries the DB instead of serving zeros.
+    // (HGETALL on a nonexistent key yields an empty map, not None.)
+    let total_images = stats_map.get("total_images").and_then(|v| v.parse().ok())?;
+    let total_size = stats_map.get("total_size").and_then(|v| v.parse().ok())?;
     Some(UserStats {
         total_images,
         total_size,

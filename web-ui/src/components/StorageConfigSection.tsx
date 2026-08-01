@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -141,7 +142,7 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
     color: 'var(--color-text-primary)',
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
@@ -345,7 +346,8 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -373,7 +375,7 @@ function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
     }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
@@ -427,7 +429,8 @@ function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
