@@ -190,6 +190,31 @@ impl Cache {
         Ok(())
     }
 
+    /// Overwrite user stat fields and refresh the TTL (HSET-based).
+    /// Safe for re-populating the cache from DB — unlike `incr_user_stat`,
+    /// repeated calls cannot double-count values.
+    /// `None` values are stored as an empty string (and read back as None).
+    pub async fn set_user_stats(
+        &self,
+        user_id: &uuid::Uuid,
+        fields: &[(&str, Option<i64>)],
+    ) -> Result<(), deadpool_redis::redis::RedisError> {
+        let key = format!("pichost:stats:{}", user_id);
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+
+        let mut pipe = deadpool_redis::redis::pipe();
+        for (field, value) in fields {
+            match value {
+                Some(v) => pipe.cmd("HSET").arg(&key).arg(field).arg(v).ignore(),
+                None => pipe.cmd("HSET").arg(&key).arg(field).arg("").ignore(),
+            };
+        }
+        pipe.cmd("EXPIRE").arg(&key).arg(300usize).ignore();
+        pipe.query_async::<_, ()>(&mut *conn).await?;
+
+        Ok(())
+    }
+
     /// Get all stats for a user as a map of field → value strings.
     pub async fn get_user_stats(
         &self,

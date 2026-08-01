@@ -69,9 +69,7 @@ export interface ImageInfo {
   storage_config?: StorageConfigInfo | null
 }
 
-export interface UploadResult extends ImageInfo {
-  storage_configs?: StorageConfigInfo[]
-}
+export interface UploadResult extends ImageInfo {}
 
 export interface PaginatedListParams {
   page?: number
@@ -193,7 +191,10 @@ export async function uploadImage(
   if (storageConfigIds?.length) {
     formData.append('storage_config_ids', storageConfigIds.join(','))
   }
-  return api.post('images', { body: formData }).json<UploadResult>()
+  // Backend returns an array — one result per storage config.
+  // The queue shows a single card per file, so use the first result.
+  const results = await api.post('images', { body: formData }).json<UploadResult[]>()
+  return results[0]
 }
 
 export interface UrlUploadRequest {
@@ -209,7 +210,11 @@ export async function uploadFromUrl(
   if (storageConfigIds?.length) {
     body.storage_config_ids = storageConfigIds
   }
-  return api.post('images/upload-url', { json: body }).json<UploadResult>()
+  // Same array response shape as uploadImage — take the first result.
+  const results = await api
+    .post('images/upload-url', { json: body })
+    .json<UploadResult[]>()
+  return results[0]
 }
 
 export async function listImages(
@@ -389,7 +394,7 @@ export async function deleteCategory(id: string): Promise<void> {
 
 export async function moveImageToCategory(
   imageId: string,
-  categoryId: string,
+  categoryId: string | null,
 ): Promise<{ message: string }> {
   return api.post(`images/${imageId}/move`, {
     json: { category_id: categoryId },

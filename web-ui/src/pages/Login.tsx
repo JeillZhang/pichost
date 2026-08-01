@@ -21,55 +21,102 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4" style={{ backgroundColor: 'var(--color-bg)' }}>
+    <div
+      className="flex min-h-screen items-center justify-center p-4"
+      style={{ backgroundColor: 'var(--color-bg)' }}
+    >
       <div className="w-full max-w-sm">
+        {/* Logo */}
         <div className="mb-8 text-center">
-          <h1 className="text-4xl font-bold" style={{
-            background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-          }}>
+          <h1
+            className="text-4xl font-bold"
+            style={{
+              background: 'linear-gradient(135deg, #a5b4fc 0%, #c084fc 50%, #a5b4fc 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              fontFamily: "'Outfit', system-ui, sans-serif",
+            }}
+          >
             PicHost
           </h1>
-          <p className="mt-1 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+          <p className="mt-1.5 text-sm" style={{ color: 'var(--color-text-muted)' }}>
             Self-hosted image hosting
           </p>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4 rounded-xl p-6"
-          style={{
-            backgroundColor: 'var(--glass-bg)', border: '1px solid var(--glass-border)',
-            backdropFilter: 'blur(var(--glass-blur))', boxShadow: 'var(--glass-shadow)',
-          }}>
+
+        {/* Form card */}
+        <form onSubmit={handleSubmit} className="glass-elevated space-y-4 p-6">
           {error && (
-            <div className="rounded-lg px-4 py-2 text-sm"
-              style={{ backgroundColor: 'var(--color-danger-subtle)', color: 'var(--color-danger)' }}>
+            <div
+              className="rounded-lg border px-4 py-2.5 text-sm"
+              style={{
+                backgroundColor: 'var(--color-danger-subtle)',
+                borderColor: 'var(--color-danger-border)',
+                color: 'var(--color-danger)',
+              }}
+            >
               {error}
             </div>
           )}
+
           <div>
-            <label htmlFor="username" className="block text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>Username</label>
-            <input id="username" type="text" required minLength={3} value={username}
-              onChange={e => setUsername(e.target.value)}
-              className="mt-1 block w-full rounded-lg px-3 py-2 placeholder-gray-500 focus:outline-none focus:ring-1"
-              style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
-              placeholder="your username" />
+            <label
+              htmlFor="username"
+              className="mb-1.5 block text-xs font-medium"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
+              Username
+            </label>
+            <input
+              id="username"
+              type="text"
+              required
+              minLength={3}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="input-field"
+              placeholder="your username"
+            />
           </div>
+
           <div>
-            <label htmlFor="password" className="block text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>Password</label>
-            <input id="password" type="password" required minLength={8} value={password}
-              onChange={e => setPassword(e.target.value)}
-              className="mt-1 block w-full rounded-lg px-3 py-2 placeholder-gray-500 focus:outline-none focus:ring-1"
-              style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
-              placeholder="••••••••" />
+            <label
+              htmlFor="password"
+              className="mb-1.5 block text-xs font-medium"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              required
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="input-field"
+              placeholder="••••••••"
+            />
           </div>
-          <button type="submit" disabled={isLoading}
-            className="flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
-            style={{ backgroundColor: 'var(--color-accent)' }}>
-            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+
+          <button type="submit" disabled={isLoading} className="btn-accent w-full">
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <LogIn className="h-4 w-4" />
+            )}
             Sign In
           </button>
+
           <p className="text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
             Don't have an account?{' '}
-            <Link to="/register" style={{ color: 'var(--color-accent)' }} className="hover:opacity-80">Register</Link>
+            <Link
+              to="/register"
+              style={{ color: 'var(--color-accent)' }}
+              className="font-medium hover:underline"
+            >
+              Register
+            </Link>
           </p>
         </form>
       </div>

@@ -77,7 +77,7 @@ export default function AdminUsers() {
               <tr
                 key={user.id}
                 style={{ borderBottom: '1px solid var(--color-border)' }}
-                className="hover:opacity-80"
+                className="transition-colors duration-100 hover:bg-[var(--color-surface)]"
               >
                 <td className="px-4 py-3" style={{ color: 'var(--color-text-primary)' }}>
                   {user.username}
@@ -88,8 +88,7 @@ export default function AdminUsers() {
                 <td className="px-4 py-3 text-center">
                   {user.is_admin ? (
                     <span
-                      className="inline-block rounded px-2 py-0.5 text-xs font-medium"
-                      style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' }}
+                      className="badge" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', borderColor: 'var(--color-accent-strong)' }}
                     >
                       Admin
                     </span>

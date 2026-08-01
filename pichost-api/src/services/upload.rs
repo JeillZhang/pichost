@@ -325,12 +325,14 @@ async fn try_dedup(
     }
 
     let row = sqlx::query_as::<_, ImageRow>(
-        "SELECT id, public_key, original_name, url, mime_type, file_size, \
-         sha256, width, height, status, thumbnail_url, webp_url, \
-         created_at, category_id, storage_config_id \
-         FROM images \
-         WHERE user_id = $1 AND sha256 = $2 \
-           AND storage_config_id IS NOT DISTINCT FROM $3",
+        "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size, \
+         i.sha256, i.width, i.height, i.status, i.thumbnail_url, i.webp_url, \
+         i.created_at, i.category_id, i.storage_config_id, \
+         c.name, c.provider \
+         FROM images i \
+         LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id \
+         WHERE i.user_id = $1 AND i.sha256 = $2 \
+           AND i.storage_config_id IS NOT DISTINCT FROM $3",
     )
     .bind(user_id)
     .bind(sha256)

@@ -4,6 +4,7 @@ import {
   Archive,
   Check,
   Database,
+  Info,
   KeyRound,
   Loader2,
   RefreshCw,
@@ -71,6 +72,49 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
     <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
       {children}
     </label>
+  )
+}
+
+/** Explains where the selected backend's own credentials are configured.
+ *  Git providers are per-user storage configs; RustFS lives in config.toml. */
+function BackendConfigHint({ backend }: { backend: string }) {
+  const hint: Record<string, React.ReactNode> = {
+    rustfs: (
+      <>
+        RustFS (S3-compatible) connection parameters are managed in the{' '}
+        <code className="rounded bg-[var(--color-surface)] px-1 py-0.5 text-[11px]">
+          [storage.rustfs]
+        </code>{' '}
+        section of config.toml.
+      </>
+    ),
+    github: (
+      <>
+        GitHub storage is configured per user in{' '}
+        <span className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          Settings → Storage Backends
+        </span>{' '}
+        — repo (owner/repo), branch and access token.
+      </>
+    ),
+    gitcode: (
+      <>
+        GitCode storage is configured per user in{' '}
+        <span className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          Settings → Storage Backends
+        </span>{' '}
+        — repo (owner/repo), branch and access token.
+      </>
+    ),
+  }
+  return (
+    <div
+      className="mt-1 flex items-start gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs leading-relaxed"
+      style={{ color: 'var(--color-text-muted)' }}
+    >
+      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-accent)' }} />
+      <span>{hint[backend] ?? null}</span>
+    </div>
   )
 }
 
@@ -303,14 +347,23 @@ export default function SystemConfig() {
               </select>
             </div>
             <div>
-              <FieldLabel>Local Storage Path</FieldLabel>
-              <input
-                type="text"
-                value={config.local_base_path}
-                onChange={e => updateField('local_base_path', e.target.value)}
-                placeholder="./storage-local"
-                className={`mt-1 ${inputClass}`}
-              />
+              {config.default_backend === 'local' ? (
+                <>
+                  <FieldLabel>Local Storage Path</FieldLabel>
+                  <input
+                    type="text"
+                    value={config.local_base_path}
+                    onChange={e => updateField('local_base_path', e.target.value)}
+                    placeholder="./storage-local"
+                    className={`mt-1 ${inputClass}`}
+                  />
+                </>
+              ) : (
+                <>
+                  <FieldLabel>Backend Credentials</FieldLabel>
+                  <BackendConfigHint backend={config.default_backend} />
+                </>
+              )}
             </div>
           </div>
         </div>

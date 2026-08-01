@@ -9,7 +9,10 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <>
       <NavBar />
-      <main className="mx-auto max-w-5xl p-4">
+      <main
+        className="mx-auto max-w-5xl px-4 py-6"
+        style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
+      >
         {children}
       </main>
     </>

@@ -49,14 +49,10 @@ export default function DropdownMenu({
       {open && (
         <div
           role="menu"
-          className="absolute z-50 min-w-[120px] overflow-hidden rounded-lg py-1"
+          className="glass-elevated absolute z-50 min-w-[140px] overflow-hidden rounded-lg py-1"
           style={{
             top: 'calc(100% + 0.375rem)',
             ...(align === 'right' ? { right: 0 } : { left: 0 }),
-            backgroundColor: 'var(--color-surface-elevated)',
-            border: '1px solid var(--color-border)',
-            boxShadow: 'var(--glass-shadow)',
-            backdropFilter: 'blur(var(--glass-blur))',
           }}
         >
           {items.map((item, index) => (
@@ -64,11 +60,9 @@ export default function DropdownMenu({
               key={index}
               type="button"
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm"
+              className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm transition-colors duration-100"
               style={{
                 color: item.danger ? 'var(--color-danger)' : 'var(--color-text-secondary)',
-                backgroundColor: 'transparent',
-                transition: 'all 0.15s ease',
               }}
               onClick={() => {
                 item.onClick()
@@ -87,7 +81,7 @@ export default function DropdownMenu({
                   : 'var(--color-text-secondary)'
               }}
             >
-              {item.icon && <span className="flex items-center">{item.icon}</span>}
+              {item.icon && <span className="flex shrink-0 items-center">{item.icon}</span>}
               <span className="flex-1 truncate">{item.label}</span>
             </button>
           ))}

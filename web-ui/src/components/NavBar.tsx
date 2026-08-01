@@ -4,50 +4,44 @@ import { useAuthStore } from '../stores/auth'
 import ThemeToggle from './ThemeToggle'
 import DropdownMenu, { type DropdownMenuItem } from './ui/DropdownMenu'
 
+const linkBase =
+  'relative text-sm font-medium transition-colors duration-200 px-1 py-0.5'
+const linkActive = 'text-[var(--color-text-primary)]'
+const linkInactive = 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+
 export default function NavBar() {
   const user = useAuthStore((s) => s.user)
   const logout = useAuthStore((s) => s.logout)
   const navigate = useNavigate()
 
   return (
-    <nav
-      className="sticky top-0 z-50 border-b backdrop-blur-sm"
-      style={{
-        backgroundColor: 'var(--glass-bg)',
-        borderColor: 'var(--glass-border)',
-      }}
-    >
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+    <nav className="glass-nav sticky top-0 z-50">
+      <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3">
         {/* Brand */}
-        <Link
-          to="/dashboard"
-          className="text-lg font-bold"
-          style={{ color: 'var(--color-text-primary)' }}
-        >
-          PicHost
+        <Link to="/dashboard" className="group flex items-center gap-2">
+          <span
+            className="bg-gradient-to-br from-indigo-400 via-violet-400 to-indigo-400 bg-clip-text text-xl font-bold text-transparent"
+            style={{ fontFamily: "'Outfit', system-ui, sans-serif" }}
+          >
+            PicHost
+          </span>
         </Link>
 
         {/* Nav links */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1">
           <NavLink
             to="/dashboard"
             className={({ isActive }) =>
-              isActive ? '' : 'hover:opacity-75'
+              `${linkBase} ${isActive ? linkActive : linkInactive}`
             }
-            style={({ isActive }) => ({
-              color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-            })}
           >
             Dashboard
           </NavLink>
           <NavLink
             to="/gallery"
             className={({ isActive }) =>
-              isActive ? '' : 'hover:opacity-75'
+              `${linkBase} ${isActive ? linkActive : linkInactive}`
             }
-            style={({ isActive }) => ({
-              color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-            })}
           >
             Gallery
           </NavLink>
@@ -55,11 +49,8 @@ export default function NavBar() {
             <NavLink
               to="/admin"
               className={({ isActive }) =>
-                isActive ? '' : 'hover:opacity-75'
+                `${linkBase} ${isActive ? linkActive : linkInactive}`
               }
-              style={({ isActive }) => ({
-                color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-              })}
             >
               Admin
             </NavLink>
@@ -72,23 +63,19 @@ export default function NavBar() {
           <DropdownMenu
             trigger={
               <span
-                className="flex max-w-[180px] cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors"
+                className="flex max-w-[180px] cursor-pointer items-center gap-2 rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] px-2.5 py-1.5 text-sm backdrop-blur-sm transition-all duration-200 hover:border-[var(--glass-border-strong)] hover:bg-[var(--glass-bg-hover)]"
                 style={{ color: 'var(--color-text-secondary)' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--color-surface)'
-                  e.currentTarget.style.color = 'var(--color-text-primary)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent'
-                  e.currentTarget.style.color = 'var(--color-text-secondary)'
-                }}
               >
                 <User className="h-4 w-4 shrink-0" />
                 <span className="max-w-[120px] truncate">{user?.username}</span>
                 {user?.is_admin && (
                   <span
-                    className="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none"
-                    style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)' }}
+                    className="badge"
+                    style={{
+                      backgroundColor: 'var(--color-accent-subtle)',
+                      color: 'var(--color-accent)',
+                      borderColor: 'var(--color-accent-strong)',
+                    }}
                   >
                     Admin
                   </span>

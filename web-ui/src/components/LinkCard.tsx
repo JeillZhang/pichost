@@ -22,19 +22,32 @@ export default function LinkCard({ label, value }: LinkCardProps) {
   }
 
   return (
-    <div className="group rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-3">
-      <div className="mb-1 text-xs font-medium text-gray-500">{label}</div>
+    <div className="glass group rounded-lg p-3 transition-all duration-200">
+      <div
+        className="mb-1 text-[11px] font-semibold uppercase tracking-wider"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        {label}
+      </div>
       <div className="flex items-center gap-2">
-        <code className="max-w-full flex-1 truncate text-sm text-gray-300">
+        <code
+          className="max-w-full flex-1 truncate rounded bg-[var(--color-surface)] px-2 py-1 text-sm"
+          style={{
+            color: 'var(--color-text-secondary)',
+            fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+            fontSize: '0.8125rem',
+          }}
+        >
           {value}
         </code>
         <button
           onClick={handleCopy}
-          className="shrink-0 rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-gray-200"
+          className="shrink-0 rounded-lg p-1.5 transition-all duration-200 hover:bg-[var(--color-surface-hover)]"
+          style={{ color: 'var(--color-text-muted)' }}
           title={`Copy ${label}`}
         >
           {copied ? (
-            <Check className="h-4 w-4 text-green-400" />
+            <Check className="h-4 w-4" style={{ color: 'var(--color-success)' }} />
           ) : (
             <Copy className="h-4 w-4" />
           )}

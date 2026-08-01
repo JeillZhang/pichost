@@ -730,6 +730,8 @@ pub async fn delete_image(
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "failed to delete image"})))
         })?;
 
+    let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
+
     tracing::info!(image_id = %id, user_id = %user.id, "image deleted");
     Ok(Json(json!({"message": "image deleted", "id": id})))
 }
@@ -773,6 +775,10 @@ pub async fn batch_delete(
         })?
         .rows_affected() as usize;
 
+    for image_id in &body.ids {
+        let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", image_id)).await;
+    }
+
     let failed = body.ids.len().saturating_sub(deleted);
     tracing::info!(user_id = %user.id, requested = body.ids.len(), deleted, failed, "batch delete");
     Ok(Json(json!({"message": "batch delete completed", "deleted": deleted, "failed": failed})))
@@ -780,7 +786,8 @@ pub async fn batch_delete(
 
 #[derive(Debug, Deserialize)]
 pub struct MoveImageRequest {
-    pub category_id: Uuid,
+    /// None removes the image from its category.
+    pub category_id: Option<Uuid>,
 }
 
 /// POST /api/v1/images/{id}/move — move an image to a category
@@ -792,20 +799,22 @@ pub async fn move_image(
 ) -> Result<Json<serde_json::Value>, RouteError> {
     use pichost_core::models::Category;
 
-    let _cat = sqlx::query_as::<_, Category>(
-        "SELECT id, user_id, name, parent_id, created_at \
-         FROM categories WHERE id = $1 AND user_id = $2",
-    )
-    .bind(body.category_id)
-    .bind(user.id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
-    })?
-    .ok_or_else(|| {
-        (StatusCode::NOT_FOUND, Json(json!({"error": "Category not found"})))
-    })?;
+    if let Some(category_id) = body.category_id {
+        let _cat = sqlx::query_as::<_, Category>(
+            "SELECT id, user_id, name, parent_id, created_at \
+             FROM categories WHERE id = $1 AND user_id = $2",
+        )
+        .bind(category_id)
+        .bind(user.id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
+        })?
+        .ok_or_else(|| {
+            (StatusCode::NOT_FOUND, Json(json!({"error": "Category not found"})))
+        })?;
+    }
 
     let result = sqlx::query(
         "UPDATE images SET category_id = $1 WHERE id = $2 AND user_id = $3",
@@ -822,6 +831,9 @@ pub async fn move_image(
     if result.rows_affected() == 0 {
         return Err((StatusCode::NOT_FOUND, Json(json!({"error": "Image not found"}))));
     }
+
+    let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
+
     Ok(Json(json!({"message": "Image moved to category"})))
 }
 
@@ -878,6 +890,10 @@ pub async fn batch_move_images(
     .map_err(|e| {
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
     })?;
+
+    for image_id in &body.image_ids {
+        let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", image_id)).await;
+    }
 
     Ok(Json(json!({
         "message": "Images moved to category",

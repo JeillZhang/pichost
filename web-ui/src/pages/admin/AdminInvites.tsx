@@ -180,11 +180,12 @@ export default function AdminInvites() {
                     <span
                       className="inline-block rounded px-2 py-0.5 text-xs font-medium"
                       style={{
-                        backgroundColor: status.label === 'Active'
-                          ? 'rgba(34, 197, 94, 0.1)'
-                          : status.label === 'Expired'
-                            ? 'rgba(239, 68, 68, 0.1)'
-                            : 'rgba(156, 163, 175, 0.1)',
+                        backgroundColor:
+                          status.label === 'Active'
+                            ? 'var(--color-success-subtle)'
+                            : status.label === 'Expired'
+                              ? 'var(--color-danger-subtle)'
+                              : 'var(--color-surface)',
                         color: status.color,
                       }}
                     >
