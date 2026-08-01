@@ -797,7 +797,9 @@ pub async fn get_admin_config() -> Result<Json<ConfigResponse>, AdminError> {
     }))
 }
 
-/// PUT /api/v1/admin/config — write config.toml with auto-backup
+/// PUT /api/v1/admin/config — write config.toml with auto-backup.
+/// Merge semantics: fields omitted from the body (None) keep their
+/// current on-disk value, so a partial update never wipes other keys.
 pub async fn update_admin_config(
     Json(body): Json<UpdateConfigBody>,
 ) -> Result<Json<ConfigResponse>, AdminError> {
@@ -805,14 +807,15 @@ pub async fn update_admin_config(
     // Best-effort backup — first save may have no existing config.toml
     let _ = config::backup_config(&path);
 
+    let existing = config::read_config_toml(&path).unwrap_or_default();
     let cfg = SystemConfig {
-        database_url: body.database_url,
-        redis_url: body.redis_url,
+        database_url: body.database_url.or(existing.database_url),
+        redis_url: body.redis_url.or(existing.redis_url),
         jwt_secret: None,
         token_encryption_key: None,
-        public_url: body.public_url,
-        default_backend: body.default_backend,
-        local_base_path: body.local_base_path,
+        public_url: body.public_url.or(existing.public_url),
+        default_backend: body.default_backend.or(existing.default_backend),
+        local_base_path: body.local_base_path.or(existing.local_base_path),
     };
     config::write_config_toml(&path, &cfg)
         .map_err(|e| internal_error(format!("write failed: {e}")))?;
