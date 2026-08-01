@@ -39,6 +39,15 @@ const STATUS_STYLES: Record<string, string> = {
     'bg-[var(--color-danger-subtle)] text-[var(--color-danger)] border-[var(--color-danger)] border-opacity-30',
 }
 
+const LINK_OPTIONS = [
+  { value: 'url', label: 'URL' },
+  { value: 'markdown', label: 'Markdown' },
+  { value: 'html', label: 'HTML' },
+  { value: 'bbcode', label: 'BBCode' },
+] as const
+
+type LinkFormat = (typeof LINK_OPTIONS)[number]['value']
+
 export default function ImageDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -47,6 +56,7 @@ export default function ImageDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [isRenaming, setIsRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState('')
+  const [linkFormat, setLinkFormat] = useState<LinkFormat>('url')
 
   const { data: img, isLoading } = useQuery({
     queryKey: ['image', id],
@@ -125,8 +135,16 @@ export default function ImageDetail() {
     )
   }
 
+  const linkValues: Record<LinkFormat, string> = {
+    url: img.url,
+    markdown: img.markdown,
+    html: img.html,
+    bbcode: img.bbcode,
+  }
+  const selectedLinkLabel = LINK_OPTIONS.find((o) => o.value === linkFormat)!.label
+
   return (
-    <div className="mx-auto max-w-2xl p-4">
+    <div className="mx-auto max-w-4xl p-4">
       {/* Back button */}
       <button
         onClick={() => navigate(-1)}
@@ -137,7 +155,7 @@ export default function ImageDetail() {
       </button>
 
       {/* Image preview */}
-      <div className="glass-elevated overflow-hidden rounded-xl">
+      <div className="glass-elevated mb-4 overflow-hidden rounded-xl">
         <img
           src={img.url}
           alt={img.original_name}
@@ -145,8 +163,9 @@ export default function ImageDetail() {
         />
       </div>
 
-      {/* Info card */}
-      <div className="glass-elevated mt-4 space-y-1 rounded-xl p-4 text-sm">
+      {/* Info card — metadata + generated assets + links */}
+      <div className="glass-elevated rounded-xl p-5">
+        {/* ── Metadata ── */}
         <div className="flex items-center gap-2">
           <span style={{ color: 'var(--color-text-secondary)' }}>Name:</span>
           {isRenaming ? (
@@ -186,40 +205,42 @@ export default function ImageDetail() {
           )}
         </div>
 
-        <p className="flex items-center gap-2">
-          <span style={{ color: 'var(--color-text-secondary)' }}>Status:</span>
-          <span
-            className={`badge ${STATUS_STYLES[img.status] || 'bg-[var(--color-surface)] text-[var(--color-text-secondary)]'}`}
-          >
-            {img.status}
-          </span>
-        </p>
-        {img.width && img.height && (
-          <p>
-            <span style={{ color: 'var(--color-text-secondary)' }}>Dimensions:</span>{' '}
-            <span style={{ color: 'var(--color-text-primary)' }}>
-              {img.width} × {img.height}px
+        <div className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+          <p className="flex items-center gap-2">
+            <span style={{ color: 'var(--color-text-secondary)' }}>Status:</span>
+            <span
+              className={`badge ${STATUS_STYLES[img.status] || 'bg-[var(--color-surface)] text-[var(--color-text-secondary)]'}`}
+            >
+              {img.status}
             </span>
           </p>
-        )}
-        <p>
-          <span style={{ color: 'var(--color-text-secondary)' }}>Type:</span>{' '}
-          <span style={{ color: 'var(--color-text-primary)' }}>{img.mime_type}</span>
-        </p>
-        <p>
-          <span style={{ color: 'var(--color-text-secondary)' }}>Size:</span>{' '}
-          <span style={{ color: 'var(--color-text-primary)' }}>
-            {(img.file_size / 1024).toFixed(1)} KB
-          </span>
-        </p>
-        <p>
-          <span style={{ color: 'var(--color-text-secondary)' }}>Uploaded:</span>{' '}
-          <span style={{ color: 'var(--color-text-primary)' }}>
-            {new Date(img.created_at).toLocaleString()}
-          </span>
-        </p>
+          {img.width && img.height && (
+            <p>
+              <span style={{ color: 'var(--color-text-secondary)' }}>Dimensions:</span>{' '}
+              <span style={{ color: 'var(--color-text-primary)' }}>
+                {img.width} × {img.height}px
+              </span>
+            </p>
+          )}
+          <p>
+            <span style={{ color: 'var(--color-text-secondary)' }}>Type:</span>{' '}
+            <span style={{ color: 'var(--color-text-primary)' }}>{img.mime_type}</span>
+          </p>
+          <p>
+            <span style={{ color: 'var(--color-text-secondary)' }}>Size:</span>{' '}
+            <span style={{ color: 'var(--color-text-primary)' }}>
+              {(img.file_size / 1024).toFixed(1)} KB
+            </span>
+          </p>
+          <p className="sm:col-span-2">
+            <span style={{ color: 'var(--color-text-secondary)' }}>Uploaded:</span>{' '}
+            <span style={{ color: 'var(--color-text-primary)' }}>
+              {new Date(img.created_at).toLocaleString()}
+            </span>
+          </p>
+        </div>
 
-        <div className="mt-3">
+        <div className="mt-4">
           <label
             className="mb-1.5 block text-xs font-semibold uppercase tracking-wider"
             style={{ color: 'var(--color-text-muted)' }}
@@ -252,28 +273,46 @@ export default function ImageDetail() {
             </p>
           )}
         </div>
-      </div>
 
-      {/* Generated Assets */}
-      {(img.thumbnail_url || img.webp_url) && (
-        <div className="mt-5 space-y-2">
-          <p
-            className="text-xs font-semibold uppercase tracking-wider"
-            style={{ color: 'var(--color-text-muted)' }}
-          >
-            Generated Assets
-          </p>
-          {img.thumbnail_url && <LinkCard label="Thumbnail URL" value={img.thumbnail_url} />}
-          {img.webp_url && <LinkCard label="WebP URL" value={img.webp_url} />}
-        </div>
-      )}
+        {/* ── Generated Assets ── */}
+        {(img.thumbnail_url || img.webp_url) && (
+          <>
+            <div className="divider my-4" />
+            <p
+              className="mb-2 text-xs font-semibold uppercase tracking-wider"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Generated Assets
+            </p>
+            <div className="space-y-2">
+              {img.thumbnail_url && (
+                <LinkCard label="Thumbnail URL" value={img.thumbnail_url} />
+              )}
+              {img.webp_url && <LinkCard label="WebP URL" value={img.webp_url} />}
+            </div>
+          </>
+        )}
 
-      {/* Links */}
-      <div className="mt-4 space-y-2">
-        <LinkCard label="URL" value={img.url} />
-        <LinkCard label="Markdown" value={img.markdown} />
-        <LinkCard label="HTML" value={img.html} />
-        <LinkCard label="BBCode" value={img.bbcode} />
+        {/* ── Links ── */}
+        <div className="divider my-4" />
+        <label
+          className="mb-1.5 block text-xs font-semibold uppercase tracking-wider"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
+          Links
+        </label>
+        <select
+          value={linkFormat}
+          onChange={(e) => setLinkFormat(e.target.value as LinkFormat)}
+          className="input-field mb-2"
+        >
+          {LINK_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <LinkCard label={selectedLinkLabel} value={linkValues[linkFormat]} />
       </div>
 
       {/* Delete */}
