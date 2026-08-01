@@ -476,17 +476,13 @@ pub async fn rename_image(
 ) -> Result<Json<UploadResult>, RouteError> {
     validate_original_name(&req.original_name)?;
 
-    let updated = sqlx::query_as::<_, ImageRow>(
-        "UPDATE images SET original_name = $1 \
-         WHERE id = $2 AND user_id = $3 \
-         RETURNING id, public_key, original_name, url, mime_type, file_size, \
-                   sha256, width, height, status, thumbnail_url, webp_url, \
-                   created_at, category_id, storage_config_id"
+    let updated_rows = sqlx::query(
+        "UPDATE images SET original_name = $1 WHERE id = $2 AND user_id = $3",
     )
     .bind(&req.original_name)
     .bind(id)
     .bind(user.id)
-    .fetch_optional(&state.pool)
+    .execute(&state.pool)
     .await
     .map_err(|e| {
         tracing::warn!("Rename image query failed: {e}");
@@ -495,16 +491,45 @@ pub async fn rename_image(
             Json(json!({"error": "internal server error"})),
         )
     })?
-    .ok_or_else(|| {
-        (
+    .rows_affected();
+    if updated_rows == 0 {
+        return Err((
             StatusCode::NOT_FOUND,
             Json(json!({"error": "image not found"})),
+        ));
+    }
+
+    let updated = sqlx::query_as::<_, ImageRow>(
+        "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size,\
+         i.sha256, i.width, i.height, i.status, i.thumbnail_url, i.webp_url, \
+         i.created_at, i.category_id, i.storage_config_id, \
+         c.name, c.provider \
+         FROM images i \
+         LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id \
+         WHERE i.id = $1 AND i.user_id = $2",
+    )
+    .bind(id)
+    .bind(user.id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Rename image re-fetch failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "internal server error"})),
         )
     })?;
 
     let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
 
-    Ok(Json(UploadResult::from_row(updated)))
+    Ok(Json(UploadResult::from_row(
+        updated.ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "image not found"})),
+            )
+        })?,
+    )))
 }
 
 /// GET /u/{public_key} — serve image publicly (unauthenticated)
