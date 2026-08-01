@@ -323,6 +323,45 @@
 
 ### 版本: 0.16.3 → **0.17.1**
 
+## P4-J: Comprehensive Test Coverage (✅ 本次完成)
+
+**目标**: 为全部 Rust 代码补充单元测试，行覆盖率 ≥90%（用户后放宽至 "覆盖率超过90就行了"）。
+
+### 基础设施
+- **Docker 测试环境**: `postgres:18-alpine` (:5432) + `redis:8-alpine` (:6379) + `minio/minio` S3 (:9000, bucket `pichost`) — 使此前 `#[ignore]` 的 DB/Redis/S3 集成测试可运行
+- **Router 移入 lib**: `pichost-api/src/app.rs` 新增 `build_router`/`configure_app`/`init_storage_backends`（从 main.rs 移入），集成测试用 `tower::ServiceExt::oneshot` 驱动真实生产路由
+- **测试 harness**: `pichost-api/tests/common/mod.rs` — `test_app()`、`create_user`/`create_admin`、`send_json`/`send_raw`、`tiny_png`、`multipart_image`、`create_invite`、`insert_user_direct`
+- **dev-deps**: pichost-api 新增 `tower(util)`、`http-body-util`、`serial_test`、`argon2`、`rand`
+- **S3 bugfix**: `storage/s3.rs get()` 错误映射改用结构化 `is_no_such_key()` 检测（原字符串匹配对 MinIO 返回的 "service error" 失效）
+
+### 新增测试 (合计 555 个可运行，0 失败)
+| 位置 | 测试数 | 覆盖内容 |
+|------|--------|---------|
+| `pichost-api/tests/` | auth 12, images 43, users+categories, admin, cache, oauth, gaps_*/gaps2_* | 全部路由 handler 成功+错误路径（真实 PG+Redis） |
+| `pichost-api/src/` 各模块 | ~85 | 纯逻辑函数（upload helpers、middleware、config、metrics、html_escape） |
+| `pichost-core/src/` | 92 个 in-crate + 3 个 S3 集成（MinIO） | config/crypto/error/models/storage 全覆盖 |
+| `pichost-worker/src/` | 158 个 | processor/queue(Redis)/pipeline(真实 PG)/main/watermark/fonts |
+
+### 覆盖率 (cargo llvm-cov, --include-ignored)
+- **总行覆盖率: 91.56%**（10729 行，未覆盖 906 行）
+- 100% 覆盖文件: app.rs, db, metrics, services/mod, middleware/metrics, models, error
+- 唯一 0% 文件: `pichost-api/src/main.rs`（纯 bootstrap 入口，业务逻辑已在 app.rs 覆盖）
+
+### 关键测试模式
+- 环境变量隔离: `PichostEnvGuard`（capture/restore 全部 `PICHOST_*`，避免并行测试互扰）
+- 测试使用 `#[tokio::test(flavor = "multi_thread", worker_threads = 4)]`（current-thread runtime 会死锁 deadpool）
+- 每个测试独立 PG pool（max 5 连接）避免连接耗尽；harness 共享连接
+- 配置端点测试用 `#[serial]` + 清理 config.toml
+- 需 PG/Redis/S3 的测试统一 `#[ignore]`-gated（CI 无 infra 时跳过），覆盖率用 `-- --include-ignored` 测量
+
+### Verification
+- `cargo test --workspace`（无 infra）✅ (313 pass, 0 fail；242 个 DB/Redis/S3 测试 ignored)
+- `cargo test --workspace -- --include-ignored`（Docker infra）✅ (555 pass, 0 fail)
+- `cargo clippy --workspace --all-targets -D warnings` ✅
+- `cargo llvm-cov --workspace --ignore-filename-regex 'tests/|test_' -- --include-ignored` → **91.56%**
+
+### 版本: 0.17.3
+
 ## 待实施
 
 | 阶段 | 主题 | 依赖 |
