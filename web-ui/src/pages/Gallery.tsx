@@ -301,21 +301,26 @@ export default function Gallery() {
                 const isSelected = selected.has(img.id)
                 return (
                   <div key={img.id} className="group relative">
-                    {selectMode && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          toggleSelect(img.id)
-                        }}
-                        className="absolute left-2 top-2 z-10 rounded-lg bg-black/50 p-1 backdrop-blur-sm transition-opacity duration-150 hover:bg-black/70"
-                      >
-                        {isSelected ? (
-                          <CheckSquare className="h-4 w-4" style={{ color: 'var(--color-accent)' }} />
-                        ) : (
-                          <Square className="h-4 w-4 text-white/60" />
-                        )}
-                      </button>
-                    )}
+                    {/* Always-visible selection toggle — this is the entry
+                        point into select mode (tiles themselves navigate). */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleSelect(img.id)
+                      }}
+                      aria-label={`Select ${img.original_name}`}
+                      className={`absolute left-2 top-2 z-10 rounded-lg p-1 backdrop-blur-sm transition-all duration-150 ${
+                        selectMode
+                          ? 'bg-black/50 hover:bg-black/70'
+                          : 'bg-black/30 opacity-60 hover:bg-black/50 group-hover:opacity-100'
+                      }`}
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="h-4 w-4" style={{ color: 'var(--color-accent)' }} />
+                      ) : (
+                        <Square className="h-4 w-4 text-white/60" />
+                      )}
+                    </button>
                     {/* Provider badge */}
                     {!selectMode && img.storage_config && (
                       <span className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded-md bg-black/50 px-1.5 py-0.5 text-[10px] text-white/80 backdrop-blur-sm">

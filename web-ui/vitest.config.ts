@@ -7,5 +7,9 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     passWithNoTests: true,
+    // E2E specs run under Playwright (npm run e2e), not vitest
+    exclude: [...configDefaults.exclude, 'e2e/**', 'playwright-report/**', 'test-results/**'],
   },
 })
+
+import { configDefaults } from 'vitest/config'

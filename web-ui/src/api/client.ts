@@ -116,6 +116,14 @@ export async function deleteImage(id: string): Promise<void> {
   await api.delete(`images/${id}`).json()
 }
 
+/** Header marking a request that already went through the 401-refresh retry,
+ *  so the interceptor does not loop forever: some endpoints (e.g. wrong
+ *  current password on /users/me/password) legitimately return 401 and must
+ *  surface the error instead of retrying with a fresh token indefinitely.
+ *  A header is used because ky may clone the Request during retry, which
+ *  would drop instance-only properties. */
+const REFRESH_RETRIED_HEADER = 'x-refresh-retried'
+
 function createApi(): KyInstance {
   return ky.create({
     prefix: '/api/v1',
@@ -131,8 +139,13 @@ function createApi(): KyInstance {
       afterResponse: [
         async ({ request, response }) => {
           // Skip refresh on auth endpoints to avoid infinite loop
-          // when the refresh token itself is expired
-          if (response.status === 401 && !request.url.includes('/auth/')) {
+          // when the refresh token itself is expired, and skip when this
+          // request was already retried once after a refresh.
+          if (
+            response.status === 401 &&
+            !request.url.includes('/auth/') &&
+            !request.headers.has(REFRESH_RETRIED_HEADER)
+          ) {
             try {
               const { useAuthStore } = await import('../stores/auth')
               const refreshed = await useAuthStore.getState().refresh()
@@ -140,6 +153,7 @@ function createApi(): KyInstance {
                 const token = localStorage.getItem('access_token')
                 const headers = new Headers(request.headers)
                 headers.set('Authorization', `Bearer ${token}`)
+                headers.set(REFRESH_RETRIED_HEADER, '1')
                 return ky.retry({
                   request: new Request(request, { headers }),
                   code: 'TOKEN_REFRESHED',
