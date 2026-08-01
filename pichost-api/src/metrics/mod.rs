@@ -1,51 +1,55 @@
 use lazy_static::lazy_static;
-use prometheus::{register_counter_vec, register_histogram_vec, register_int_gauge, Encoder, Registry, TextEncoder};
+use prometheus::{
+    register_counter_vec_with_registry, register_histogram_vec_with_registry,
+    register_int_gauge_with_registry, Encoder, Registry, TextEncoder,
+};
 
 lazy_static! {
     pub static ref REGISTRY: Registry = Registry::new();
 
-    pub static ref HTTP_REQUESTS_TOTAL: prometheus::CounterVec = register_counter_vec!(
+    pub static ref HTTP_REQUESTS_TOTAL: prometheus::CounterVec = register_counter_vec_with_registry!(
         "pichost_http_requests_total",
         "Total HTTP requests",
-        &["method", "path", "status"]
+        &["method", "path", "status"],
+        REGISTRY.clone()
     )
     .unwrap();
 
-    pub static ref HTTP_REQUEST_DURATION: prometheus::HistogramVec = register_histogram_vec!(
+    pub static ref HTTP_REQUEST_DURATION: prometheus::HistogramVec = register_histogram_vec_with_registry!(
         "pichost_http_request_duration_seconds",
         "HTTP request duration in seconds",
         &["method", "path"],
-        vec![0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
+        vec![0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
+        REGISTRY.clone()
     )
     .unwrap();
 
-    pub static ref UPLOADS_TOTAL: prometheus::Counter = prometheus::register_counter!(
-        "pichost_uploads_total",
-        "Total image uploads"
-    )
-    .unwrap();
+    pub static ref UPLOADS_TOTAL: prometheus::Counter =
+        prometheus::register_counter_with_registry!("pichost_uploads_total", "Total image uploads", REGISTRY.clone())
+            .unwrap();
 
-    pub static ref UPLOAD_ERRORS_TOTAL: prometheus::Counter = prometheus::register_counter!(
-        "pichost_upload_errors_total",
-        "Total upload errors"
-    )
-    .unwrap();
+    pub static ref UPLOAD_ERRORS_TOTAL: prometheus::Counter =
+        prometheus::register_counter_with_registry!("pichost_upload_errors_total", "Total upload errors", REGISTRY.clone())
+            .unwrap();
 
-    pub static ref TOTAL_USERS: prometheus::IntGauge = register_int_gauge!(
+    pub static ref TOTAL_USERS: prometheus::IntGauge = register_int_gauge_with_registry!(
         "pichost_users_total",
-        "Total registered users"
+        "Total registered users",
+        REGISTRY.clone()
     )
     .unwrap();
 
-    pub static ref TOTAL_IMAGES: prometheus::IntGauge = register_int_gauge!(
+    pub static ref TOTAL_IMAGES: prometheus::IntGauge = register_int_gauge_with_registry!(
         "pichost_images_total",
-        "Total images"
+        "Total images",
+        REGISTRY.clone()
     )
     .unwrap();
 
-    pub static ref TOTAL_STORAGE_BYTES: prometheus::IntGauge = register_int_gauge!(
+    pub static ref TOTAL_STORAGE_BYTES: prometheus::IntGauge = register_int_gauge_with_registry!(
         "pichost_storage_bytes_total",
-        "Total storage used in bytes"
+        "Total storage used in bytes",
+        REGISTRY.clone()
     )
     .unwrap();
 }

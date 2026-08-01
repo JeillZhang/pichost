@@ -53,9 +53,9 @@ services:
       DATABASE_URL: postgres://pichost:pichost@postgres/pichost
       PICHOST_DATABASE_URL: postgres://pichost:pichost@postgres/pichost
       PICHOST_REDIS_URL: redis://redis:6379
-      PICHOST_AUTH_JWT_SECRET: ${PICHOST_AUTH_JWT_SECRET:-dev-secret-change-me-in-production}
-      PICHOST_STORAGE_LOCAL_BASE_PATH: /app/storage-local
-      PICHOST_SERVER_PUBLIC_URL: ${PICHOST_SERVER_PUBLIC_URL:-http://localhost:8080}
+      PICHOST_AUTH__JWT_SECRET: ${PICHOST_AUTH__JWT_SECRET:-dev-secret-change-me-in-production}
+      PICHOST_STORAGE__LOCAL_BASE_PATH: /app/storage-local
+      PICHOST_SERVER__PUBLIC_URL: ${PICHOST_SERVER__PUBLIC_URL:-http://localhost:8080}
 
   # ── Worker (2 replicas, independent consumers) ──
   worker:
@@ -76,9 +76,9 @@ services:
       DATABASE_URL: postgres://pichost:pichost@postgres/pichost
       PICHOST_DATABASE_URL: postgres://pichost:pichost@postgres/pichost
       PICHOST_REDIS_URL: redis://redis:6379
-      PICHOST_AUTH_JWT_SECRET: ${PICHOST_AUTH_JWT_SECRET:-dev-secret-change-me-in-production}
-      PICHOST_STORAGE_LOCAL_BASE_PATH: /app/storage-local
-      PICHOST_SERVER_PUBLIC_URL: ${PICHOST_SERVER_PUBLIC_URL:-http://localhost:8080}
+      PICHOST_AUTH__JWT_SECRET: ${PICHOST_AUTH__JWT_SECRET:-dev-secret-change-me-in-production}
+      PICHOST_STORAGE__LOCAL_BASE_PATH: /app/storage-local
+      PICHOST_SERVER__PUBLIC_URL: ${PICHOST_SERVER__PUBLIC_URL:-http://localhost:8080}
 
   # ── Nginx — reverse proxy + CDN cache + static files ──
   nginx:

@@ -11,10 +11,10 @@ use axum::{
 use crate::app::AppState;
 use crate::middleware::auth::AuthUser;
 
-const POLICY_AUTH: (&str, u32, u64) = ("auth", 5, 60);
-const POLICY_UPLOAD: (&str, u32, u64) = ("upload", 30, 60);
-const POLICY_GENERAL: (&str, u32, u64) = ("general", 60, 60);
-const POLICY_PUBLIC: (&str, u32, u64) = ("public", 200, 60);
+/// Rate limits are read from config (defaults match these constants).
+/// Window is fixed at 60s; per-policy maxima are configurable so deployments
+/// and E2E test environments can raise them (PICHOST_RATE_LIMIT_*_MAX).
+const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 
 fn too_many_response(retry_after: u64) -> (StatusCode, Json<serde_json::Value>) {
     (
@@ -78,7 +78,8 @@ pub async fn rate_limit_auth(
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     let ip = extract_client_ip(&req);
-    match check_rate_limit(&state.cache, "auth", &ip, POLICY_AUTH.1, POLICY_AUTH.2).await {
+    let max = state.config.rate_limit.auth_max;
+    match check_rate_limit(&state.cache, "auth", &ip, max, RATE_LIMIT_WINDOW_SECS).await {
         Ok(_) => Ok(next.run(req).await),
         Err(retry_after) => {
             tracing::warn!(ip = %ip, "auth rate limited");
@@ -97,15 +98,8 @@ pub async fn rate_limit_upload(
         .get::<AuthUser>()
         .map(|u| u.id.to_string())
         .unwrap_or_else(|| extract_client_ip(&req));
-    match check_rate_limit(
-        &state.cache,
-        "upload",
-        &key,
-        POLICY_UPLOAD.1,
-        POLICY_UPLOAD.2,
-    )
-    .await
-    {
+    let max = state.config.rate_limit.upload_max;
+    match check_rate_limit(&state.cache, "upload", &key, max, RATE_LIMIT_WINDOW_SECS).await {
         Ok(_) => Ok(next.run(req).await),
         Err(retry_after) => {
             tracing::warn!(key = %key, "upload rate limited");
@@ -124,15 +118,8 @@ pub async fn rate_limit_general(
         .get::<AuthUser>()
         .map(|u| u.id.to_string())
         .unwrap_or_else(|| extract_client_ip(&req));
-    match check_rate_limit(
-        &state.cache,
-        "general",
-        &key,
-        POLICY_GENERAL.1,
-        POLICY_GENERAL.2,
-    )
-    .await
-    {
+    let max = state.config.rate_limit.general_max;
+    match check_rate_limit(&state.cache, "general", &key, max, RATE_LIMIT_WINDOW_SECS).await {
         Ok(_) => Ok(next.run(req).await),
         Err(retry_after) => {
             tracing::warn!(key = %key, "general rate limited");
@@ -147,15 +134,8 @@ pub async fn rate_limit_public(
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     let ip = extract_client_ip(&req);
-    match check_rate_limit(
-        &state.cache,
-        "public",
-        &ip,
-        POLICY_PUBLIC.1,
-        POLICY_PUBLIC.2,
-    )
-    .await
-    {
+    let max = state.config.rate_limit.public_max;
+    match check_rate_limit(&state.cache, "public", &ip, max, RATE_LIMIT_WINDOW_SECS).await {
         Ok(_) => Ok(next.run(req).await),
         Err(retry_after) => {
             tracing::warn!(ip = %ip, "public rate limited");

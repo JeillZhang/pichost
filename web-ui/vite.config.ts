@@ -9,6 +9,8 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:3000',
       '/u': 'http://localhost:3000',
+      '/t': 'http://localhost:3000',
+      '/metrics': 'http://localhost:3000',
     },
   },
   resolve: {

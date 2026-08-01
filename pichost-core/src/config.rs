@@ -12,6 +12,8 @@ pub struct AppConfig {
     pub upload: UploadConfig,
     pub logging: LoggingConfig,
     pub worker: WorkerConfig,
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
     /// AES-256-GCM 密钥，用于加密用户 Git PAT
     /// 须 32 字节（base64 或 hex 编码），与 JWT secret 独立
     #[serde(default)]
@@ -119,6 +121,44 @@ pub struct WorkerConfig {
     pub processing: WorkerProcessingConfig,
 }
 
+/// Per-policy rate limits (requests per 60s window).
+/// Configurable so deployments can tune limits; E2E tests raise them.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RateLimitConfig {
+    #[serde(default = "default_rate_limit_auth")]
+    pub auth_max: u32,
+    #[serde(default = "default_rate_limit_upload")]
+    pub upload_max: u32,
+    #[serde(default = "default_rate_limit_general")]
+    pub general_max: u32,
+    #[serde(default = "default_rate_limit_public")]
+    pub public_max: u32,
+}
+
+fn default_rate_limit_auth() -> u32 {
+    5
+}
+fn default_rate_limit_upload() -> u32 {
+    30
+}
+fn default_rate_limit_general() -> u32 {
+    60
+}
+fn default_rate_limit_public() -> u32 {
+    200
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            auth_max: default_rate_limit_auth(),
+            upload_max: default_rate_limit_upload(),
+            general_max: default_rate_limit_general(),
+            public_max: default_rate_limit_public(),
+        }
+    }
+}
+
 impl Default for WorkerProcessingConfig {
     fn default() -> Self {
         Self {
@@ -186,6 +226,7 @@ impl Default for AppConfig {
             },
             logging: LoggingConfig { level: "info".into(), format: "json".into() },
             worker: WorkerConfig::default(),
+            rate_limit: RateLimitConfig::default(),
             token_encryption_key: None,
             storage_max_user_configs: None,
         }
@@ -197,6 +238,12 @@ pub fn load_config() -> Result<AppConfig, figment::Error> {
     let figment = Figment::new()
         .merge(Serialized::defaults(AppConfig::default()))
         .merge(Toml::file("config.toml").nested())
+        // `__` marks explicit nesting: PICHOST_AUTH__JWT_SECRET → auth.jwt_secret.
+        // (split("_") alone would produce auth.jwt.secret — three levels — which
+        // can never match a flat field name containing underscores.)
+        .merge(Env::prefixed("PICHOST_").split("__"))
+        // Legacy single-underscore form still works for 2-segment keys like
+        // PICHOST_DATABASE_URL → database.url (and for flat keys).
         .merge(Env::prefixed("PICHOST_").split("_"));
 
     figment.extract()
