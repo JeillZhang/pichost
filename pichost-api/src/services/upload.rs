@@ -1134,3 +1134,198 @@ pub async fn get_user_image(
     })
     .map(|opt| opt.map(UploadResult::from_row))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_row(storage_config_id: Option<Uuid>, name: Option<String>, provider: Option<String>) -> ImageRow {
+        ImageRow {
+            id: Uuid::new_v4(),
+            public_key: "abc123".into(),
+            original_name: "photo.png".into(),
+            url: "http://x/u/abc123".into(),
+            mime_type: "image/png".into(),
+            file_size: 1024,
+            sha256: "deadbeef".into(),
+            width: Some(10),
+            height: Some(20),
+            status: "active".into(),
+            thumbnail_url: None,
+            webp_url: None,
+            created_at: Utc::now(),
+            category_id: None,
+            storage_config_id,
+            name,
+            provider,
+        }
+    }
+
+    fn git_config(provider: &str) -> UserStorageConfig {
+        UserStorageConfig {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            name: "cfg".into(),
+            provider: provider.into(),
+            is_default: false,
+            config: serde_json::json!({}),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn png_bytes() -> Vec<u8> {
+        let img = image::RgbImage::new(2, 3);
+        let mut bytes = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .unwrap();
+        bytes
+    }
+
+    #[test]
+    fn test_defaults() {
+        assert_eq!(default_page(), 1);
+        assert_eq!(default_per_page(), 20);
+        assert_eq!(default_sort(), "created_at");
+        assert_eq!(default_order(), "desc");
+    }
+
+    #[test]
+    fn test_from_row_with_storage_config() {
+        let config_id = Uuid::new_v4();
+        let row = sample_row(Some(config_id), Some("my git".into()), Some("github".into()));
+        let result = UploadResult::from_row(row);
+        assert_eq!(result.markdown, "![photo.png](http://x/u/abc123)");
+        assert_eq!(result.html, "<img src=\"http://x/u/abc123\" alt=\"photo.png\" />");
+        assert_eq!(result.bbcode, "[img]http://x/u/abc123[/img]");
+        assert_eq!(result.file_size, 1024);
+        assert_eq!(result.width, Some(10));
+        assert_eq!(result.status, "active");
+        let sc = result.storage_config.unwrap();
+        assert_eq!(sc.id, config_id);
+        assert_eq!(sc.name, "my git");
+        assert_eq!(sc.provider, "github");
+    }
+
+    #[test]
+    fn test_from_row_without_storage_config() {
+        let row = sample_row(None, None, None);
+        let result = UploadResult::from_row(row);
+        assert!(result.storage_config.is_none());
+    }
+
+    #[test]
+    fn test_from_row_partial_storage_config() {
+        let row = sample_row(Some(Uuid::new_v4()), Some("name".into()), None);
+        assert!(UploadResult::from_row(row).storage_config.is_none());
+    }
+
+    #[test]
+    fn test_normalize_sort() {
+        assert_eq!(normalize_sort("created_at"), "created_at");
+        assert_eq!(normalize_sort("file_size"), "file_size");
+        assert_eq!(normalize_sort("original_name"), "original_name");
+        assert_eq!(normalize_sort("bogus"), "created_at");
+        assert_eq!(normalize_sort(""), "created_at");
+    }
+
+    #[test]
+    fn test_normalize_order() {
+        assert_eq!(normalize_order("asc"), "ASC");
+        assert_eq!(normalize_order("ASC"), "ASC");
+        assert_eq!(normalize_order("desc"), "DESC");
+        assert_eq!(normalize_order("DESC"), "DESC");
+        assert_eq!(normalize_order("bogus"), "DESC");
+    }
+
+    #[test]
+    fn test_calc_total_pages() {
+        assert_eq!(calc_total_pages(0, 10), 1);
+        assert_eq!(calc_total_pages(23, 10), 3);
+        assert_eq!(calc_total_pages(20, 10), 2);
+        assert_eq!(calc_total_pages(1, 20), 1);
+    }
+
+    #[test]
+    fn test_local_fallback_config() {
+        let user_id = Uuid::new_v4();
+        let cfg = local_fallback_config(user_id);
+        assert_eq!(cfg.provider, "local");
+        assert!(cfg.id.is_nil());
+        assert_eq!(cfg.user_id, user_id);
+        assert_eq!(cfg.name, "Local Storage");
+    }
+
+    #[test]
+    fn test_validate_upload_configs() {
+        assert!(validate_upload_configs(&[]).is_err());
+        assert!(validate_upload_configs(&[git_config("local")]).is_ok());
+        let three = vec![git_config("local"), git_config("github"), git_config("gitcode")];
+        let err = validate_upload_configs(&three).unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        let no_local = vec![git_config("github"), git_config("gitcode")];
+        let err = validate_upload_configs(&no_local).unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert!(validate_upload_configs(&[git_config("local"), git_config("github")]).is_ok());
+    }
+
+    #[test]
+    fn test_storage_error_response() {
+        use pichost_core::error::StorageError;
+        let (status, msg) = storage_error_response(&StorageError::PayloadTooLarge("big".into()));
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(msg, "big");
+        let (status, _) = storage_error_response(&StorageError::NotFound("x".into()));
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn test_resolve_encryption_key() {
+        let config = pichost_core::config::AppConfig::default();
+        assert_eq!(resolve_encryption_key(&config).unwrap(), [0u8; 32]);
+        let mut config = config;
+        config.token_encryption_key = Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".into());
+        assert_eq!(resolve_encryption_key(&config).unwrap(), [1u8; 32]);
+        config.token_encryption_key = Some("not-base64!!".into());
+        let err = resolve_encryption_key(&config).unwrap_err();
+        assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn test_detect_mime() {
+        assert_eq!(detect_mime(&png_bytes()), "image/png");
+        assert_eq!(detect_mime(b"garbage"), "application/octet-stream");
+    }
+
+    #[test]
+    fn test_image_dimensions() {
+        assert_eq!(image_dimensions(&png_bytes()), (Some(2), Some(3)));
+        assert_eq!(image_dimensions(b"garbage"), (None, None));
+    }
+
+    #[test]
+    fn test_push_optional_filters_all() {
+        let mut builder = sqlx::QueryBuilder::<sqlx::Postgres>::new("SELECT * FROM images");
+        push_optional_filters(&mut builder, "test", Some(Uuid::new_v4()), Some(Uuid::new_v4()));
+        let sql = builder.sql();
+        assert!(sql.contains("AND original_name ILIKE"));
+        assert!(sql.contains("AND storage_config_id ="));
+        assert!(sql.contains("AND category_id ="));
+    }
+
+    #[test]
+    fn test_push_optional_filters_none() {
+        let mut builder = sqlx::QueryBuilder::<sqlx::Postgres>::new("SELECT * FROM images");
+        push_optional_filters(&mut builder, "", None, None);
+        assert_eq!(builder.sql(), "SELECT * FROM images");
+    }
+
+    #[test]
+    fn test_config_info() {
+        let cfg = git_config("gitcode");
+        let info = config_info(&cfg);
+        assert_eq!(info.id, cfg.id);
+        assert_eq!(info.name, cfg.name);
+        assert_eq!(info.provider, "gitcode");
+    }
+}

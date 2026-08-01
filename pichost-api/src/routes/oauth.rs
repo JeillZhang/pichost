@@ -341,3 +341,49 @@ pub async fn oauth_link(
     tracing::info!(user_id = %user.id, provider = %body.provider, "oauth account linked");
     Ok(Json(serde_json::json!({"message": "account linked successfully"})))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pichost_core::config::AppConfig;
+
+    fn test_state() -> AppState {
+        use pichost_core::StorageRouter;
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy("postgres://pichost:pichost@localhost:5432/pichost")
+            .unwrap();
+        AppState {
+            pool,
+            cache: Arc::new(crate::cache::Cache::new(crate::cache::create_pool(
+                "redis://localhost:6379",
+                2,
+            ))),
+            config: Arc::new(AppConfig::default()),
+            router: Arc::new(StorageRouter::new(std::collections::HashMap::new(), "local".into())),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_make_github_client_without_credentials() {
+        let state = test_state();
+        let err = make_github_client(&state).unwrap_err();
+        assert!(err.contains("client_id not configured"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_make_google_client_without_credentials() {
+        let state = test_state();
+        let err = make_google_client(&state).unwrap_err();
+        assert!(err.contains("client_id not configured"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_lookup_oauth_user_not_linked() {
+        let state = test_state();
+        let err = lookup_oauth_user(&state, "github", "provider-id-1").await.unwrap_err();
+        assert_eq!(err.0, StatusCode::NOT_FOUND);
+        assert!(err.1 .0["error"].as_str().unwrap().contains("no account linked"));
+    }
+}

@@ -241,3 +241,271 @@ mod tests {
         assert_eq!(read.default_backend, view.default_backend);
     }
 }
+
+#[cfg(test)]
+mod gaps_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn db_url() -> String {
+        std::env::var("PICHOST_DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://pichost:pichost@localhost:5432/pichost".into())
+    }
+
+    fn redis_url() -> String {
+        std::env::var("PICHOST_REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".into())
+    }
+
+    #[test]
+    fn test_read_existing_file_with_sections() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[database]\nurl = \"postgres://u:p@h:5432/d\"\n[redis]\nurl = \"redis://r:6379\"\n\
+             [auth]\njwt_secret = \"secret\"\n[server]\npublic_url = \"https://x\"\n\
+             [storage]\ndefault_backend = \"local\"\nlocal_base_path = \"./st\"\n",
+        )
+        .unwrap();
+        let cfg = read_config_toml(&path).unwrap();
+        assert_eq!(cfg.database_url.as_deref(), Some("postgres://u:p@h:5432/d"));
+        assert_eq!(cfg.redis_url.as_deref(), Some("redis://r:6379"));
+        assert_eq!(cfg.jwt_secret.as_deref(), Some("secret"));
+        assert_eq!(cfg.public_url.as_deref(), Some("https://x"));
+        assert_eq!(cfg.default_backend.as_deref(), Some("local"));
+        assert_eq!(cfg.local_base_path.as_deref(), Some("./st"));
+    }
+
+    #[test]
+    fn test_read_io_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::create_dir(&path).unwrap();
+        assert!(matches!(read_config_toml(&path), Err(ConfigError::Io(_))));
+    }
+
+    #[test]
+    fn test_read_parse_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[database\nurl = ").unwrap();
+        assert!(matches!(read_config_toml(&path), Err(ConfigError::Parse(_))));
+    }
+
+    #[test]
+    fn test_write_removes_key_when_none() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[database]\nurl = \"postgres://u:p@h/d\"\n[redis]\nurl = \"redis://r\"\n",
+        )
+        .unwrap();
+        let partial = SystemConfig {
+            database_url: None,
+            redis_url: Some("redis://r2".into()),
+            ..Default::default()
+        };
+        write_config_toml(&path, &partial).unwrap();
+        let cfg = read_config_toml(&path).unwrap();
+        assert_eq!(cfg.database_url, None);
+        assert_eq!(cfg.redis_url.as_deref(), Some("redis://r2"));
+    }
+
+    #[test]
+    fn test_write_preserves_existing_sections() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let partial = SystemConfig {
+            database_url: Some("postgres://u:p@h/d".into()),
+            ..Default::default()
+        };
+        write_config_toml(&path, &partial).unwrap();
+        let full = SystemConfig {
+            database_url: None,
+            redis_url: Some("redis://r".into()),
+            public_url: Some("https://x".into()),
+            ..Default::default()
+        };
+        write_config_toml(&path, &full).unwrap();
+        let cfg = read_config_toml(&path).unwrap();
+        assert_eq!(cfg.database_url.as_deref(), Some("postgres://u:p@h/d"));
+        assert_eq!(cfg.redis_url.as_deref(), Some("redis://r"));
+        assert_eq!(cfg.public_url.as_deref(), Some("https://x"));
+    }
+
+    #[test]
+    fn test_write_read_error_existing_dir() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::create_dir(&path).unwrap();
+        let cfg = SystemConfig::default();
+        assert!(matches!(write_config_toml(&path, &cfg), Err(ConfigError::Io(_))));
+    }
+
+    #[test]
+    fn test_write_parse_error_existing() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "not = [valid").unwrap();
+        let cfg = SystemConfig::default();
+        assert!(matches!(
+            write_config_toml(&path, &cfg),
+            Err(ConfigError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn test_write_io_error() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("afile.txt");
+        std::fs::write(&parent, "x").unwrap();
+        let path = parent.join("config.toml");
+        let cfg = SystemConfig {
+            database_url: Some("postgres://u:p@h/d".into()),
+            ..Default::default()
+        };
+        assert!(matches!(write_config_toml(&path, &cfg), Err(ConfigError::Io(_))));
+    }
+
+    #[test]
+    fn test_backup_missing_file_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("nope.toml");
+        assert!(matches!(backup_config(&path), Err(ConfigError::Io(_))));
+    }
+
+    #[test]
+    fn test_backup_copy_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::create_dir(&path).unwrap();
+        assert!(matches!(backup_config(&path), Err(ConfigError::Io(_))));
+    }
+
+    #[test]
+    fn test_backup_and_list_filters_sorts() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "x = 1").unwrap();
+        let name = backup_config(&path).unwrap();
+        assert!(name.starts_with("config.toml.") && name.ends_with(".bak"));
+        std::fs::write(dir.path().join("config.toml.2026-01-01T00:00:00Z.bak"), "a").unwrap();
+        std::fs::write(dir.path().join("other.txt"), "c").unwrap();
+        let backups = list_backups(dir.path()).unwrap();
+        assert_eq!(backups.len(), 2);
+        assert_eq!(backups[0], name);
+    }
+
+    #[test]
+    fn test_list_backups_invalid_dir() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("afile.txt");
+        std::fs::write(&file, "x").unwrap();
+        assert!(matches!(list_backups(&file), Err(ConfigError::Io(_))));
+    }
+
+    #[test]
+    fn test_restore_roundtrip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "original").unwrap();
+        let name = backup_config(&path).unwrap();
+        std::fs::write(&path, "changed").unwrap();
+        restore_config(&path, &name).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "original");
+    }
+
+    #[test]
+    fn test_restore_missing_backup() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let err = restore_config(&path, "config.toml.9999.bak").unwrap_err();
+        assert!(matches!(err, ConfigError::Io(_)));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_database_connection_ok() {
+        assert!(test_database_connection(&db_url()).await.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_database_connection_invalid_url() {
+        let err = test_database_connection("not-a-valid-url").await.unwrap_err();
+        assert!(matches!(err, ConfigError::Connection(_)));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_database_connection_timeout() {
+        let start = std::time::Instant::now();
+        let err = test_database_connection("postgres://pichost:pichost@192.0.2.1:5432/pichost")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ConfigError::Connection(_)));
+        assert!(start.elapsed().as_secs() >= 4);
+    }
+
+    #[test]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    fn test_redis_connection_ok() {
+        assert!(test_redis_connection(&redis_url()).is_ok());
+    }
+
+    #[test]
+    fn test_redis_connection_bad_url() {
+        assert!(test_redis_connection("not-a-url").is_err());
+    }
+
+    #[test]
+    fn test_redis_connection_unreachable() {
+        assert!(test_redis_connection("redis://127.0.0.1:6399").is_err());
+    }
+
+    #[test]
+    fn test_redis_connection_unexpected_reply() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 256];
+            loop {
+                let n = match sock.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => n,
+                    Err(_) => break,
+                };
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let setinfos = req.matches("SETINFO").count();
+                if req.contains("PING") {
+                    for _ in 0..setinfos {
+                        let _ = sock.write_all(b"+OK\r\n");
+                    }
+                    let _ = sock.write_all(b"+FOO\r\n");
+                } else {
+                    for _ in 0..setinfos {
+                        let _ = sock.write_all(b"+OK\r\n");
+                    }
+                }
+            }
+        });
+        let url = format!("redis://{}:{}", addr.ip(), addr.port());
+        assert!(test_redis_connection(&url).is_err());
+    }
+
+    #[test]
+    fn test_redis_connection_eof() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 256];
+            let _ = sock.read(&mut buf);
+            let _ = sock.write_all(b"+OK\r\n");
+        });
+        let url = format!("redis://{}:{}", addr.ip(), addr.port());
+        assert!(test_redis_connection(&url).is_err());
+    }
+}

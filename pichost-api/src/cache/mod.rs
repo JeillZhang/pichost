@@ -437,3 +437,118 @@ pub struct InviteCodeInfo {
 fn pool_err(e: deadpool_redis::PoolError) -> deadpool_redis::redis::RedisError {
     deadpool_redis::redis::RedisError::from(std::io::Error::other(e.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_cache() -> Cache {
+        let url = std::env::var("PICHOST_REDIS_URL")
+            .unwrap_or_else(|_| "redis://localhost:6379".to_string());
+        Cache::new(create_pool(&url, 5))
+    }
+
+    fn unique_code() -> String {
+        format!("t{}", Uuid::new_v4().simple())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ops_fail_with_unreachable_redis() {
+        let cache = Cache::new(create_pool("redis://127.0.0.1:1", 1));
+        assert!(cache.get("k").await.is_err());
+        assert!(cache.set("k", "v").await.is_err());
+        assert!(cache.set_ex("k", "v", 60).await.is_err());
+        assert!(cache.del("k").await.is_err());
+        assert!(cache.exists("k").await.is_err());
+        assert!(cache.incr("k", 60).await.is_err());
+        assert!(cache.incr_user_stat(&Uuid::new_v4(), "f", 1).await.is_err());
+        assert!(cache.set_user_stats(&Uuid::new_v4(), &[("f", Some(1))]).await.is_err());
+        assert!(cache.get_user_stats(&Uuid::new_v4()).await.is_err());
+        assert!(cache.create_invite_code(&Uuid::new_v4(), 60).await.is_err());
+        assert!(cache.verify_invite_code("x").await.is_err());
+        assert!(cache.consume_invite_code("x", &Uuid::new_v4()).await.is_err());
+        assert!(cache.list_invite_codes().await.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_cached_fallbacks_with_unreachable_redis() {
+        let cache = Cache::new(create_pool("redis://127.0.0.1:1", 1));
+        let meta: Result<(i32,), std::io::Error> =
+            cache.cached_meta(&Uuid::new_v4(), 60, async { Ok((7,)) }).await;
+        assert_eq!(meta.unwrap().0, 7);
+        let thumb: Result<Vec<u8>, std::io::Error> =
+            cache.cached_thumb("k", 60, async { Ok(vec![1u8, 2]) }).await;
+        assert_eq!(thumb.unwrap(), vec![1u8, 2]);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_list_invite_codes_cleans_stale_expired() {
+        let cache = test_cache();
+        let code = cache.create_invite_code(&Uuid::new_v4(), 60).await.unwrap();
+        let key = format!("pichost:invite:{code}");
+        let mut conn = cache.get_pool().get().await.unwrap();
+        deadpool_redis::redis::cmd("HSET")
+            .arg(&key)
+            .arg("expires_at")
+            .arg((chrono::Utc::now().timestamp() - 100).to_string())
+            .query_async::<_, ()>(&mut *conn)
+            .await
+            .unwrap();
+        drop(conn);
+
+        let codes = cache.list_invite_codes().await.unwrap();
+        assert!(!codes.iter().any(|c| c.code == code));
+        let mut conn = cache.get_pool().get().await.unwrap();
+        let members: Vec<String> = deadpool_redis::redis::cmd("SMEMBERS")
+            .arg("pichost:invites")
+            .query_async(&mut *conn)
+            .await
+            .unwrap();
+        assert!(!members.contains(&code));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_list_invite_codes_cleans_used_without_srem() {
+        let cache = test_cache();
+        let code = cache.create_invite_code(&Uuid::new_v4(), 60).await.unwrap();
+        let key = format!("pichost:invite:{code}");
+        let mut conn = cache.get_pool().get().await.unwrap();
+        deadpool_redis::redis::cmd("HSET")
+            .arg(&key)
+            .arg("used_by")
+            .arg(Uuid::new_v4().to_string())
+            .query_async::<_, ()>(&mut *conn)
+            .await
+            .unwrap();
+        drop(conn);
+
+        let codes = cache.list_invite_codes().await.unwrap();
+        assert!(!codes.iter().any(|c| c.code == code));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_parse_invite_fields_empty() {
+        assert!(parse_invite_fields(&unique_code(), &HashMap::new(), 0).is_none());
+        let mut fields = HashMap::new();
+        fields.insert("created_at".to_string(), "garbage".to_string());
+        fields.insert("created_by".to_string(), "garbage".to_string());
+        fields.insert("expires_at".to_string(), "garbage".to_string());
+        assert!(parse_invite_fields(&unique_code(), &fields, 1).is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_parse_invite_fields_valid_graceful_defaults() {
+        let code = unique_code();
+        let mut fields = HashMap::new();
+        fields.insert("expires_at".to_string(), (chrono::Utc::now().timestamp() + 3600).to_string());
+        fields.insert("created_at".to_string(), "garbage".to_string());
+        fields.insert("created_by".to_string(), "garbage".to_string());
+        let info = parse_invite_fields(&code, &fields, 0).expect("parsed");
+        assert_eq!(info.code, code);
+        assert_eq!(info.created_at, 0);
+        assert_eq!(info.created_by, Uuid::nil());
+        assert_eq!(info.used_by, None);
+    }
+}

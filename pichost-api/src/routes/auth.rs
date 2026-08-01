@@ -471,3 +471,112 @@ pub async fn logout(
         Json(serde_json::json!({"message": "logged out successfully"})),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SECRET: &str = "test-secret-0123456789abcdef0123456789abcdef";
+
+    fn config_with_secret() -> AppConfig {
+        let mut config = AppConfig::default();
+        config.auth.jwt_secret = SECRET.into();
+        config
+    }
+
+    #[test]
+    fn test_generate_tokens() {
+        let user_id = Uuid::new_v4();
+        let (access, refresh, ac, rc) = generate_tokens(user_id, true, &config_with_secret()).unwrap();
+        assert_eq!(ac.typ, "access");
+        assert_eq!(rc.typ, "refresh");
+        assert_eq!(ac.sub, user_id.to_string());
+        assert_eq!(rc.sub, user_id.to_string());
+        assert_eq!(rc.access_jti, ac.jti);
+        assert_eq!(rc.access_exp, ac.exp);
+        assert!(ac.is_admin);
+
+        let key = DecodingKey::from_secret(SECRET.as_bytes());
+        let decoded: AccessTokenClaims =
+            decode(&access, &key, &Validation::new(Algorithm::HS256)).unwrap().claims;
+        assert_eq!(decoded.sub, user_id.to_string());
+        assert_eq!(decoded.typ, "access");
+        let decoded: RefreshTokenClaims =
+            decode(&refresh, &key, &Validation::new(Algorithm::HS256)).unwrap().claims;
+        assert_eq!(decoded.typ, "refresh");
+        assert_eq!(decoded.sub, user_id.to_string());
+    }
+
+    #[test]
+    fn test_validate_register_payload_short_password() {
+        let payload = RegisterRequest {
+            username: "u".into(),
+            password: "12345".into(),
+            email: None,
+            invite_code: None,
+        };
+        let err = validate_register_payload(&payload).unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_validate_register_payload_ok() {
+        let payload = RegisterRequest {
+            username: "u".into(),
+            password: "123456".into(),
+            email: None,
+            invite_code: None,
+        };
+        assert!(validate_register_payload(&payload).is_ok());
+    }
+
+    #[test]
+    fn test_error_response() {
+        let (status, json) = error_response(StatusCode::BAD_REQUEST, "oops");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(json.0["error"], "oops");
+    }
+
+    #[test]
+    fn test_hash_password() {
+        let hash = hash_password("password123").unwrap();
+        assert!(hash.starts_with("$argon2"));
+    }
+
+    #[test]
+    fn test_access_claims_serde_roundtrip() {
+        let claims = AccessTokenClaims {
+            sub: "u1".into(),
+            jti: "j1".into(),
+            exp: 100,
+            iat: 1,
+            is_admin: true,
+            typ: "access".into(),
+        };
+        let json = serde_json::to_string(&claims).unwrap();
+        let back: AccessTokenClaims = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.sub, "u1");
+        assert_eq!(back.jti, "j1");
+        assert_eq!(back.typ, "access");
+        assert!(back.is_admin);
+    }
+
+    #[test]
+    fn test_refresh_claims_serde_roundtrip() {
+        let claims = RefreshTokenClaims {
+            sub: "u1".into(),
+            jti: "j1".into(),
+            exp: 100,
+            iat: 1,
+            is_admin: false,
+            typ: "refresh".into(),
+            access_jti: "aj".into(),
+            access_exp: 90,
+        };
+        let json = serde_json::to_string(&claims).unwrap();
+        let back: RefreshTokenClaims = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.typ, "refresh");
+        assert_eq!(back.access_jti, "aj");
+        assert_eq!(back.access_exp, 90);
+    }
+}

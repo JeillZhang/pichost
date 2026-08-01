@@ -458,3 +458,129 @@ pub async fn change_my_password(
     update_password_hash(&state.pool, user.id, &new_hash).await?;
     Ok(Json(serde_json::json!({"message": "password updated"})))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn profile_row(watermark: Option<serde_json::Value>) -> ProfileRow {
+        (
+            Uuid::new_v4(),
+            "alice".into(),
+            Some("a@b.c".into()),
+            "local".into(),
+            "pfx".into(),
+            Some(1024),
+            true,
+            chrono::Utc::now(),
+            chrono::Utc::now(),
+            watermark,
+        )
+    }
+
+    fn stats_map(images: &str, size: &str) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        map.insert("total_images".into(), images.into());
+        map.insert("total_size".into(), size.into());
+        map
+    }
+
+    #[test]
+    fn test_try_cached_stats_complete() {
+        let stats = try_cached_stats(Some(stats_map("5", "1024")), "local", Some(2048)).unwrap();
+        assert_eq!(stats.total_images, 5);
+        assert_eq!(stats.total_size, 1024);
+        assert_eq!(stats.backend, "local");
+        assert_eq!(stats.storage_quota, Some(2048));
+    }
+
+    #[test]
+    fn test_try_cached_stats_missing_field() {
+        let mut map = HashMap::new();
+        map.insert("total_size".into(), "1024".into());
+        assert!(try_cached_stats(Some(map), "local", None).is_none());
+        assert!(try_cached_stats(None, "local", None).is_none());
+    }
+
+    #[test]
+    fn test_try_cached_stats_unparseable() {
+        assert!(try_cached_stats(Some(stats_map("abc", "1024")), "local", None).is_none());
+    }
+
+    #[test]
+    fn test_build_user_profile_with_watermark() {
+        let wm = serde_json::json!({"enabled": true, "text": "@alice"});
+        let profile = build_user_profile(profile_row(Some(wm)));
+        assert_eq!(profile.username, "alice");
+        assert_eq!(profile.email.as_deref(), Some("a@b.c"));
+        assert_eq!(profile.storage_quota, Some(1024));
+        let cfg = profile.watermark_config.unwrap();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.text, "@alice");
+    }
+
+    #[test]
+    fn test_build_user_profile_without_watermark() {
+        let profile = build_user_profile(profile_row(None));
+        assert!(profile.watermark_config.is_none());
+    }
+
+    fn wm_payload(watermark_config: Option<Option<pichost_core::models::WatermarkConfig>>) -> UpdateProfileRequest {
+        UpdateProfileRequest {
+            username: None,
+            email: None,
+            storage_backend: None,
+            watermark_config,
+        }
+    }
+
+    #[test]
+    fn test_serialize_watermark_config_some() {
+        let cfg = pichost_core::models::WatermarkConfig {
+            enabled: true,
+            text: "x".into(),
+            font: "NotoSansSC-Regular".into(),
+            font_size: 48,
+            color: "rgba(255, 255, 255, 0.5)".into(),
+            rotation: -30.0,
+            scale: 0.15,
+            position: pichost_core::models::WatermarkPosition::BottomRight,
+            margin_x: 20,
+            margin_y: 20,
+        };
+        let (provided, value) = serialize_watermark_config(&wm_payload(Some(Some(cfg)))).unwrap();
+        assert!(provided);
+        assert!(value.is_some());
+    }
+
+    #[test]
+    fn test_serialize_watermark_config_clear() {
+        let (provided, value) = serialize_watermark_config(&wm_payload(Some(None))).unwrap();
+        assert!(provided);
+        assert!(value.is_none());
+    }
+
+    #[test]
+    fn test_serialize_watermark_config_absent() {
+        let (provided, value) = serialize_watermark_config(&wm_payload(None)).unwrap();
+        assert!(!provided);
+        assert!(value.is_none());
+    }
+
+    #[test]
+    fn test_verify_current_password() {
+        let hash = hash_new_password("correct-horse").unwrap();
+        assert!(verify_current_password("correct-horse", &hash).is_ok());
+        let err = verify_current_password("wrong-password", &hash).unwrap_err();
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+        let err = verify_current_password("x", "not-a-hash").unwrap_err();
+        assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn test_hash_new_password() {
+        let hash = hash_new_password("new-password-123").unwrap();
+        assert!(hash.starts_with("$argon2"));
+    }
+}

@@ -222,3 +222,57 @@ pub async fn delete_category(
     }
     Ok(StatusCode::OK)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cat(id: Uuid, parent: Option<Uuid>) -> Category {
+        Category {
+            id,
+            user_id: Uuid::new_v4(),
+            name: format!("cat-{}", id),
+            parent_id: parent,
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn test_build_tree_nested() {
+        let root = Uuid::new_v4();
+        let child = Uuid::new_v4();
+        let categories = vec![cat(child, Some(root)), cat(root, None)];
+        let tree = build_tree(categories);
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].id, root);
+        assert_eq!(tree[0].parent_id, None);
+        assert_eq!(tree[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].id, child);
+        assert_eq!(tree[0].children[0].parent_id, Some(root));
+        assert!(tree[0].children[0].children.is_empty());
+    }
+
+    #[test]
+    fn test_build_tree_no_roots() {
+        let a = Uuid::new_v4();
+        let categories = vec![cat(a, Some(Uuid::new_v4()))];
+        assert!(build_tree(categories).is_empty());
+    }
+
+    #[test]
+    fn test_build_children_filters_by_parent() {
+        let parent = Uuid::new_v4();
+        let child = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let categories = vec![cat(parent, None), cat(child, Some(parent)), cat(other, Some(Uuid::new_v4()))];
+        let children = build_children(parent, &categories);
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].id, child);
+    }
+
+    #[test]
+    fn test_error_json() {
+        let json = error_json("oops");
+        assert_eq!(json.0["error"], "oops");
+    }
+}

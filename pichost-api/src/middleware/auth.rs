@@ -131,3 +131,206 @@ pub async fn require_admin(
 
     Ok(next.run(req).await)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::middleware;
+    use axum::routing::get;
+    use axum::Router;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use tower::ServiceExt;
+
+    const SECRET: &str = "test-secret-0123456789abcdef0123456789abcdef";
+
+    fn mint_access(sub: &str, is_admin: bool, exp_offset: i64) -> String {
+        let now = chrono::Utc::now().timestamp() as usize;
+        let claims = AccessTokenClaims {
+            sub: sub.to_string(),
+            jti: Uuid::new_v4().to_string(),
+            exp: (now as i64 + exp_offset) as usize,
+            iat: now,
+            is_admin,
+            typ: "access".to_string(),
+        };
+        encode(&Header::default(), &claims, &EncodingKey::from_secret(SECRET.as_bytes())).unwrap()
+    }
+
+    #[test]
+    fn test_extract_bearer_missing() {
+        let req = Request::builder().body(Body::empty()).unwrap();
+        let err = extract_bearer_token(&req).unwrap_err();
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn test_extract_bearer_wrong_format() {
+        let req = Request::builder()
+            .header("Authorization", "Basic xyz")
+            .body(Body::empty())
+            .unwrap();
+        let err = extract_bearer_token(&req).unwrap_err();
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn test_extract_bearer_valid() {
+        let req = Request::builder()
+            .header("Authorization", "Bearer tok123")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(extract_bearer_token(&req).unwrap(), "tok123");
+    }
+
+    #[test]
+    fn test_decode_valid_token() {
+        let token = mint_access("user-1", true, 900);
+        let claims = decode_and_validate_jwt(&token, SECRET.as_bytes()).unwrap();
+        assert_eq!(claims.sub, "user-1");
+        assert!(claims.is_admin);
+        assert_eq!(claims.typ, "access");
+    }
+
+    #[test]
+    fn test_decode_garbage() {
+        let err = decode_and_validate_jwt("garbage.token.value", SECRET.as_bytes()).unwrap_err();
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn test_decode_expired() {
+        let token = mint_access("user-1", false, -100);
+        let err = decode_and_validate_jwt(&token, SECRET.as_bytes()).unwrap_err();
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+    }
+
+    fn auth_user(is_admin: bool) -> AuthUser {
+        AuthUser {
+            id: Uuid::new_v4(),
+            is_admin,
+            storage_quota: None,
+            watermark_config: None,
+        }
+    }
+
+    async fn inject_admin(mut req: Request, next: Next) -> Response {
+        req.extensions_mut().insert(auth_user(true));
+        next.run(req).await
+    }
+
+    async fn inject_non_admin(mut req: Request, next: Next) -> Response {
+        req.extensions_mut().insert(auth_user(false));
+        next.run(req).await
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_require_admin_missing_auth_user() {
+        let app = Router::new()
+            .route("/", get(|| async { "ok" }))
+            .layer(middleware::from_fn(require_admin));
+        let resp = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_require_admin_non_admin_forbidden() {
+        let app = Router::new()
+            .route("/", get(|| async { "ok" }))
+            .layer(middleware::from_fn(require_admin))
+            .layer(middleware::from_fn(inject_non_admin));
+        let resp = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_require_admin_admin_ok() {
+        let app = Router::new()
+            .route("/", get(|| async { "ok" }))
+            .layer(middleware::from_fn(require_admin))
+            .layer(middleware::from_fn(inject_admin));
+        let resp = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    fn auth_state() -> Arc<crate::app::AppState> {
+        use pichost_core::StorageRouter;
+        let mut cfg = pichost_core::config::AppConfig::default();
+        cfg.auth.jwt_secret = SECRET.to_string();
+        Arc::new(crate::app::AppState {
+            pool: sqlx::postgres::PgPoolOptions::new()
+                .max_connections(1)
+                .connect_lazy("postgres://pichost:pichost@localhost:5432/pichost")
+                .unwrap(),
+            cache: Arc::new(crate::cache::Cache::new(crate::cache::create_pool(
+                "redis://localhost:6379",
+                2,
+            ))),
+            config: Arc::new(cfg),
+            router: Arc::new(StorageRouter::new(
+                std::collections::HashMap::new(),
+                "local".into(),
+            )),
+        })
+    }
+
+    fn auth_app(state: Arc<crate::app::AppState>) -> Router {
+        Router::new()
+            .route("/", get(|| async { "ok" }))
+            .route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                require_auth,
+            ))
+            .with_state(state)
+    }
+
+    async fn hit_with_token(app: Router, token: &str) -> StatusCode {
+        app.oneshot(
+            Request::builder()
+                .uri("/")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires running PostgreSQL and Redis"]
+    async fn test_require_auth_revoked_token() {
+        let state = auth_state();
+        let token = mint_access("user-1", false, 900);
+        let claims: AccessTokenClaims = decode(
+            &token,
+            &DecodingKey::from_secret(SECRET.as_bytes()),
+            &Validation::new(Algorithm::HS256),
+        )
+        .unwrap()
+        .claims;
+        state
+            .cache
+            .set_ex(&format!("bl:{}", claims.jti), "revoked", 60)
+            .await
+            .unwrap();
+        let status = hit_with_token(auth_app(state), &token).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_require_auth_invalid_subject() {
+        let token = mint_access("not-a-uuid", false, 900);
+        let status = hit_with_token(auth_app(auth_state()), &token).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+}

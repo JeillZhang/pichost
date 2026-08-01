@@ -63,3 +63,33 @@ pub fn encode_metrics() -> String {
         .expect("encode metrics");
     String::from_utf8(buffer).expect("metrics utf8")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_encode_metrics_contains_request_counter() {
+        HTTP_REQUESTS_TOTAL.with_label_values(&["GET", "/x", "200"]).inc();
+        HTTP_REQUEST_DURATION.with_label_values(&["GET", "/x"]).observe(0.1);
+        let output = encode_metrics();
+        assert!(output.contains("pichost_http_requests_total"));
+        assert!(output.contains("pichost_http_request_duration_seconds"));
+    }
+
+    #[test]
+    fn test_metrics_families_exist() {
+        HTTP_REQUEST_DURATION.with_label_values(&["POST", "/y"]).observe(0.1);
+        UPLOADS_TOTAL.inc();
+        UPLOAD_ERRORS_TOTAL.inc();
+        TOTAL_USERS.set(1);
+        TOTAL_IMAGES.set(2);
+        TOTAL_STORAGE_BYTES.set(3);
+        let output = encode_metrics();
+        assert!(output.contains("pichost_uploads_total"));
+        assert!(output.contains("pichost_upload_errors_total"));
+        assert!(output.contains("pichost_users_total"));
+        assert!(output.contains("pichost_images_total"));
+        assert!(output.contains("pichost_storage_bytes_total"));
+    }
+}

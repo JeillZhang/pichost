@@ -235,4 +235,120 @@ mod tests {
         let u3 = url::Url::parse("https://example.com/noext").unwrap();
         assert_eq!(extract_filename_from_url_str(&u3), "noext");
     }
+
+    #[test]
+    fn test_is_private_ip_reserved_ranges() {
+        assert!(is_private_ip(&[100, 64, 0, 1]));
+        assert!(is_private_ip(&[100, 127, 255, 254]));
+        assert!(!is_private_ip(&[100, 128, 0, 1]));
+        assert!(is_private_ip(&[192, 0, 0, 1]));
+        assert!(is_private_ip(&[192, 0, 2, 1]));
+        assert!(is_private_ip(&[198, 51, 100, 1]));
+        assert!(is_private_ip(&[203, 0, 113, 1]));
+        assert!(is_private_ip(&[198, 18, 0, 1]));
+        assert!(is_private_ip(&[198, 19, 255, 255]));
+        assert!(is_private_ip(&[255, 255, 255, 255]));
+        assert!(is_private_ip(&[0, 0, 0, 0]));
+        assert!(is_private_ip(&[224, 0, 0, 1]));
+    }
+
+    #[test]
+    fn test_validate_url_scheme_no_scheme() {
+        assert!(validate_url_scheme("example.com/photo.jpg").is_err());
+    }
+
+    #[test]
+    fn test_err_helper_returns_400() {
+        let (status, json) = err("boom");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(json.0["error"], "boom");
+    }
+
+    #[test]
+    fn test_extract_filename_trailing_slash_and_root() {
+        let trailing = url::Url::parse("https://example.com/path/").unwrap();
+        assert_eq!(extract_filename_from_url_str(&trailing), "image");
+        let root = url::Url::parse("https://example.com").unwrap();
+        assert_eq!(extract_filename_from_url_str(&root), "image");
+    }
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x00";
+
+    async fn spawn_server(status: &'static str, content_length: Option<u64>, body: &'static [u8]) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = sock.read(&mut buf).await;
+            let clen = content_length.unwrap_or(body.len() as u64);
+            let head = format!(
+                "HTTP/1.1 {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                status, clen
+            );
+            let _ = sock.write_all(head.as_bytes()).await;
+            let _ = sock.write_all(body).await;
+        });
+        format!("http://{}/image.png", addr)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_resolve_and_check_host_localhost_blocked() {
+        let result = resolve_and_check_host("localhost").await;
+        let (status, json) = result.unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(json.0["error"].as_str().unwrap().contains("SSRF"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_download_client_ok() {
+        assert!(build_download_client().is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_fetch_remote_body_happy_path() {
+        let url = spawn_server("200 OK", None, PNG).await;
+        let client = build_download_client().unwrap();
+        let bytes = fetch_remote_body(&client, &url).await.unwrap();
+        assert_eq!(bytes, PNG);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_fetch_remote_body_garbage() {
+        let url = spawn_server("200 OK", None, b"not an image").await;
+        let client = build_download_client().unwrap();
+        let (status, json) = fetch_remote_body(&client, &url).await.unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(json.0["error"].as_str().unwrap().contains("not a valid image"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_fetch_remote_body_404() {
+        let url = spawn_server("404 Not Found", None, b"nope").await;
+        let client = build_download_client().unwrap();
+        let (_, json) = fetch_remote_body(&client, &url).await.unwrap_err();
+        assert!(json.0["error"].as_str().unwrap().contains("404"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_fetch_remote_body_oversized() {
+        let url = spawn_server("200 OK", Some(MAX_BODY_SIZE + 1), b"x").await;
+        let client = build_download_client().unwrap();
+        let (_, json) = fetch_remote_body(&client, &url).await.unwrap_err();
+        assert!(json.0["error"].as_str().unwrap().contains("maximum size"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_fetch_image_from_url_rejects_private_ip() {
+        let result = fetch_image_from_url("http://127.0.0.1:1/x.png").await;
+        let (status, json) = result.unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(json.0["error"].as_str().unwrap().contains("SSRF"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_fetch_image_from_url_rejects_ftp() {
+        assert!(fetch_image_from_url("ftp://example.com/x.png").await.is_err());
+    }
 }
