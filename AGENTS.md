@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.17.1` — P4-I complete. System config management (admin config API + config.toml read/write), Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI).
+- Version: `0.17.3` — P4-I complete. System config management (admin config API + config.toml read/write), Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI).
 
 ## Key Commands
 
