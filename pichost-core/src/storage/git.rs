@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use reqwest::header::{AUTHORIZATION, USER_AGENT};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::Utc;
+use reqwest::header::{AUTHORIZATION, USER_AGENT};
 
-use crate::error::StorageError;
 use super::StorageBackend;
+use crate::error::StorageError;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GitProvider {
@@ -62,13 +62,7 @@ impl GitStorage {
     fn build_path(&self, key: &str, ext: &str) -> String {
         let now = Utc::now();
         let prefix = self.path_prefix.as_deref().unwrap_or("pichost");
-        format!(
-            "{}/{}/{}.{}",
-            prefix,
-            now.format("%Y/%m/%d"),
-            key,
-            ext,
-        )
+        format!("{}/{}/{}.{}", prefix, now.format("%Y/%m/%d"), key, ext,)
     }
 
     fn contents_url(&self, path: &str) -> String {
@@ -101,6 +95,65 @@ impl GitStorage {
     fn build_commit_message(key: &str) -> String {
         format!("Upload {}", key)
     }
+
+    fn check_gitcode_size_limit(&self, data: &[u8]) -> Result<(), StorageError> {
+        if self.provider == GitProvider::GitCode && data.len() > Self::GITCODE_MAX_CONTENTS_BYTES {
+            return Err(StorageError::PayloadTooLarge(
+                "文件超过GitCode 20MB限制，请改用本地存储或GitHub".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn build_contents_body(&self, key: &str, data: &[u8]) -> serde_json::Value {
+        serde_json::json!({
+            "message": Self::build_commit_message(key),
+            "content": BASE64.encode(data),
+            "branch": self.branch,
+        })
+    }
+
+    async fn send_contents_request(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<reqwest::Response, StorageError> {
+        let method = match self.provider {
+            GitProvider::GitHub => reqwest::Method::PUT,
+            GitProvider::GitCode => reqwest::Method::POST,
+        };
+        self.client
+            .request(method, self.contents_url(path))
+            .header(AUTHORIZATION, format!("Bearer {}", self.token))
+            .header(USER_AGENT, "pichost/0.15.0")
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| StorageError::WriteFailed(e.to_string()))
+    }
+
+    async fn map_put_response(resp: reqwest::Response, path: &str) -> Result<String, StorageError> {
+        if resp.status().is_success() || resp.status().as_u16() == 201 {
+            return Ok(path.to_string());
+        }
+        if resp.status().as_u16() == 429 {
+            let retry = resp
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("60");
+            return Err(StorageError::WriteFailed(format!(
+                "速率受限，请在{}秒后重试",
+                retry
+            )));
+        }
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        Err(StorageError::WriteFailed(format!(
+            "Git API 错误 ({}): {}",
+            status, body
+        )))
+    }
 }
 
 #[async_trait]
@@ -112,68 +165,18 @@ impl StorageBackend for GitStorage {
         }
     }
 
-    async fn put(&self, key: &str, data: &[u8], content_type: &str) -> Result<String, StorageError> {
-        let ext = Self::mime_to_ext(content_type);
-        let path = self.build_path(key, ext);
-        let base64_content = BASE64.encode(data);
-        let commit_msg = Self::build_commit_message(key);
+    async fn put(
+        &self,
+        key: &str,
+        data: &[u8],
+        content_type: &str,
+    ) -> Result<String, StorageError> {
+        let path = self.build_path(key, Self::mime_to_ext(content_type));
+        self.check_gitcode_size_limit(data)?;
 
-        // GitCode: check size limit
-        if self.provider == GitProvider::GitCode && data.len() > Self::GITCODE_MAX_CONTENTS_BYTES {
-            return Err(StorageError::PayloadTooLarge(
-                "文件超过GitCode 20MB限制，请改用本地存储或GitHub".into(),
-            ));
-        }
-
-        let http_method = match self.provider {
-            GitProvider::GitHub => "PUT",
-            GitProvider::GitCode => "POST",
-        };
-
-        let url = self.contents_url(&path);
-        let body = serde_json::json!({
-            "message": commit_msg,
-            "content": base64_content,
-            "branch": self.branch,
-        });
-
-        let resp = self
-            .client
-            .request(
-                match http_method {
-                    "PUT" => reqwest::Method::PUT,
-                    _ => reqwest::Method::POST,
-                },
-                &url,
-            )
-            .header(AUTHORIZATION, format!("Bearer {}", self.token))
-            .header(USER_AGENT, "pichost/0.15.0")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
-
-        if resp.status().is_success() || resp.status().as_u16() == 201 {
-            Ok(path)
-        } else if resp.status().as_u16() == 429 {
-            let retry = resp
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("60");
-            Err(StorageError::WriteFailed(format!(
-                "速率受限，请在{}秒后重试",
-                retry
-            )))
-        } else {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            Err(StorageError::WriteFailed(format!(
-                "Git API 错误 ({}): {}",
-                status,
-                body
-            )))
-        }
+        let body = self.build_contents_body(key, data);
+        let resp = self.send_contents_request(&path, &body).await?;
+        Self::map_put_response(resp, &path).await
     }
 
     async fn get(&self, key: &str) -> Result<Vec<u8>, StorageError> {

@@ -137,18 +137,13 @@ async fn check_invite_code(
     is_first_user: bool,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     if !is_first_user {
-        let code = invite_code.ok_or_else(|| {
-            error_response(StatusCode::BAD_REQUEST, "invite code is required")
-        })?;
+        let code = invite_code
+            .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "invite code is required"))?;
 
-        match state
-            .cache
-            .verify_invite_code(code)
-            .await
-            .map_err(|e| {
-                tracing::warn!("Invite code verification failed: {e}");
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
-            })? {
+        match state.cache.verify_invite_code(code).await.map_err(|e| {
+            tracing::warn!("Invite code verification failed: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        })? {
             cache::InviteVerifyResult::Valid => {}
             cache::InviteVerifyResult::Used => {
                 return Err(error_response(
@@ -173,9 +168,7 @@ async fn check_invite_code(
     Ok(())
 }
 
-fn hash_password(
-    password: &str,
-) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+fn hash_password(password: &str) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
         .hash_password(password.as_bytes(), &salt)
@@ -257,15 +250,45 @@ pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
+    validate_register_payload(&payload)?;
+    let user_count = count_existing_users(&state.pool).await?;
+    let is_first_user = user_count == 0;
+    check_invite_code(&state, payload.invite_code.as_deref(), is_first_user).await?;
+    let (user_id, access_token, refresh_token, storage_quota) =
+        create_user_and_tokens(&state, &payload, is_first_user).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(AuthResponse {
+            access_token,
+            refresh_token,
+            user: UserInfo {
+                id: user_id,
+                username: payload.username,
+                email: payload.email,
+                is_admin: is_first_user,
+                storage_quota,
+            },
+        }),
+    ))
+}
+
+fn validate_register_payload(
+    payload: &RegisterRequest,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     if payload.password.len() < 6 {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
             "password must be at least 6 characters",
         ));
     }
-    let user_count = count_existing_users(&state.pool).await?;
-    let is_first_user = user_count == 0;
-    check_invite_code(&state, payload.invite_code.as_deref(), is_first_user).await?;
+    Ok(())
+}
+
+async fn create_user_and_tokens(
+    state: &AppState,
+    payload: &RegisterRequest,
+    is_first_user: bool,
+) -> Result<(Uuid, String, String, Option<i64>), (StatusCode, Json<serde_json::Value>)> {
     let hash = hash_password(&payload.password)?;
     let storage_quota = if state.config.upload.storage_quota_default > 0 {
         Some(state.config.upload.storage_quota_default as i64)
@@ -273,7 +296,12 @@ pub async fn register(
         None
     };
     let user_id: Uuid = insert_user(
-        &state, &payload.username, &payload.email, &hash, is_first_user, storage_quota,
+        state,
+        &payload.username,
+        &payload.email,
+        &hash,
+        is_first_user,
+        storage_quota,
     )
     .await?;
     if !is_first_user {
@@ -292,17 +320,7 @@ pub async fn register(
             tracing::warn!("JWT generation failed: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         })?;
-    Ok((
-        StatusCode::CREATED,
-        Json(AuthResponse {
-            access_token,
-            refresh_token,
-            user: UserInfo {
-                id: user_id, username: payload.username, email: payload.email,
-                is_admin: is_first_user, storage_quota,
-            },
-        }),
-    ))
+    Ok((user_id, access_token, refresh_token, storage_quota))
 }
 
 pub async fn login(
@@ -358,7 +376,8 @@ pub async fn login(
 async fn lookup_user_for_refresh(
     pool: &sqlx::PgPool,
     sub: &str,
-) -> Result<(Uuid, String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(Uuid, String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)>
+{
     let user_id: Uuid = sub
         .parse()
         .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid token subject"))?;

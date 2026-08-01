@@ -11,7 +11,9 @@ use uuid::Uuid;
 
 use pichost_core::StorageRouter;
 
-fn deserialize_optional_jsonb<'de, D>(deserializer: D) -> Result<Option<Option<serde_json::Value>>, D::Error>
+fn deserialize_optional_jsonb<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<serde_json::Value>>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -143,11 +145,11 @@ struct StatsCacheParams {
 fn map_user_rows(rows: Vec<UserRow>) -> Vec<UserInfo> {
     rows.into_iter()
         .map(
-            |(id, username, email, _is_admin, _storage_backend, _created_at, storage_quota, _watermark_config)| UserInfo {
+            |(id, username, email, is_admin, _, _, storage_quota, _)| UserInfo {
                 id,
                 username,
                 email,
-                is_admin: _is_admin,
+                is_admin,
                 storage_quota,
             },
         )
@@ -204,7 +206,10 @@ async fn execute_user_update(params: UserUpdateParams<'_>) -> Result<(), AdminEr
         .await
         .map_err(|e| {
             tracing::warn!("Admin update user (with pw) failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal error"})),
+            )
         })?;
     } else {
         sqlx::query(
@@ -223,19 +228,31 @@ async fn execute_user_update(params: UserUpdateParams<'_>) -> Result<(), AdminEr
         .await
         .map_err(|e| {
             tracing::warn!("Admin update user failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal error"})),
+            )
         })?;
     }
     Ok(())
 }
 
-async fn fetch_and_merge_user_fields(
+type UserFields = (
+    String,
+    Option<String>,
+    bool,
+    String,
+    Option<i64>,
+    Option<serde_json::Value>,
+);
+
+async fn fetch_user_fields(
     pool: &DbPool,
     user_id: Uuid,
-    body: &UpdateUserBody,
-) -> Result<(String, Option<String>, bool, String, Option<i64>, Option<serde_json::Value>), AdminError> {
-    let existing = sqlx::query_as::<_, (String, Option<String>, bool, String, Option<i64>, Option<serde_json::Value>)>(
-        r#"SELECT username, email, is_admin, storage_backend, storage_quota, watermark_config FROM users WHERE id = $1"#,
+) -> Result<UserFields, AdminError> {
+    sqlx::query_as::<_, UserFields>(
+        "SELECT username, email, is_admin, storage_backend, storage_quota, watermark_config \
+         FROM users WHERE id = $1",
     )
     .bind(user_id)
     .fetch_optional(pool)
@@ -252,8 +269,10 @@ async fn fetch_and_merge_user_fields(
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "user not found"})),
         )
-    })?;
+    })
+}
 
+fn merge_user_fields(body: &UpdateUserBody, existing: UserFields) -> UserFields {
     let (username, email, is_admin, storage_backend, storage_quota, watermark_config) = existing;
     let new_username = body.username.clone().unwrap_or(username);
     let new_email = body.email.clone().or(email);
@@ -269,8 +288,23 @@ async fn fetch_and_merge_user_fields(
         Some(None) => None,
         None => watermark_config,
     };
+    (
+        new_username,
+        new_email,
+        new_is_admin,
+        new_storage_backend,
+        new_storage_quota,
+        new_watermark_config,
+    )
+}
 
-    Ok((new_username, new_email, new_is_admin, new_storage_backend, new_storage_quota, new_watermark_config))
+async fn fetch_and_merge_user_fields(
+    pool: &DbPool,
+    user_id: Uuid,
+    body: &UpdateUserBody,
+) -> Result<UserFields, AdminError> {
+    let existing = fetch_user_fields(pool, user_id).await?;
+    Ok(merge_user_fields(body, existing))
 }
 
 // ── delete_user helpers ────────────────────────────────────────────────
@@ -365,10 +399,17 @@ fn try_parse_cached_stats(stats_map: &HashMap<String, String>) -> Option<AdminSt
     let total_users: i64 = stats_map.get("total_users")?.parse().ok()?;
     let total_images: i64 = stats_map.get("total_images")?.parse().ok()?;
     let total_size: i64 = stats_map.get("total_size")?.parse().ok()?;
-    let active_users_24h: i64 = stats_map.get("active_users_24h")
-        .and_then(|v| v.parse().ok()).unwrap_or(0);
+    let active_users_24h: i64 = stats_map
+        .get("active_users_24h")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
 
-    let parse = |k: &str, fallback| stats_map.get(k).and_then(|v| v.parse().ok()).unwrap_or(fallback);
+    let parse = |k: &str, fallback| {
+        stats_map
+            .get(k)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(fallback)
+    };
     let local = BackendStats {
         total_images: parse("local_images", total_images),
         total_size: parse("local_size", total_size),
@@ -393,7 +434,14 @@ fn try_parse_cached_stats(stats_map: &HashMap<String, String>) -> Option<AdminSt
     TOTAL_IMAGES.set(total_images);
     TOTAL_STORAGE_BYTES.set(total_size);
 
-    Some(AdminStats { total_users, total_images, total_size, active_users_24h, total_quota, storage_backends: backends })
+    Some(AdminStats {
+        total_users,
+        total_images,
+        total_size,
+        active_users_24h,
+        total_quota,
+        storage_backends: backends,
+    })
 }
 
 async fn query_total_users(pool: &DbPool) -> Result<i64, AdminError> {
@@ -475,35 +523,53 @@ async fn query_backend_stats(
 
 async fn populate_stats_cache(cache: &Cache, params: StatsCacheParams) {
     let StatsCacheParams {
-        total_users, total_images, total_size, active_users_24h, total_quota,
-        local_images, local_size, rustfs_size,
+        total_users,
+        total_images,
+        total_size,
+        active_users_24h,
+        total_quota,
+        local_images,
+        local_size,
+        rustfs_size,
     } = params;
     // Overwrite (HSET) — the cache is repopulated from DB on every miss,
     // so accumulating with HINCRBY would double-count.
     let _ = cache
-        .set_user_stats(&uuid::Uuid::nil(), &[
-            ("total_users", Some(total_users)),
-            ("total_images", Some(total_images)),
-            ("total_size", Some(total_size)),
-            ("active_users_24h", Some(active_users_24h)),
-            ("total_quota", total_quota),
-            ("local_images", Some(local_images)),
-            ("local_size", Some(local_size)),
-            ("rustfs_size", Some(rustfs_size)),
-        ])
+        .set_user_stats(
+            &uuid::Uuid::nil(),
+            &[
+                ("total_users", Some(total_users)),
+                ("total_images", Some(total_images)),
+                ("total_size", Some(total_size)),
+                ("active_users_24h", Some(active_users_24h)),
+                ("total_quota", total_quota),
+                ("local_images", Some(local_images)),
+                ("local_size", Some(local_size)),
+                ("rustfs_size", Some(rustfs_size)),
+            ],
+        )
         .await;
 }
 
-fn build_backends_map(local: &BackendStats, rustfs: &BackendStats) -> HashMap<String, BackendStats> {
+fn build_backends_map(
+    local: &BackendStats,
+    rustfs: &BackendStats,
+) -> HashMap<String, BackendStats> {
     let mut m = HashMap::new();
-    m.insert("local".into(), BackendStats {
-        total_images: local.total_images,
-        total_size: local.total_size,
-    });
-    m.insert("rustfs".into(), BackendStats {
-        total_images: rustfs.total_images,
-        total_size: rustfs.total_size,
-    });
+    m.insert(
+        "local".into(),
+        BackendStats {
+            total_images: local.total_images,
+            total_size: local.total_size,
+        },
+    );
+    m.insert(
+        "rustfs".into(),
+        BackendStats {
+            total_images: rustfs.total_images,
+            total_size: rustfs.total_size,
+        },
+    );
     m
 }
 
@@ -515,7 +581,9 @@ fn mask_url(url: &str) -> String {
 }
 
 fn config_file_path() -> std::path::PathBuf {
-    std::env::current_dir().unwrap_or_default().join("config.toml")
+    std::env::current_dir()
+        .unwrap_or_default()
+        .join("config.toml")
 }
 
 fn internal_error(msg: String) -> AdminError {
@@ -599,8 +667,14 @@ pub async fn update_user(
         ));
     }
 
-    let (new_username, new_email, new_is_admin, new_storage_backend, new_storage_quota, new_watermark_config) =
-        fetch_and_merge_user_fields(&state.pool, user_id, &body).await?;
+    let (
+        new_username,
+        new_email,
+        new_is_admin,
+        new_storage_backend,
+        new_storage_quota,
+        new_watermark_config,
+    ) = fetch_and_merge_user_fields(&state.pool, user_id, &body).await?;
 
     let password_hash = hash_password_if_provided(&body.password).await?;
 
@@ -644,7 +718,8 @@ pub async fn delete_user(
 
     verify_user_exists(&state.pool, user_id).await?;
 
-    let images_deleted = collect_and_cleanup_storage_files(&state.router, &state.pool, user_id).await?;
+    let images_deleted =
+        collect_and_cleanup_storage_files(&state.router, &state.pool, user_id).await?;
 
     // Delete from DB (cascade handles images)
     delete_user_from_db(&state.pool, user_id).await?;
@@ -710,12 +785,20 @@ pub async fn get_admin_stats(
     };
 
     // Populate cache (best-effort)
-    populate_stats_cache(&state.cache, StatsCacheParams {
-        total_users, total_images, total_size, active_users_24h, total_quota,
-        local_images: local_stats.total_images,
-        local_size: local_stats.total_size,
-        rustfs_size: rustfs_stats.total_size,
-    }).await;
+    populate_stats_cache(
+        &state.cache,
+        StatsCacheParams {
+            total_users,
+            total_images,
+            total_size,
+            active_users_24h,
+            total_quota,
+            local_images: local_stats.total_images,
+            local_size: local_stats.total_size,
+            rustfs_size: rustfs_stats.total_size,
+        },
+    )
+    .await;
 
     TOTAL_USERS.set(stats.total_users);
     TOTAL_IMAGES.set(stats.total_images);
@@ -792,7 +875,9 @@ pub async fn get_admin_config() -> Result<Json<ConfigResponse>, AdminError> {
         },
         public_url: cfg.public_url.unwrap_or_else(|| "not set".into()),
         default_backend: cfg.default_backend.unwrap_or_else(|| "local".into()),
-        local_base_path: cfg.local_base_path.unwrap_or_else(|| "./storage-local".into()),
+        local_base_path: cfg
+            .local_base_path
+            .unwrap_or_else(|| "./storage-local".into()),
         config_path: path.display().to_string(),
     }))
 }

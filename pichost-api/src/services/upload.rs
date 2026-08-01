@@ -79,11 +79,9 @@ impl UploadResult {
     /// bbcode link formats from original_name + url.
     pub(crate) fn from_row(row: ImageRow) -> Self {
         let storage_config = match (row.storage_config_id, row.name, row.provider) {
-            (Some(id), Some(name), Some(provider)) => Some(StorageConfigInfo {
-                id,
-                name,
-                provider,
-            }),
+            (Some(id), Some(name), Some(provider)) => {
+                Some(StorageConfigInfo { id, name, provider })
+            }
             _ => None,
         };
         let markdown = format!("![{}]({})", row.original_name, row.url);
@@ -142,10 +140,18 @@ pub struct ImageListQuery {
     pub category_id: Option<Uuid>,
 }
 
-fn default_page() -> u32 { 1 }
-fn default_per_page() -> u32 { 20 }
-fn default_sort() -> String { "created_at".to_string() }
-fn default_order() -> String { "desc".to_string() }
+fn default_page() -> u32 {
+    1
+}
+fn default_per_page() -> u32 {
+    20
+}
+fn default_sort() -> String {
+    "created_at".to_string()
+}
+fn default_order() -> String {
+    "desc".to_string()
+}
 
 /// Paginated response envelope
 #[derive(Debug, Serialize)]
@@ -186,33 +192,39 @@ async fn enqueue_processing_task(
         payload["storage_config_id"] = serde_json::Value::String(cid.to_string());
     }
 
-    let pool_err = |e: deadpool_redis::PoolError| {
-        tracing::warn!("redis pool error during enqueue: {e}");
-    };
-
     let mut conn = match redis_pool.get().await {
         Ok(c) => c,
         Err(e) => {
-            pool_err(e);
+            tracing::warn!("redis pool error during enqueue: {e}");
             return;
         }
     };
 
     let payload_json = serde_json::to_string(&payload).unwrap_or_default();
-    let now = chrono::Utc::now().to_rfc3339();
     let task_key = format!("pichost:task:{task_id}");
+    push_task_to_redis(&mut conn, &task_key, task_id, &payload_json).await;
 
+    tracing::info!(%task_id, %image_id, "enqueued processing task");
+}
+
+/// Stores task metadata as a Redis hash and pushes the task id onto the
+/// pending queue. Redis errors are logged and swallowed (non-fatal).
+async fn push_task_to_redis(
+    conn: &mut deadpool_redis::Connection,
+    task_key: &str,
+    task_id: Uuid,
+    payload_json: &str,
+) {
+    let now = chrono::Utc::now().to_rfc3339();
     // Store task data hash — field names must match queue.rs convention
-    let _: Result<(), _> = conn.hset(&task_key, "data", &payload_json).await;
-    let _: Result<(), _> = conn.hset(&task_key, "status", "pending").await;
-    let _: Result<(), _> = conn.hset(&task_key, "created_at", &now).await;
-    let _: Result<(), _> = conn.hset(&task_key, "updated_at", &now).await;
+    let _: Result<(), _> = conn.hset(task_key, "data", payload_json).await;
+    let _: Result<(), _> = conn.hset(task_key, "status", "pending").await;
+    let _: Result<(), _> = conn.hset(task_key, "created_at", &now).await;
+    let _: Result<(), _> = conn.hset(task_key, "updated_at", &now).await;
     // Push to pending queue
     let _: Result<(), _> = conn
         .lpush("pichost:tasks:pending", task_id.to_string())
         .await;
-
-    tracing::info!(%task_id, %image_id, "enqueued processing task");
 }
 
 // ── Private helpers ────────────────────────────────────────────────────────
@@ -302,7 +314,22 @@ async fn try_dedup(
     sha256: &str,
     storage_config_id: Option<Uuid>,
 ) -> Result<Option<UploadResult>, ApiError> {
-    let exists: bool = sqlx::query_scalar(
+    if !dedup_exists(state, user_id, sha256, storage_config_id).await? {
+        return Ok(None);
+    }
+    let row = fetch_dedup_row(state, user_id, sha256, storage_config_id).await?;
+    Ok(Some(UploadResult::from_row(row)))
+}
+
+/// Returns whether an image with the same sha256 already exists for this
+/// user and storage config.
+async fn dedup_exists(
+    state: &AppState,
+    user_id: Uuid,
+    sha256: &str,
+    storage_config_id: Option<Uuid>,
+) -> Result<bool, ApiError> {
+    sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM images \
          WHERE user_id=$1 AND sha256=$2 \
            AND storage_config_id IS NOT DISTINCT FROM $3)",
@@ -318,13 +345,17 @@ async fn try_dedup(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "internal server error"})),
         )
-    })?;
+    })
+}
 
-    if !exists {
-        return Ok(None);
-    }
-
-    let row = sqlx::query_as::<_, ImageRow>(
+/// Fetches the existing duplicate image row (with its storage config join).
+async fn fetch_dedup_row(
+    state: &AppState,
+    user_id: Uuid,
+    sha256: &str,
+    storage_config_id: Option<Uuid>,
+) -> Result<ImageRow, ApiError> {
+    sqlx::query_as::<_, ImageRow>(
         "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size, \
          i.sha256, i.width, i.height, i.status, i.thumbnail_url, i.webp_url, \
          i.created_at, i.category_id, i.storage_config_id, \
@@ -345,9 +376,7 @@ async fn try_dedup(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "internal server error"})),
         )
-    })?;
-
-    Ok(Some(UploadResult::from_row(row)))
+    })
 }
 
 /// Generates a collision-free 6-char hex public key.
@@ -430,38 +459,60 @@ async fn resolve_upload_configs(
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        let configs = sqlx::query_as::<_, UserStorageConfig>(
-            "SELECT id, user_id, name, provider, is_default, \
-             config, created_at, updated_at \
-             FROM user_storage_configs \
-             WHERE id = ANY($1) AND user_id = $2 \
-             ORDER BY created_at",
-        )
-        .bind(&ids)
-        .bind(user_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Failed to resolve upload configs: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
-            )
-        })?;
-
-        if configs.is_empty() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": "storage_config_ids: no matching configs found"
-                })),
-            ));
-        }
-        return Ok(configs);
+        return fetch_configs_by_ids(pool, user_id, &ids).await;
     }
 
     // Backward compat: use user's default config, or local fallback
-    let config = sqlx::query_as::<_, UserStorageConfig>(
+    if let Some(config) = fetch_default_config(pool, user_id).await? {
+        return Ok(vec![config]);
+    }
+
+    // No configs exist — synthesize a local pseudo-config
+    Ok(vec![local_fallback_config(user_id)])
+}
+
+/// Loads the user's configs matching the given ids, erroring when none match.
+async fn fetch_configs_by_ids(
+    pool: &PgPool,
+    user_id: Uuid,
+    ids: &[Uuid],
+) -> Result<Vec<UserStorageConfig>, ApiError> {
+    let configs = sqlx::query_as::<_, UserStorageConfig>(
+        "SELECT id, user_id, name, provider, is_default, \
+         config, created_at, updated_at \
+         FROM user_storage_configs \
+         WHERE id = ANY($1) AND user_id = $2 \
+         ORDER BY created_at",
+    )
+    .bind(ids)
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Failed to resolve upload configs: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "internal server error"})),
+        )
+    })?;
+
+    if configs.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "storage_config_ids: no matching configs found"
+            })),
+        ));
+    }
+    Ok(configs)
+}
+
+/// Loads the user's default storage config, if one exists.
+async fn fetch_default_config(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Option<UserStorageConfig>, ApiError> {
+    sqlx::query_as::<_, UserStorageConfig>(
         "SELECT id, user_id, name, provider, is_default, \
          config, created_at, updated_at \
          FROM user_storage_configs \
@@ -476,14 +527,12 @@ async fn resolve_upload_configs(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "internal server error"})),
         )
-    })?;
+    })
+}
 
-    if let Some(c) = config {
-        return Ok(vec![c]);
-    }
-
-    // No configs exist — synthesize a local pseudo-config
-    Ok(vec![UserStorageConfig {
+/// Synthesizes a local pseudo-config used when the user has no configs.
+fn local_fallback_config(user_id: Uuid) -> UserStorageConfig {
+    UserStorageConfig {
         id: Uuid::nil(),
         user_id,
         name: "Local Storage".into(),
@@ -492,7 +541,7 @@ async fn resolve_upload_configs(
         config: serde_json::json!({}),
         created_at: Utc::now(),
         updated_at: Utc::now(),
-    }])
+    }
 }
 
 /// Validate upload configs: max 2 configs, at least one must be "local".
@@ -617,13 +666,16 @@ async fn persist_image_for_config(
     height: Option<i32>,
     sha256: &str,
 ) -> Result<(Uuid, String, String, String, String), ApiError> {
-    let storage = state.router.for_config(config, encryption_key).map_err(|e| {
-        tracing::warn!("Failed to resolve backend for config {}: {e}", config.id);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "failed to resolve storage backend"})),
-        )
-    })?;
+    let storage = state
+        .router
+        .for_config(config, encryption_key)
+        .map_err(|e| {
+            tracing::warn!("Failed to resolve backend for config {}: {e}", config.id);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "failed to resolve storage backend"})),
+            )
+        })?;
 
     let public_key = generate_public_key(state).await?;
 
@@ -644,7 +696,11 @@ async fn persist_image_for_config(
     } else {
         config.id.to_string()
     };
-    let db_config_id = if config.id.is_nil() { None } else { Some(config.id) };
+    let db_config_id = if config.id.is_nil() {
+        None
+    } else {
+        Some(config.id)
+    };
 
     let image_id = insert_image_record(
         &state.pool,
@@ -736,19 +792,30 @@ async fn upload_to_single_backend(
     width: Option<i32>,
     height: Option<i32>,
 ) -> Result<UploadResult, ApiError> {
-    let config_id = if config.id.is_nil() { None } else { Some(config.id) };
+    let config_id = if config.id.is_nil() {
+        None
+    } else {
+        Some(config.id)
+    };
 
     // Deduplicate per config
     if let Some(existing) = try_dedup(state, user.id, sha256, config_id).await? {
         return Ok(existing);
     }
 
-    let (image_id, storage_key, backend_name, public_key, url) =
-        persist_image_for_config(
-            state, user, config, encryption_key,
-            file_name, bytes, mime_type, width, height, sha256,
-        )
-        .await?;
+    let (image_id, storage_key, backend_name, public_key, url) = persist_image_for_config(
+        state,
+        user,
+        config,
+        encryption_key,
+        file_name,
+        bytes,
+        mime_type,
+        width,
+        height,
+        sha256,
+    )
+    .await?;
 
     enqueue_processing_task(
         &state.cache.get_pool(),
@@ -805,30 +872,81 @@ pub async fn process_upload(
     let mime_type = detect_mime(&bytes);
     let (width, height) = image_dimensions(&bytes);
 
-    let mut results = Vec::with_capacity(configs.len());
+    let ctx = UploadCtx {
+        state,
+        user,
+        encryption_key: &encryption_key,
+        bytes: &bytes,
+        file_name: &file_name,
+        sha256: &sha256,
+        mime_type: &mime_type,
+        width,
+        height,
+    };
+    run_backend_uploads(&ctx, &configs).await
+}
 
+/// Shared upload parameters passed to `run_backend_uploads`.
+struct UploadCtx<'a> {
+    state: &'a AppState,
+    user: &'a AuthUser,
+    encryption_key: &'a [u8; 32],
+    bytes: &'a [u8],
+    file_name: &'a str,
+    sha256: &'a str,
+    mime_type: &'a str,
+    width: Option<i32>,
+    height: Option<i32>,
+}
+
+/// Runs the upload against 1-2 storage configs, uploading the second config
+/// in parallel when two are configured.
+async fn run_backend_uploads(
+    ctx: &UploadCtx<'_>,
+    configs: &[UserStorageConfig],
+) -> Result<Vec<UploadResult>, ApiError> {
     if configs.len() == 1 {
         let result = upload_to_single_backend(
-            state, user, &configs[0], &encryption_key,
-            &bytes, &file_name, &sha256, &mime_type, width, height,
+            ctx.state,
+            ctx.user,
+            &configs[0],
+            ctx.encryption_key,
+            ctx.bytes,
+            ctx.file_name,
+            ctx.sha256,
+            ctx.mime_type,
+            ctx.width,
+            ctx.height,
         )
         .await?;
-        results.push(result);
-    } else if configs.len() >= 2 {
-        let fut0 = upload_to_single_backend(
-            state, user, &configs[0], &encryption_key,
-            &bytes, &file_name, &sha256, &mime_type, width, height,
-        );
-        let fut1 = upload_to_single_backend(
-            state, user, &configs[1], &encryption_key,
-            &bytes, &file_name, &sha256, &mime_type, width, height,
-        );
-        let (r0, r1) = tokio::join!(fut0, fut1);
-        results.push(r0?);
-        results.push(r1?);
+        return Ok(vec![result]);
     }
-
-    Ok(results)
+    let fut0 = upload_to_single_backend(
+        ctx.state,
+        ctx.user,
+        &configs[0],
+        ctx.encryption_key,
+        ctx.bytes,
+        ctx.file_name,
+        ctx.sha256,
+        ctx.mime_type,
+        ctx.width,
+        ctx.height,
+    );
+    let fut1 = upload_to_single_backend(
+        ctx.state,
+        ctx.user,
+        &configs[1],
+        ctx.encryption_key,
+        ctx.bytes,
+        ctx.file_name,
+        ctx.sha256,
+        ctx.mime_type,
+        ctx.width,
+        ctx.height,
+    );
+    let (r0, r1) = tokio::join!(fut0, fut1);
+    Ok(vec![r0?, r1?])
 }
 
 // ── Gallery queries ────────────────────────────────────────────────────────
@@ -844,29 +962,33 @@ pub async fn list_user_images(
     let offset = ((page - 1) * per_page) as i64;
     let limit = per_page as i64;
 
-    let sort_col = match query.sort.as_str() {
-        "created_at" | "file_size" | "original_name" => query.sort.as_str(),
-        _ => "created_at",
-    };
-    let order_dir = match query.order.as_str() {
-        "asc" | "ASC" => "ASC",
-        _ => "DESC",
-    };
+    let sort_col = normalize_sort(query.sort.as_str());
+    let order_dir = normalize_order(query.order.as_str());
 
     let search_term = query.search.trim();
-    let total = count_user_images(pool, user_id, search_term, query.storage_config_id, query.category_id).await?;
+    let total = count_user_images(
+        pool,
+        user_id,
+        search_term,
+        query.storage_config_id,
+        query.category_id,
+    )
+    .await?;
     let rows = fetch_user_images(
-        pool, user_id, sort_col, order_dir, search_term, limit, offset,
-        query.storage_config_id, query.category_id,
+        pool,
+        user_id,
+        sort_col,
+        order_dir,
+        search_term,
+        limit,
+        offset,
+        query.storage_config_id,
+        query.category_id,
     )
     .await?;
     let items: Vec<UploadResult> = rows.into_iter().map(UploadResult::from_row).collect();
 
-    let total_pages = if total == 0 {
-        1
-    } else {
-        ((total as f64) / (per_page as f64)).ceil() as u32
-    };
+    let total_pages = calc_total_pages(total, per_page);
 
     Ok(ImageListResponse {
         items,
@@ -877,6 +999,53 @@ pub async fn list_user_images(
     })
 }
 
+/// Normalizes the sort field to one of the whitelisted column names.
+fn normalize_sort(sort: &str) -> &str {
+    match sort {
+        "created_at" | "file_size" | "original_name" => sort,
+        _ => "created_at",
+    }
+}
+
+/// Normalizes the sort order to ASC or DESC.
+fn normalize_order(order: &str) -> &'static str {
+    match order {
+        "asc" | "ASC" => "ASC",
+        _ => "DESC",
+    }
+}
+
+/// Computes the total page count for a gallery listing.
+fn calc_total_pages(total: i64, per_page: u32) -> u32 {
+    if total == 0 {
+        1
+    } else {
+        ((total as f64) / (per_page as f64)).ceil() as u32
+    }
+}
+
+/// Appends search / storage-config / category WHERE clauses (in that order)
+/// to a gallery query builder. Empty filters are skipped.
+fn push_optional_filters(
+    builder: &mut sqlx::QueryBuilder<'_, sqlx::Postgres>,
+    search_term: &str,
+    config_id: Option<Uuid>,
+    category_id: Option<Uuid>,
+) {
+    if !search_term.is_empty() {
+        builder.push(" AND original_name ILIKE ");
+        builder.push_bind(format!("%{search_term}%"));
+    }
+    if let Some(cid) = config_id {
+        builder.push(" AND storage_config_id = ");
+        builder.push_bind(cid);
+    }
+    if let Some(cat_id) = category_id {
+        builder.push(" AND category_id = ");
+        builder.push_bind(cat_id);
+    }
+}
+
 async fn count_user_images(
     pool: &PgPool,
     user_id: Uuid,
@@ -884,177 +1053,60 @@ async fn count_user_images(
     config_id: Option<Uuid>,
     category_id: Option<Uuid>,
 ) -> Result<i64, ApiError> {
-    let log_err = |e: sqlx::Error| {
-        tracing::warn!("Image count query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
-    };
-    if let Some(cid) = config_id {
-        if let Some(cat_id) = category_id {
-            if search_term.is_empty() {
-                sqlx::query_scalar::<_, i64>(
-                    "SELECT COUNT(*) FROM images WHERE user_id = $1 \
-                     AND storage_config_id = $2 AND category_id = $3",
-                ).bind(user_id).bind(cid).bind(cat_id)
-                .fetch_one(pool).await.map_err(log_err)
-            } else {
-                sqlx::query_scalar::<_, i64>(
-                    "SELECT COUNT(*) FROM images WHERE user_id = $1 \
-                     AND original_name ILIKE $2 AND storage_config_id = $3 \
-                     AND category_id = $4",
-                ).bind(user_id).bind(format!("%{}%", search_term)).bind(cid).bind(cat_id)
-                .fetch_one(pool).await.map_err(log_err)
-            }
-        } else if search_term.is_empty() {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM images WHERE user_id = $1 AND storage_config_id = $2",
-            )
-            .bind(user_id)
-            .bind(cid)
-            .fetch_one(pool)
-            .await
-            .map_err(log_err)
-        } else {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM images WHERE user_id = $1 \
-                 AND original_name ILIKE $2 AND storage_config_id = $3",
-            )
-            .bind(user_id)
-            .bind(format!("%{}%", search_term))
-            .bind(cid)
-            .fetch_one(pool)
-            .await
-            .map_err(log_err)
-        }
-    } else if let Some(cat_id) = category_id {
-        if search_term.is_empty() {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM images WHERE user_id = $1 AND category_id = $2",
-            ).bind(user_id).bind(cat_id)
-            .fetch_one(pool).await.map_err(log_err)
-        } else {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM images WHERE user_id = $1 \
-                 AND original_name ILIKE $2 AND category_id = $3",
-            ).bind(user_id).bind(format!("%{}%", search_term)).bind(cat_id)
-            .fetch_one(pool).await.map_err(log_err)
-        }
-    } else if search_term.is_empty() {
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM images WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_one(pool)
-            .await
-            .map_err(log_err)
-    } else {
-        sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM images WHERE user_id = $1 AND original_name ILIKE $2",
-        )
-        .bind(user_id)
-        .bind(format!("%{}%", search_term))
+    let mut builder = sqlx::QueryBuilder::new("SELECT COUNT(*) FROM images WHERE user_id = ");
+    builder.push_bind(user_id);
+    push_optional_filters(&mut builder, search_term, config_id, category_id);
+    builder
+        .build_query_scalar::<i64>()
         .fetch_one(pool)
         .await
-        .map_err(log_err)
-    }
+        .map_err(|e| {
+            tracing::warn!("Image count query failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal server error"})),
+            )
+        })
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn fetch_user_images(
-    pool: &PgPool, user_id: Uuid, sort_col: &str, order_dir: &str,
-    search_term: &str, limit: i64, offset: i64,
+    pool: &PgPool,
+    user_id: Uuid,
+    sort_col: &str,
+    order_dir: &str,
+    search_term: &str,
+    limit: i64,
+    offset: i64,
     config_id: Option<Uuid>,
     category_id: Option<Uuid>,
 ) -> Result<Vec<ImageRow>, ApiError> {
-    let map_err = |e: sqlx::Error| {
-        tracing::warn!("Image list query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
-    };
-    let base = "SELECT id,public_key,original_name,url,mime_type,file_size,\
-                sha256,width,height,status,thumbnail_url,webp_url,\
-                created_at,category_id,storage_config_id FROM images";
-    if let Some(cid) = config_id {
-        if let Some(cat_id) = category_id {
-            if search_term.is_empty() {
-                let sql = format!(
-                    "{base} WHERE user_id = $1 AND storage_config_id = $2 \
-                     AND category_id = $3 \
-                     ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5"
-                );
-                sqlx::query_as::<_, ImageRow>(&sql)
-                    .bind(user_id).bind(cid).bind(cat_id).bind(limit).bind(offset)
-                    .fetch_all(pool).await.map_err(map_err)
-            } else {
-                let sql = format!(
-                    "{base} WHERE user_id = $1 AND original_name ILIKE $2 \
-                     AND storage_config_id = $3 AND category_id = $4 \
-                     ORDER BY {sort_col} {order_dir} LIMIT $5 OFFSET $6"
-                );
-                sqlx::query_as::<_, ImageRow>(&sql)
-                    .bind(user_id).bind(format!("%{}%", search_term))
-                    .bind(cid).bind(cat_id).bind(limit).bind(offset)
-                    .fetch_all(pool).await.map_err(map_err)
-            }
-        } else if search_term.is_empty() {
-            let sql = format!(
-                "{base} WHERE user_id = $1 AND storage_config_id = $2 \
-                 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4"
-            );
-            sqlx::query_as::<_, ImageRow>(&sql)
-                .bind(user_id).bind(cid).bind(limit).bind(offset)
-                .fetch_all(pool).await.map_err(map_err)
-        } else {
-            let sql = format!(
-                "{base} WHERE user_id = $1 AND original_name ILIKE $2 \
-                 AND storage_config_id = $3 \
-                 ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5"
-            );
-            sqlx::query_as::<_, ImageRow>(&sql)
-                .bind(user_id).bind(format!("%{}%", search_term))
-                .bind(cid).bind(limit).bind(offset)
-                .fetch_all(pool).await.map_err(map_err)
-        }
-    } else if let Some(cat_id) = category_id {
-        if search_term.is_empty() {
-            let sql = format!(
-                "{base} WHERE user_id = $1 AND category_id = $2 \
-                 ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4"
-            );
-            sqlx::query_as::<_, ImageRow>(&sql)
-                .bind(user_id).bind(cat_id).bind(limit).bind(offset)
-                .fetch_all(pool).await.map_err(map_err)
-        } else {
-            let sql = format!(
-                "{base} WHERE user_id = $1 AND original_name ILIKE $2 \
-                 AND category_id = $3 \
-                 ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5"
-            );
-            sqlx::query_as::<_, ImageRow>(&sql)
-                .bind(user_id).bind(format!("%{}%", search_term))
-                .bind(cat_id).bind(limit).bind(offset)
-                .fetch_all(pool).await.map_err(map_err)
-        }
-    } else if search_term.is_empty() {
-        let sql = format!(
-            "{base} WHERE user_id = $1 ORDER BY {sort_col} {order_dir} \
-             LIMIT $2 OFFSET $3"
-        );
-        sqlx::query_as::<_, ImageRow>(&sql)
-            .bind(user_id).bind(limit).bind(offset)
-            .fetch_all(pool).await.map_err(map_err)
-    } else {
-        let sql = format!(
-            "{base} WHERE user_id = $1 AND original_name ILIKE $2 \
-             ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4"
-        );
-        sqlx::query_as::<_, ImageRow>(&sql)
-            .bind(user_id).bind(format!("%{}%", search_term))
-            .bind(limit).bind(offset)
-            .fetch_all(pool).await.map_err(map_err)
-    }
+    let mut builder = sqlx::QueryBuilder::new(
+        "SELECT id,public_key,original_name,url,mime_type,file_size,\
+         sha256,width,height,status,thumbnail_url,webp_url,\
+         created_at,category_id,storage_config_id FROM images WHERE user_id = ",
+    );
+    builder.push_bind(user_id);
+    push_optional_filters(&mut builder, search_term, config_id, category_id);
+    builder.push(" ORDER BY ");
+    builder.push(sort_col);
+    builder.push(' ');
+    builder.push(order_dir);
+    builder.push(" LIMIT ");
+    builder.push_bind(limit);
+    builder.push(" OFFSET ");
+    builder.push_bind(offset);
+    builder
+        .build_query_as::<ImageRow>()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Image list query failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal server error"})),
+            )
+        })
 }
 
 /// Fetch a single image by ID (owned by user).

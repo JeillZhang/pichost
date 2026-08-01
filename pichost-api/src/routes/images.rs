@@ -13,9 +13,7 @@ use uuid::Uuid;
 use crate::app::AppState;
 use crate::db::DbPool;
 use crate::middleware::auth::AuthUser;
-use crate::services::upload::{
-    self, ImageListQuery, ImageListResponse, ImageRow, UploadResult,
-};
+use crate::services::upload::{self, ImageListQuery, ImageListResponse, ImageRow, UploadResult};
 use crate::services::upload_url;
 
 // ---------------------------------------------------------------------------
@@ -90,6 +88,33 @@ fn validate_original_name(name: &str) -> Result<(), RouteError> {
     Ok(())
 }
 
+fn push_optional_filters(
+    builder: &mut sqlx::QueryBuilder<'_, sqlx::Postgres>,
+    prefix: &str,
+    search_term: &str,
+    config_id: Option<Uuid>,
+    category_id: Option<Uuid>,
+) {
+    if !search_term.is_empty() {
+        builder.push(" AND ");
+        builder.push(prefix);
+        builder.push("original_name ILIKE ");
+        builder.push_bind(format!("%{search_term}%"));
+    }
+    if let Some(cid) = config_id {
+        builder.push(" AND ");
+        builder.push(prefix);
+        builder.push("storage_config_id = ");
+        builder.push_bind(cid);
+    }
+    if let Some(cat_id) = category_id {
+        builder.push(" AND ");
+        builder.push(prefix);
+        builder.push("category_id = ");
+        builder.push_bind(cat_id);
+    }
+}
+
 async fn count_user_images(
     pool: &DbPool,
     user_id: Uuid,
@@ -97,153 +122,62 @@ async fn count_user_images(
     config_id: Option<Uuid>,
     category_id: Option<Uuid>,
 ) -> Result<i64, RouteError> {
-    let log_err = |e: sqlx::Error| {
-        tracing::warn!("Image count query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "internal server error"})),
-        )
-    };
-    if let Some(cid) = config_id {
-        if let Some(cat_id) = category_id {
-            if search_term.is_empty() {
-                sqlx::query_scalar::<_, i64>(
-                    "SELECT COUNT(*) FROM images WHERE user_id = $1 \
-                     AND storage_config_id = $2 AND category_id = $3",
-                ).bind(user_id).bind(cid).bind(cat_id)
-                .fetch_one(pool).await.map_err(log_err)
-            } else {
-                sqlx::query_scalar::<_, i64>(
-                    "SELECT COUNT(*) FROM images WHERE user_id = $1 \
-                     AND original_name ILIKE $2 AND storage_config_id = $3 \
-                     AND category_id = $4",
-                ).bind(user_id).bind(format!("%{}%", search_term)).bind(cid).bind(cat_id)
-                .fetch_one(pool).await.map_err(log_err)
-            }
-        } else if search_term.is_empty() {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM images WHERE user_id = $1 \
-                 AND storage_config_id = $2",
-            ).bind(user_id).bind(cid)
-            .fetch_one(pool).await.map_err(log_err)
-        } else {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM images WHERE user_id = $1 \
-                 AND original_name ILIKE $2 AND storage_config_id = $3",
-            ).bind(user_id).bind(format!("%{}%", search_term)).bind(cid)
-            .fetch_one(pool).await.map_err(log_err)
-        }
-    } else if let Some(cat_id) = category_id {
-        if search_term.is_empty() {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM images WHERE user_id = $1 AND category_id = $2",
-            ).bind(user_id).bind(cat_id)
-            .fetch_one(pool).await.map_err(log_err)
-        } else {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM images WHERE user_id = $1 \
-                 AND original_name ILIKE $2 AND category_id = $3",
-            ).bind(user_id).bind(format!("%{}%", search_term)).bind(cat_id)
-            .fetch_one(pool).await.map_err(log_err)
-        }
-    } else if search_term.is_empty() {
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM images WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_one(pool)
-            .await
-            .map_err(log_err)
-    } else {
-        sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM images WHERE user_id = $1 AND original_name ILIKE $2",
-        )
-        .bind(user_id)
-        .bind(format!("%{}%", search_term))
+    let mut builder = sqlx::QueryBuilder::new("SELECT COUNT(*) FROM images WHERE user_id = ");
+    builder.push_bind(user_id);
+    push_optional_filters(&mut builder, "", search_term, config_id, category_id);
+    builder
+        .build_query_scalar::<i64>()
         .fetch_one(pool)
         .await
-        .map_err(log_err)
-    }
+        .map_err(|e| {
+            tracing::warn!("Image count query failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "internal server error"})),
+            )
+        })
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn fetch_user_images(
-    pool: &DbPool, user_id: Uuid, sort_col: &str, order_dir: &str,
-    search_term: &str, limit: i64, offset: i64,
+    pool: &DbPool,
+    user_id: Uuid,
+    sort_col: &str,
+    order_dir: &str,
+    search_term: &str,
+    limit: i64,
+    offset: i64,
     config_id: Option<Uuid>,
     category_id: Option<Uuid>,
 ) -> Result<Vec<ImageRow>, RouteError> {
-    let map_err = |e: sqlx::Error| {
-        tracing::warn!("Image list query failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal server error"})))
-    };
-    let base = "SELECT i.id,i.public_key,i.original_name,i.url,i.mime_type,i.file_size,\
-                i.sha256,i.width,i.height,i.status,i.thumbnail_url,i.webp_url,\
-                i.created_at,i.category_id,i.storage_config_id,\
-                c.name,c.provider \
-                FROM images i \
-                LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id";
-    if let Some(cid) = config_id {
-        if let Some(cat_id) = category_id {
-            if search_term.is_empty() {
-                let sql = format!("{base} WHERE i.user_id = $1 AND i.storage_config_id = $2 \
-                                   AND i.category_id = $3 ORDER BY {sort_col} {order_dir} \
-                                   LIMIT $4 OFFSET $5");
-                sqlx::query_as::<_, ImageRow>(&sql)
-                    .bind(user_id).bind(cid).bind(cat_id).bind(limit).bind(offset)
-                    .fetch_all(pool).await.map_err(map_err)
-            } else {
-                let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 \
-                                   AND i.storage_config_id = $3 AND i.category_id = $4 \
-                                   ORDER BY {sort_col} {order_dir} LIMIT $5 OFFSET $6");
-                sqlx::query_as::<_, ImageRow>(&sql)
-                    .bind(user_id).bind(format!("%{}%", search_term))
-                    .bind(cid).bind(cat_id).bind(limit).bind(offset)
-                    .fetch_all(pool).await.map_err(map_err)
-            }
-        } else if search_term.is_empty() {
-            let sql = format!("{base} WHERE i.user_id = $1 AND i.storage_config_id = $2 \
-                               ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
-            sqlx::query_as::<_, ImageRow>(&sql)
-                .bind(user_id).bind(cid).bind(limit).bind(offset)
-                .fetch_all(pool).await.map_err(map_err)
-        } else {
-            let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 \
-                               AND i.storage_config_id = $3 \
-                               ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5");
-            sqlx::query_as::<_, ImageRow>(&sql)
-                .bind(user_id).bind(format!("%{}%", search_term))
-                .bind(cid).bind(limit).bind(offset)
-                .fetch_all(pool).await.map_err(map_err)
-        }
-    } else if let Some(cat_id) = category_id {
-        if search_term.is_empty() {
-            let sql = format!("{base} WHERE i.user_id = $1 AND i.category_id = $2 \
-                               ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
-            sqlx::query_as::<_, ImageRow>(&sql)
-                .bind(user_id).bind(cat_id).bind(limit).bind(offset)
-                .fetch_all(pool).await.map_err(map_err)
-        } else {
-            let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 \
-                               AND i.category_id = $3 \
-                               ORDER BY {sort_col} {order_dir} LIMIT $4 OFFSET $5");
-            sqlx::query_as::<_, ImageRow>(&sql)
-                .bind(user_id).bind(format!("%{}%", search_term))
-                .bind(cat_id).bind(limit).bind(offset)
-                .fetch_all(pool).await.map_err(map_err)
-        }
-    } else if search_term.is_empty() {
-        let sql = format!("{base} WHERE i.user_id = $1 ORDER BY {sort_col} {order_dir} \
-                           LIMIT $2 OFFSET $3");
-        sqlx::query_as::<_, ImageRow>(&sql)
-            .bind(user_id).bind(limit).bind(offset)
-            .fetch_all(pool).await.map_err(map_err)
-    } else {
-        let sql = format!("{base} WHERE i.user_id = $1 AND i.original_name ILIKE $2 \
-                           ORDER BY {sort_col} {order_dir} LIMIT $3 OFFSET $4");
-        sqlx::query_as::<_, ImageRow>(&sql)
-            .bind(user_id).bind(format!("%{}%", search_term))
-            .bind(limit).bind(offset)
-            .fetch_all(pool).await.map_err(map_err)
-    }
+    let mut builder = sqlx::QueryBuilder::new(
+        "SELECT i.id,i.public_key,i.original_name,i.url,i.mime_type,i.file_size,\
+         i.sha256,i.width,i.height,i.status,i.thumbnail_url,i.webp_url,\
+         i.created_at,i.category_id,i.storage_config_id,\
+         c.name,c.provider FROM images i \
+         LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id WHERE i.user_id = ",
+    );
+    builder.push_bind(user_id);
+    push_optional_filters(&mut builder, "i.", search_term, config_id, category_id);
+    builder.push(" ORDER BY ");
+    builder.push(sort_col);
+    builder.push(' ');
+    builder.push(order_dir);
+    builder.push(" LIMIT ");
+    builder.push_bind(limit);
+    builder.push(" OFFSET ");
+    builder.push_bind(offset);
+    builder
+        .build_query_as::<ImageRow>()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Image list query failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "internal server error"})),
+            )
+        })
 }
 
 fn map_rows_to_results(rows: Vec<ImageRow>) -> Vec<UploadResult> {
@@ -259,12 +193,8 @@ pub async fn upload_handler(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
     mut multipart: Multipart,
-) -> Result<
-    (StatusCode, Json<Vec<UploadResult>>),
-    (StatusCode, Json<serde_json::Value>),
-> {
-    let (bytes, file_name, storage_config_ids) =
-        extract_upload_parts(&mut multipart).await?;
+) -> Result<(StatusCode, Json<Vec<UploadResult>>), (StatusCode, Json<serde_json::Value>)> {
+    let (bytes, file_name, storage_config_ids) = extract_upload_parts(&mut multipart).await?;
 
     match upload::process_upload(&state, &user, bytes, file_name, storage_config_ids).await {
         Ok(results) => {
@@ -308,8 +238,7 @@ pub async fn url_upload_handler(
 ) -> Result<(StatusCode, Json<Vec<UploadResult>>), RouteError> {
     validate_url_not_empty(&payload.url)?;
 
-    let (bytes, file_name) =
-        upload_url::fetch_image_from_url(&payload.url).await?;
+    let (bytes, file_name) = upload_url::fetch_image_from_url(&payload.url).await?;
 
     match upload::process_upload(&state, &user, bytes, file_name, payload.storage_config_ids).await
     {
@@ -324,6 +253,47 @@ pub async fn url_upload_handler(
     }
 }
 
+async fn parse_upload_field(
+    field: axum::extract::multipart::Field<'_>,
+    file_data: &mut Option<Vec<u8>>,
+    file_name: &mut String,
+    storage_config_ids: &mut Option<Vec<Uuid>>,
+) -> Result<(), RouteError> {
+    match field.name() {
+        Some("file") => {
+            *file_name = field
+                .file_name()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "file".to_string());
+            let data = field.bytes().await.map_err(|e| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("failed to read file: {e}")})),
+                )
+            })?;
+            *file_data = Some(data.to_vec());
+        }
+        Some("storage_config_ids") => {
+            let text = field.text().await.map_err(|e| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("failed to read config ids: {e}")})),
+                )
+            })?;
+            let ids: Result<Vec<Uuid>, _> =
+                text.split(',').map(|s| Uuid::parse_str(s.trim())).collect();
+            *storage_config_ids = Some(ids.map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "invalid UUID in storage_config_ids"})),
+                )
+            })?);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Extract file data and optional storage_config_ids from a multipart upload.
 async fn extract_upload_parts(
     multipart: &mut Multipart,
@@ -333,40 +303,7 @@ async fn extract_upload_parts(
     let mut storage_config_ids: Option<Vec<Uuid>> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
-        match field.name() {
-            Some("file") => {
-                file_name = field
-                    .file_name()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "file".to_string());
-                let data = field.bytes().await.map_err(|e| {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": format!("failed to read file: {e}")})),
-                    )
-                })?;
-                file_data = Some(data.to_vec());
-            }
-            Some("storage_config_ids") => {
-                let text = field.text().await.map_err(|e| {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": format!("failed to read config ids: {e}")})),
-                    )
-                })?;
-                let ids: Result<Vec<Uuid>, _> = text
-                    .split(',')
-                    .map(|s| Uuid::parse_str(s.trim()))
-                    .collect();
-                storage_config_ids = Some(ids.map_err(|_| {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "invalid UUID in storage_config_ids"})),
-                    )
-                })?);
-            }
-            _ => {}
-        }
+        parse_upload_field(field, &mut file_data, &mut file_name, &mut storage_config_ids).await?;
     }
 
     let bytes = file_data.ok_or_else(|| {
@@ -379,6 +316,18 @@ async fn extract_upload_parts(
     Ok((bytes, file_name, storage_config_ids))
 }
 
+fn resolve_sort(params: &ImageListQuery) -> (&str, &str) {
+    let sort_col = match params.sort.as_str() {
+        "created_at" | "file_size" | "original_name" => params.sort.as_str(),
+        _ => "created_at",
+    };
+    let order_dir = match params.order.as_str() {
+        "asc" | "ASC" => "ASC",
+        _ => "DESC",
+    };
+    (sort_col, order_dir)
+}
+
 /// GET /api/v1/images — list user's images with pagination, search, and sort (protected)
 pub async fn list_images(
     State(state): State<Arc<AppState>>,
@@ -389,23 +338,27 @@ pub async fn list_images(
     let per_page = params.per_page.clamp(1, 100);
     let offset = ((page - 1) * per_page) as i64;
     let limit = per_page as i64;
-
-    let sort_col = match params.sort.as_str() {
-        "created_at" | "file_size" | "original_name" => params.sort.as_str(),
-        _ => "created_at",
-    };
-    let order_dir = match params.order.as_str() {
-        "asc" | "ASC" => "ASC",
-        _ => "DESC",
-    };
+    let (sort_col, order_dir) = resolve_sort(&params);
 
     let search_term = params.search.trim();
     let total = count_user_images(
-        &state.pool, user.id, search_term, params.storage_config_id, params.category_id,
-    ).await?;
+        &state.pool,
+        user.id,
+        search_term,
+        params.storage_config_id,
+        params.category_id,
+    )
+    .await?;
     let rows = fetch_user_images(
-        &state.pool, user.id, sort_col, order_dir, search_term, limit, offset,
-        params.storage_config_id, params.category_id,
+        &state.pool,
+        user.id,
+        sort_col,
+        order_dir,
+        search_term,
+        limit,
+        offset,
+        params.storage_config_id,
+        params.category_id,
     )
     .await?;
     let items = map_rows_to_results(rows);
@@ -467,39 +420,42 @@ pub async fn get_image(
     Ok(Json(result))
 }
 
-/// PATCH /api/v1/images/{id} — rename an image's display name
-pub async fn rename_image(
-    State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthUser>,
-    Path(id): Path<Uuid>,
-    Json(req): Json<UpdateImageRequest>,
-) -> Result<Json<UploadResult>, RouteError> {
-    validate_original_name(&req.original_name)?;
-
-    let updated_rows = sqlx::query(
-        "UPDATE images SET original_name = $1 WHERE id = $2 AND user_id = $3",
-    )
-    .bind(&req.original_name)
-    .bind(id)
-    .bind(user.id)
-    .execute(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("Rename image query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "internal server error"})),
-        )
-    })?
-    .rows_affected();
+async fn rename_image_in_db(
+    pool: &DbPool,
+    id: Uuid,
+    user_id: Uuid,
+    name: &str,
+) -> Result<(), RouteError> {
+    let updated_rows =
+        sqlx::query("UPDATE images SET original_name = $1 WHERE id = $2 AND user_id = $3")
+            .bind(name)
+            .bind(id)
+            .bind(user_id)
+            .execute(pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Rename image query failed: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "internal server error"})),
+                )
+            })?
+            .rows_affected();
     if updated_rows == 0 {
         return Err((
             StatusCode::NOT_FOUND,
             Json(json!({"error": "image not found"})),
         ));
     }
+    Ok(())
+}
 
-    let updated = sqlx::query_as::<_, ImageRow>(
+async fn refetch_image_row(
+    pool: &DbPool,
+    id: Uuid,
+    user_id: Uuid,
+) -> Result<ImageRow, RouteError> {
+    sqlx::query_as::<_, ImageRow>(
         "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size,\
          i.sha256, i.width, i.height, i.status, i.thumbnail_url, i.webp_url, \
          i.created_at, i.category_id, i.storage_config_id, \
@@ -509,8 +465,8 @@ pub async fn rename_image(
          WHERE i.id = $1 AND i.user_id = $2",
     )
     .bind(id)
-    .bind(user.id)
-    .fetch_optional(&state.pool)
+    .bind(user_id)
+    .fetch_optional(pool)
     .await
     .map_err(|e| {
         tracing::warn!("Rename image re-fetch failed: {e}");
@@ -518,18 +474,29 @@ pub async fn rename_image(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "internal server error"})),
         )
-    })?;
+    })?
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "image not found"})),
+        )
+    })
+}
+
+/// PATCH /api/v1/images/{id} — rename an image's display name
+pub async fn rename_image(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateImageRequest>,
+) -> Result<Json<UploadResult>, RouteError> {
+    validate_original_name(&req.original_name)?;
+    rename_image_in_db(&state.pool, id, user.id, &req.original_name).await?;
+    let updated = refetch_image_row(&state.pool, id, user.id).await?;
 
     let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
 
-    Ok(Json(UploadResult::from_row(
-        updated.ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "image not found"})),
-            )
-        })?,
-    )))
+    Ok(Json(UploadResult::from_row(updated)))
 }
 
 /// GET /u/{public_key} — serve image publicly (unauthenticated)
@@ -545,19 +512,33 @@ pub async fn public_get(
     .await
     .map_err(|e| {
         tracing::warn!("Public image query failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal server error"})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "internal server error"})),
+        )
     })?
-    .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"}))))?;
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "image not found"})),
+        )
+    })?;
 
     let (storage_key, mime_type, status, storage_backend) = row;
     if !check_image_status(&status) {
-        return Err((StatusCode::NOT_FOUND, Json(json!({"error": "image not found"}))));
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "image not found"})),
+        ));
     }
 
     let storage = state.router.for_backend(&storage_backend);
     let bytes = storage.get(&storage_key).await.map_err(|e| {
         tracing::warn!("Storage read failed on {}: {e}", storage.backend_name());
-        (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"})))
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "image not found"})),
+        )
     })?;
 
     Ok(Response::builder()
@@ -623,17 +604,16 @@ pub async fn public_get_thumb(
         .unwrap())
 }
 
-/// GET /t/{public_key} — serve thumbnail by public_key (alias)
-pub async fn public_get_thumb_by_key(
-    State(state): State<Arc<AppState>>,
-    Path(public_key): Path<String>,
-) -> Result<Response, RouteError> {
+async fn resolve_thumb_key_by_public_key(
+    pool: &DbPool,
+    public_key: &str,
+) -> Result<(String, String), RouteError> {
     let row: (Option<String>, String) = sqlx::query_as(
         "SELECT thumbnail_key, storage_backend FROM images \
          WHERE public_key = $1 AND status IN ('active', 'ready')",
     )
-    .bind(&public_key)
-    .fetch_optional(&state.pool)
+    .bind(public_key)
+    .fetch_optional(pool)
     .await
     .map_err(|e| {
         tracing::warn!("Thumbnail-by-key query failed: {e}");
@@ -656,6 +636,16 @@ pub async fn public_get_thumb_by_key(
             Json(json!({"error": "thumbnail not yet generated"})),
         )
     })?;
+    Ok((thumb_key, storage_backend))
+}
+
+/// GET /t/{public_key} — serve thumbnail by public_key (alias)
+pub async fn public_get_thumb_by_key(
+    State(state): State<Arc<AppState>>,
+    Path(public_key): Path<String>,
+) -> Result<Response, RouteError> {
+    let (thumb_key, storage_backend) =
+        resolve_thumb_key_by_public_key(&state.pool, &public_key).await?;
 
     let backend = state.router.for_backend(&storage_backend);
     let bytes = state
@@ -726,33 +716,62 @@ pub async fn public_get_webp(
         .unwrap())
 }
 
+async fn fetch_delete_target(
+    pool: &DbPool,
+    id: Uuid,
+    user: &AuthUser,
+) -> Result<(String, String, Option<String>, Option<String>), RouteError> {
+    sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
+        r#"SELECT storage_key, storage_backend, thumbnail_key, webp_key
+           FROM images WHERE id = $1 AND (user_id = $2 OR $3)"#,
+    )
+    .bind(id)
+    .bind(user.id)
+    .bind(user.is_admin)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Delete image query failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "internal server error"})),
+        )
+    })?
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "image not found"})),
+        )
+    })
+}
+
 /// DELETE /api/v1/images/{id} — delete image + storage files (protected)
 pub async fn delete_image(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, RouteError> {
-    let row = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
-        r#"SELECT storage_key, storage_backend, thumbnail_key, webp_key
-           FROM images WHERE id = $1 AND (user_id = $2 OR $3)"#,
+    let (storage_key, storage_backend, thumb_key, webp_key) =
+        fetch_delete_target(&state.pool, id, &user).await?;
+    cleanup_storage_files(
+        &state.router,
+        &storage_backend,
+        &storage_key,
+        &thumb_key,
+        &webp_key,
     )
-    .bind(id).bind(user.id).bind(user.is_admin)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("Delete image query failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal server error"})))
-    })?
-    .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"}))))?;
-
-    let (storage_key, storage_backend, thumb_key, webp_key) = row;
-    cleanup_storage_files(&state.router, &storage_backend, &storage_key, &thumb_key, &webp_key).await;
+    .await;
 
     sqlx::query("DELETE FROM images WHERE id = $1")
-        .bind(id).execute(&state.pool).await
+        .bind(id)
+        .execute(&state.pool)
+        .await
         .map_err(|e| {
             tracing::warn!("Image delete db failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "failed to delete image"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "failed to delete image"})),
+            )
         })?;
 
     let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
@@ -768,6 +787,29 @@ pub struct BatchDeleteRequest {
     pub ids: Vec<Uuid>,
 }
 
+async fn fetch_batch_delete_targets(
+    pool: &DbPool,
+    ids: &[Uuid],
+    user: &AuthUser,
+) -> Result<Vec<(String, String, Option<String>, Option<String>)>, RouteError> {
+    sqlx::query_as(
+        r#"SELECT storage_key, storage_backend, thumbnail_key, webp_key
+           FROM images WHERE id = ANY($1) AND (user_id = $2 OR $3)"#,
+    )
+    .bind(ids)
+    .bind(user.id)
+    .bind(user.is_admin)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Batch delete query failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "internal server error"})),
+        )
+    })
+}
+
 /// POST /api/v1/images/batch-delete — delete multiple images (protected)
 pub async fn batch_delete(
     State(state): State<Arc<AppState>>,
@@ -776,27 +818,22 @@ pub async fn batch_delete(
 ) -> Result<Json<serde_json::Value>, RouteError> {
     validate_batch_ids(&body.ids)?;
 
-    let rows: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
-        r#"SELECT storage_key, storage_backend, thumbnail_key, webp_key
-           FROM images WHERE id = ANY($1) AND (user_id = $2 OR $3)"#,
-    )
-    .bind(&body.ids).bind(user.id).bind(user.is_admin)
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("Batch delete query failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal server error"})))
-    })?;
+    let rows = fetch_batch_delete_targets(&state.pool, &body.ids, &user).await?;
 
     for (sk, sb, tk, wk) in &rows {
         cleanup_storage_files(&state.router, sb, sk, tk, wk).await;
     }
 
     let deleted = sqlx::query("DELETE FROM images WHERE id = ANY($1)")
-        .bind(&body.ids).execute(&state.pool).await
+        .bind(&body.ids)
+        .execute(&state.pool)
+        .await
         .map_err(|e| {
             tracing::warn!("Batch delete DB failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "failed to delete images"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "failed to delete images"})),
+            )
         })?
         .rows_affected() as usize;
 
@@ -806,13 +843,45 @@ pub async fn batch_delete(
 
     let failed = body.ids.len().saturating_sub(deleted);
     tracing::info!(user_id = %user.id, requested = body.ids.len(), deleted, failed, "batch delete");
-    Ok(Json(json!({"message": "batch delete completed", "deleted": deleted, "failed": failed})))
+    Ok(Json(
+        json!({"message": "batch delete completed", "deleted": deleted, "failed": failed}),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
 pub struct MoveImageRequest {
     /// None removes the image from its category.
     pub category_id: Option<Uuid>,
+}
+
+async fn ensure_category_owned(
+    pool: &DbPool,
+    category_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), RouteError> {
+    use pichost_core::models::Category;
+
+    sqlx::query_as::<_, Category>(
+        "SELECT id, user_id, name, parent_id, created_at \
+         FROM categories WHERE id = $1 AND user_id = $2",
+    )
+    .bind(category_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Category not found"})),
+        )
+    })?;
+    Ok(())
 }
 
 /// POST /api/v1/images/{id}/move — move an image to a category
@@ -822,39 +891,28 @@ pub async fn move_image(
     Path(id): Path<Uuid>,
     Json(body): Json<MoveImageRequest>,
 ) -> Result<Json<serde_json::Value>, RouteError> {
-    use pichost_core::models::Category;
-
     if let Some(category_id) = body.category_id {
-        let _cat = sqlx::query_as::<_, Category>(
-            "SELECT id, user_id, name, parent_id, created_at \
-             FROM categories WHERE id = $1 AND user_id = $2",
-        )
-        .bind(category_id)
-        .bind(user.id)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|e| {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
-        })?
-        .ok_or_else(|| {
-            (StatusCode::NOT_FOUND, Json(json!({"error": "Category not found"})))
-        })?;
+        ensure_category_owned(&state.pool, category_id, user.id).await?;
     }
 
-    let result = sqlx::query(
-        "UPDATE images SET category_id = $1 WHERE id = $2 AND user_id = $3",
-    )
-    .bind(body.category_id)
-    .bind(id)
-    .bind(user.id)
-    .execute(&state.pool)
-    .await
-    .map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
-    })?;
+    let result = sqlx::query("UPDATE images SET category_id = $1 WHERE id = $2 AND user_id = $3")
+        .bind(body.category_id)
+        .bind(id)
+        .bind(user.id)
+        .execute(&state.pool)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
 
     if result.rows_affected() == 0 {
-        return Err((StatusCode::NOT_FOUND, Json(json!({"error": "Image not found"}))));
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Image not found"})),
+        ));
     }
 
     let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
@@ -868,53 +926,44 @@ pub struct BatchMoveRequest {
     pub category_id: Uuid,
 }
 
+fn validate_batch_move(ids: &[Uuid]) -> Result<(), RouteError> {
+    if ids.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "image_ids cannot be empty"})),
+        ));
+    }
+    if ids.len() > 100 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Maximum 100 images per batch move"})),
+        ));
+    }
+    Ok(())
+}
+
 /// POST /api/v1/images/batch-move — move multiple images to a category
 pub async fn batch_move_images(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
     Json(body): Json<BatchMoveRequest>,
 ) -> Result<Json<serde_json::Value>, RouteError> {
-    use pichost_core::models::Category;
+    validate_batch_move(&body.image_ids)?;
+    ensure_category_owned(&state.pool, body.category_id, user.id).await?;
 
-    if body.image_ids.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "image_ids cannot be empty"})),
-        ));
-    }
-    if body.image_ids.len() > 100 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Maximum 100 images per batch move"})),
-        ));
-    }
-
-    let _cat = sqlx::query_as::<_, Category>(
-        "SELECT id, user_id, name, parent_id, created_at \
-         FROM categories WHERE id = $1 AND user_id = $2",
-    )
-    .bind(body.category_id)
-    .bind(user.id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
-    })?
-    .ok_or_else(|| {
-        (StatusCode::NOT_FOUND, Json(json!({"error": "Category not found"})))
-    })?;
-
-    let result = sqlx::query(
-        "UPDATE images SET category_id = $1 WHERE user_id = $2 AND id = ANY($3)",
-    )
-    .bind(body.category_id)
-    .bind(user.id)
-    .bind(&body.image_ids)
-    .execute(&state.pool)
-    .await
-    .map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
-    })?;
+    let result =
+        sqlx::query("UPDATE images SET category_id = $1 WHERE user_id = $2 AND id = ANY($3)")
+            .bind(body.category_id)
+            .bind(user.id)
+            .bind(&body.image_ids)
+            .execute(&state.pool)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                )
+            })?;
 
     for image_id in &body.image_ids {
         let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", image_id)).await;
@@ -965,10 +1014,19 @@ pub async fn get_image_links(
 
     let (_public_key, original_name, url) = row;
     let markdown = format!("![{}]({})", original_name, url);
-    let html = format!("<img src=\"{}\" alt=\"{}\" />", url, html_escape(&original_name));
+    let html = format!(
+        "<img src=\"{}\" alt=\"{}\" />",
+        url,
+        html_escape(&original_name)
+    );
     let bbcode = format!("[img]{}[/img]", url);
 
-    Ok(Json(ImageLinks { url, markdown, html, bbcode }))
+    Ok(Json(ImageLinks {
+        url,
+        markdown,
+        html,
+        bbcode,
+    }))
 }
 
 #[cfg(test)]

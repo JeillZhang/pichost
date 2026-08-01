@@ -20,20 +20,20 @@ fn err(msg: impl Into<String>) -> ApiError {
 pub fn is_private_ip(octets: &[u8; 4]) -> bool {
     #[allow(clippy::match_like_matches_macro)]
     match octets {
-        [0, ..] => true,                                       // 0.0.0.0/8
-        [10, ..] => true,                                      // 10.0.0.0/8
-        [127, ..] => true,                                     // 127.0.0.0/8
-        [169, 254, ..] => true,                                // 169.254.0.0/16
-        [172, b, ..] if (16..=31).contains(b) => true,         // 172.16.0.0/12
-        [192, 168, ..] => true,                                // 192.168.0.0/16
-        [224..=239, ..] => true,                               // multicast
-        [255, 255, 255, 255] => true,                          // broadcast
-        [100, 64..=127, ..] => true,                           // 100.64.0.0/10
-        [192, 0, 0, ..] => true,                               // 192.0.0.0/24
-        [192, 0, 2, ..] => true,                               // TEST-NET-1
-        [198, 51, 100, ..] => true,                            // TEST-NET-2
-        [203, 0, 113, ..] => true,                             // TEST-NET-3
-        [198, 18..=19, ..] => true,                            // benchmark
+        [0, ..] => true,                               // 0.0.0.0/8
+        [10, ..] => true,                              // 10.0.0.0/8
+        [127, ..] => true,                             // 127.0.0.0/8
+        [169, 254, ..] => true,                        // 169.254.0.0/16
+        [172, b, ..] if (16..=31).contains(b) => true, // 172.16.0.0/12
+        [192, 168, ..] => true,                        // 192.168.0.0/16
+        [224..=239, ..] => true,                       // multicast
+        [255, 255, 255, 255] => true,                  // broadcast
+        [100, 64..=127, ..] => true,                   // 100.64.0.0/10
+        [192, 0, 0, ..] => true,                       // 192.0.0.0/24
+        [192, 0, 2, ..] => true,                       // TEST-NET-1
+        [198, 51, 100, ..] => true,                    // TEST-NET-2
+        [203, 0, 113, ..] => true,                     // TEST-NET-3
+        [198, 18..=19, ..] => true,                    // benchmark
         _ => false,
     }
 }
@@ -93,23 +93,16 @@ async fn resolve_and_check_host(host: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Download an image from a URL with full SSRF protection.
-///
-/// Returns `(bytes, filename)` on success.
-pub async fn fetch_image_from_url(url: &str) -> Result<(Vec<u8>, String), ApiError> {
-    let parsed = validate_url_scheme(url)?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| err("URL has no host"))?;
-    resolve_and_check_host(host).await?;
-
-    let client = reqwest::Client::builder()
+fn build_download_client() -> Result<reqwest::Client, ApiError> {
+    reqwest::Client::builder()
         .redirect(Policy::limited(MAX_REDIRECTS))
         .timeout(Duration::from_secs(DOWNLOAD_TIMEOUT_SECS))
         .build()
-        .map_err(|e| err(format!("failed to build HTTP client: {}", e)))?;
+        .map_err(|e| err(format!("failed to build HTTP client: {}", e)))
+}
 
-    let response = client.get(parsed.as_str()).send().await.map_err(|e| {
+async fn fetch_remote_body(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, ApiError> {
+    let response = client.get(url).send().await.map_err(|e| {
         if e.is_timeout() {
             err("download timed out (30s)")
         } else if e.is_connect() {
@@ -154,8 +147,21 @@ pub async fn fetch_image_from_url(url: &str) -> Result<(Vec<u8>, String), ApiErr
         return Err(err("downloaded content is not a valid image"));
     }
 
+    Ok(bytes.to_vec())
+}
+
+/// Download an image from a URL with full SSRF protection.
+///
+/// Returns `(bytes, filename)` on success.
+pub async fn fetch_image_from_url(url: &str) -> Result<(Vec<u8>, String), ApiError> {
+    let parsed = validate_url_scheme(url)?;
+    let host = parsed.host_str().ok_or_else(|| err("URL has no host"))?;
+    resolve_and_check_host(host).await?;
+
+    let client = build_download_client()?;
+    let bytes = fetch_remote_body(&client, parsed.as_str()).await?;
     let filename = extract_filename_from_url_str(&parsed);
-    Ok((bytes.to_vec(), filename))
+    Ok((bytes, filename))
 }
 
 #[cfg(test)]
