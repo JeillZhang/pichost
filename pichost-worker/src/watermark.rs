@@ -295,4 +295,46 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown font"));
     }
+
+    #[test]
+    fn test_draw_tiled_changes_pixels() {
+        let mut img = DynamicImage::new_rgba8(200, 200);
+        let black = Rgba([0u8, 0, 0, 255]);
+        for p in img.as_mut_rgba8().unwrap().pixels_mut() {
+            *p = black;
+        }
+        let config: WatermarkConfig =
+            serde_json::from_str(r#"{"enabled":true,"text":"wm","position":"tile"}"#).unwrap();
+        let out = apply_watermark(&img, &config).unwrap();
+        assert_eq!((out.width(), out.height()), (200, 200));
+        let changed = out
+            .as_rgba8()
+            .unwrap()
+            .pixels()
+            .filter(|p| **p != black)
+            .count();
+        assert!(changed > 0);
+    }
+
+    #[test]
+    fn test_parse_rgba_alpha_clamps() {
+        assert_eq!(parse_rgba("rgba(1,2,3,1.5)").unwrap(), Rgba([1, 2, 3, 255]));
+        assert_eq!(parse_rgba("rgba(1,2,3,-1)").unwrap(), Rgba([1, 2, 3, 0]));
+    }
+
+    #[test]
+    fn test_parse_rgba_with_whitespace() {
+        assert_eq!(parse_rgba("rgba( 1, 2 , 3, 0.5 )").unwrap(), Rgba([1, 2, 3, 127]));
+    }
+
+    #[test]
+    fn test_parse_rgba_lowercase_hex() {
+        assert_eq!(parse_rgba("#aabbcc").unwrap(), Rgba([170, 187, 204, 255]));
+    }
+
+    #[test]
+    fn test_parse_rgba_wrong_part_count() {
+        assert!(parse_rgba("rgba(1,2,3)").is_err());
+        assert!(parse_rgba("rgba(1,2,3,0.5,6)").is_err());
+    }
 }

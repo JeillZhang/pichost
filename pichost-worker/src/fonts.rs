@@ -76,4 +76,11 @@ mod tests {
         let size = scaled_font_size(1000.0, 48, 0.15);
         assert!((size - 7.2).abs() < f64::EPSILON as f32);
     }
+
+    #[test]
+    fn test_scaled_font_size_zero_cases() {
+        assert_eq!(scaled_font_size(0.0, 48, 0.15), 0.0);
+        assert_eq!(scaled_font_size(1000.0, 0, 0.15), 0.0);
+        assert_eq!(scaled_font_size(1000.0, 48, 0.0), 0.0);
+    }
 }
