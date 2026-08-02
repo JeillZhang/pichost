@@ -31,7 +31,7 @@ export default function Login() {
           <h1
             className="text-4xl font-bold"
             style={{
-              background: 'linear-gradient(135deg, #a5b4fc 0%, #c084fc 50%, #a5b4fc 100%)',
+              background: 'var(--color-accent-gradient)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               fontFamily: "'Outfit', system-ui, sans-serif",
