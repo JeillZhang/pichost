@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.17.3** — P4-G/H/I complete. Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI), system config management (admin config API + config.toml read/write).
+**v0.17.5** — P4-G/H/I complete. Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI), system config management (admin config API + config.toml read/write), PR-triggered API smoke tests (555-test suite on PG+Redis+MinIO).
 
 ## Stack
 
@@ -94,10 +94,13 @@ cd web-ui && npm install && npm run dev  # → http://localhost:5173
 
 ```bash
 cargo test --workspace                      # 313 pass without infra (DB tests #[ignore]-gated)
+cargo test --workspace -- --include-ignored  # 555 pass with Docker PG+Redis+MinIO
 cargo clippy --workspace -- -D warnings      # zero warnings required
 cargo llvm-cov --workspace -- --include-ignored  # 91.56% line coverage (needs Docker PG+Redis+MinIO)
 cd web-ui && npm run build                   # tsc -b && vite build
 ```
+
+The full 555-test suite runs automatically on every PR to `main` via `.github/workflows/smoke-test.yml` (PG+Redis+MinIO service containers + clippy gate). See `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md` for the smoke test design guide.
 
 Run a single test: `cargo test -p pichost-api test_image_list`
 
@@ -235,7 +238,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 │   └── nginx.conf           Reverse proxy + cache + rate limiting
 ├── migrations/              10 SQL migrations (0001–0010)
 ├── scripts/                 systemd services + install/uninstall scripts
-├── .github/workflows/       Release CI (v* tags → build, test, package .tar.gz)
+├── .github/workflows/       Smoke tests (PR → 555-test suite), Release CI (v* tags → build, test, package .tar.gz)
 ├── Dockerfile.api           Multi-stage Rust build for API
 ├── Dockerfile.worker        Multi-stage Rust build for Worker
 ├── docker-compose.yml       Full stack: Nginx, API×2, Worker×2, PostgreSQL, Redis
