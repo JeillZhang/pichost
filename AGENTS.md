@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.17.3` — P4-I complete. System config management (admin config API + config.toml read/write), Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI).
+- Version: `0.17.5` — P4-I complete + API smoke test CI. System config management (admin config API + config.toml read/write), Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI), PR-triggered API smoke tests (PG+Redis+MinIO service containers).
 
 ## Key Commands
 
@@ -126,7 +126,7 @@
 - Postgres/Redis ports not exposed to host — internal Docker network only.
 - Two compose files: `docker-compose.yml` (local dev/S3) and `docker-compose.prod.yml` (production S3, `.env`-driven).
 - Bare-metal packaging: `scripts/pichost-api.service` + `scripts/pichost-worker.service` (systemd, `User=pichost`, `EnvironmentFile=/etc/pichost/.env`), install/uninstall via `scripts/install.sh` / `scripts/uninstall.sh`.
-- CI: `.github/workflows/release.yml` — `v*` tags → build x86_64-unknown-linux-gnu, test + clippy, package `.tar.gz`. Also `.github/workflows/e2e.yml` (Playwright E2E, PG+Redis service containers).
+- CI: `.github/workflows/smoke-test.yml` — PR to `main` → full API integration suite (`cargo test --workspace -- --include-ignored`, ~555 tests) against PG+Redis+MinIO service containers + clippy gate. `.github/workflows/release.yml` — `v*` tags → build x86_64-unknown-linux-gnu, test + clippy, package `.tar.gz`. `.github/workflows/e2e.yml` — Playwright E2E, PG+Redis service containers.
 
 ## API Endpoints Summary
 
@@ -175,6 +175,7 @@ All paths below are relative to `/api/v1/` prefix unless otherwise noted. The `/
 ## Testing
 
 - **Full suite**: `cargo test --workspace` → **313 pass, 0 fail** without infra (242 DB/Redis/S3 tests `#[ignore]`-gated). With Docker PG+Redis+MinIO running: `cargo test --workspace -- --include-ignored` → **555 pass, 0 fail**.
+- **CI**: every PR to `main` runs the full suite automatically via `.github/workflows/smoke-test.yml` (see the smoke test design guide `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md`). New API features must add a smoke test before coding (TDD).
 - **Coverage**: `cargo llvm-cov --workspace --ignore-filename-regex 'tests/|test_' -- --include-ignored` → **91.56% line coverage**. `cargo-llvm-cov` must be installed (`cargo install cargo-llvm-cov`).
 - **Test infrastructure**: `pichost-api/tests/common/mod.rs` harness builds a real `AppState` (PG+Redis) + production router (`configure_app`) and drives it via `tower::ServiceExt::oneshot`. The router-assembly functions live in `pichost-api/src/app.rs` (moved from `main.rs`) so integration tests exercise the exact production routing.
 - **Docker test services**: `postgres:18-alpine` (:5432), `redis:8-alpine` (:6379), `minio/minio` (:9000, bucket `pichost`, minioadmin/minioadmin). Used for the previously-ignored DB/Redis/S3 integration tests.

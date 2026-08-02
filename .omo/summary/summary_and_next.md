@@ -362,6 +362,35 @@
 
 ### 版本: 0.17.3
 
+## P5-A: API 冒烟测试 CI 工作流 ✅ (本次完成)
+
+**目标**: 完善 API 自动化测试，建立 PR 触发式冒烟测试 CI，确立新特性开发的冒烟测试设计模式。
+
+### 测试覆盖审计结果
+- **50 个 API 端点全部有集成测试覆盖**（`pichost-api/tests/` 198 个路由级测试），仅两个已知缺口（OAuth callback/link 成功路径，需 mock 外部 provider，优先级低）
+- `health_test.rs` 原是死占位符（`assert!(true)`），已清理为说明性注释，真实 health 测试位于 `auth_test.rs`
+
+### GitHub Actions 冒烟测试工作流
+- **`.github/workflows/smoke-test.yml`**: PR 合入 `main`（open/sync/reopen）+ push 触发
+- **服务容器**: PostgreSQL 18 + Redis 8 + MinIO（bucket `pichost` 通过 `minio/mc` 自动创建）
+- **测试命令**: `cargo test --workspace -- --include-ignored`（~555 测试全量运行）
+- **质量门**: `cargo clippy --workspace -- -D warnings`
+- **缓存**: cargo registry/git/target 复用 e2e 缓存键模式
+- 此前 `release.yml` 仅运行 313 个无基础设施测试，`e2e.yml` 仅 Playwright — 集成测试从未在 PR 上运行过
+
+### 冒烟测试设计指南
+- **`docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md`**: 建立新特性开发的冒烟测试设计模式
+- 开发前: 列出新/改端点，设计成功+错误路径测试，确认测试文件归属
+- 开发中: TDD 红-绿-重构，使用 `common/mod.rs` harness
+- 开发后: `cargo test --workspace -- --include-ignored` + clippy
+- 新特性 CRUD 端点覆盖要求: create/read/update/delete 的 success + not_found + 权限错误路径
+
+### Verification
+- `cargo clippy --workspace -D warnings` ✅
+- `cargo test --workspace` ✅ (313 pass, 0 fail — 与基线一致)
+
+### 版本: 0.17.4 → **0.17.5**
+
 ## 待实施
 
 | 阶段 | 主题 | 依赖 |
