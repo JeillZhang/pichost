@@ -12,14 +12,14 @@ export class ImageDetailPage {
     return this.page.locator('input[type="text"]').first()
   }
 
-  /** Category selector: the select bound to category_id (first select). */
+  /** Category selector: GlassSelect combobox bound to category_id. */
   get categorySelect() {
-    return this.page.locator('select').first()
+    return this.page.getByRole('combobox', { name: 'Category' })
   }
 
-  /** Link format selector: second select (URL/Markdown/HTML/BBCode). */
+  /** Link format selector: GlassSelect combobox (URL/Markdown/HTML/BBCode). */
   get linkFormatSelect() {
-    return this.page.locator('select').nth(1)
+    return this.page.getByRole('combobox', { name: 'Link format' })
   }
 
   /** The <code> element inside the Links LinkCard (main link value). */

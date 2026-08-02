@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import api from '../api/client'
 import Button from './ui/Button'
+import GlassSelect from './ui/GlassSelect'
 
 interface ConfigResponse {
   database_url: string
@@ -39,10 +40,10 @@ interface BackupInfo {
 const BACKEND_OPTIONS = ['local', 'rustfs', 'github', 'gitcode']
 
 const inputClass =
-  'w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] disabled:opacity-50'
+  'w-full rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] disabled:opacity-50'
 
 const cardClass =
-  'rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm'
+  'rounded-lg border border-[var(--color-border)] bg-[var(--glass-tint-base)]/65 p-4 backdrop-blur-sm'
 
 function TestStatus({ result }: { result: string | null }) {
   if (!result) return null
@@ -336,15 +337,12 @@ export default function SystemConfig() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <FieldLabel>Default Storage Backend</FieldLabel>
-              <select
+              <GlassSelect
                 value={config.default_backend}
-                onChange={e => updateField('default_backend', e.target.value)}
-                className={`mt-1 ${inputClass}`}
-              >
-                {BACKEND_OPTIONS.map(opt => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
+                onChange={(v) => updateField('default_backend', v)}
+                options={BACKEND_OPTIONS.map((b) => ({ value: b, label: b }))}
+                className="mt-1"
+              />
             </div>
             <div>
               {config.default_backend === 'local' ? (
@@ -434,7 +432,7 @@ export default function SystemConfig() {
         )}
       </div>
 
-      <div className="flex items-center justify-between rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm">
+      <div className="flex items-center justify-between rounded-lg border border-[var(--color-border)] bg-[var(--glass-tint-base)]/65 p-4 backdrop-blur-sm">
         <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {changedCount > 0
             ? `${changedCount} field${changedCount !== 1 ? 's' : ''} changed`

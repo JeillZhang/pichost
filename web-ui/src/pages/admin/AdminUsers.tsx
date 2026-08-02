@@ -55,13 +55,7 @@ export default function AdminUsers() {
         </p>
       </div>
 
-      <div
-        className="overflow-hidden rounded-xl"
-        style={{
-          backgroundColor: 'var(--glass-bg)',
-          border: '1px solid var(--glass-border)',
-        }}
-      >
+      <div className="glass overflow-hidden rounded-xl">
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid var(--color-border)' }}>

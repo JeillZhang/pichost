@@ -1,4 +1,5 @@
 import { usePreprocessingStore } from '../stores/preprocessing'
+import GlassSelect from './ui/GlassSelect'
 
 const FORMAT_OPTIONS = [
   { value: 'image/webp', label: 'WebP' },
@@ -14,7 +15,7 @@ export function PreprocessingSettings() {
   return (
     <div className="space-y-4">
       <h3 className="text-lg font-semibold">Upload Preprocessing</h3>
-      <p className="text-sm text-muted-foreground">
+      <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
         Images are processed in your browser before upload. All operations are optional.
       </p>
 
@@ -22,7 +23,7 @@ export function PreprocessingSettings() {
       <div className="flex items-center justify-between">
         <div>
           <p className="font-medium">Remove EXIF Data</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
             Strip location, camera, and timestamp metadata from JPEG images
           </p>
         </div>
@@ -47,7 +48,7 @@ export function PreprocessingSettings() {
         </div>
         {store.resize.enabled && (
           <div className="flex items-center gap-3 pl-2">
-            <label className="text-sm text-muted-foreground">Max:</label>
+            <label className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Max:</label>
             <input
               type="number"
               value={store.resize.maxWidth}
@@ -56,7 +57,7 @@ export function PreprocessingSettings() {
               min={1}
               max={10000}
             />
-            <span className="text-muted-foreground">×</span>
+            <span style={{ color: 'var(--color-text-muted)' }}>×</span>
             <input
               type="number"
               value={store.resize.maxHeight}
@@ -65,7 +66,7 @@ export function PreprocessingSettings() {
               min={1}
               max={10000}
             />
-            <span className="text-xs text-muted-foreground">px (aspect ratio preserved)</span>
+            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>px (aspect ratio preserved)</span>
           </div>
         )}
       </div>
@@ -83,19 +84,16 @@ export function PreprocessingSettings() {
         </div>
         {store.formatConvert.enabled && (
           <div className="flex items-center gap-3 pl-2">
-            <select
+            <GlassSelect
               value={store.formatConvert.targetFormat}
-              onChange={(e) => store.updateFormatConvert({
+              onChange={(v) => store.updateFormatConvert({
                 ...store.formatConvert,
-                targetFormat: e.target.value as 'image/jpeg' | 'image/png' | 'image/webp',
+                targetFormat: v as 'image/jpeg' | 'image/png' | 'image/webp',
               })}
-              className="glass-input text-sm"
-            >
-              {FORMAT_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            <label className="text-sm text-muted-foreground">Quality:</label>
+              options={FORMAT_OPTIONS}
+              className="w-40"
+            />
+            <label className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Quality:</label>
             <input
               type="range"
               min={10}
@@ -122,7 +120,7 @@ export function PreprocessingSettings() {
         </div>
         {store.compression.enabled && (
           <div className="flex items-center gap-3 pl-2">
-            <label className="text-sm text-muted-foreground">Quality:</label>
+            <label className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Quality:</label>
             <input
               type="range"
               min={10}
@@ -156,9 +154,10 @@ export function PreprocessingSettings() {
                 onClick={() => store.updateRotate({ ...store.rotate, degrees: deg as 0 | 90 | 180 | 270 })}
                 className={`px-3 py-1 rounded text-sm border transition-colors ${
                   store.rotate.degrees === deg
-                    ? 'border-blue-500 bg-blue-500/20 text-blue-400'
-                    : 'border-[var(--color-border)] hover:border-blue-500/50'
+                    ? 'border-[var(--color-accent)] bg-[var(--color-accent-subtle)]'
+                    : 'border-[var(--color-border)] hover:border-[var(--color-accent-subtle)]'
                 }`}
+                style={store.rotate.degrees === deg ? { color: 'var(--color-accent)' } : undefined}
               >
                 {deg}°
               </button>
@@ -172,7 +171,10 @@ export function PreprocessingSettings() {
         <button
           type="button"
           onClick={store.resetAll}
-          className="text-sm text-red-400 hover:text-red-300 transition-colors"
+          className="text-sm transition-colors"
+          style={{ color: 'var(--color-danger)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-danger-hover)')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-danger)')}
         >
           Reset to defaults
         </button>

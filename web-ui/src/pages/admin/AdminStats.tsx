@@ -36,7 +36,7 @@ interface StatCard {
 
 const statCards: StatCard[] = [
   { key: 'total_users', label: 'Total Users', icon: Users, color: 'var(--color-accent)' },
-  { key: 'total_images', label: 'Total Images', icon: ImageIcon, color: '#a78bfa' },
+  { key: 'total_images', label: 'Total Images', icon: ImageIcon, color: 'var(--color-accent)' },
   { key: 'total_size', label: 'Total Storage', icon: HardDrive, color: 'var(--color-success)', format: (v: number) => formatBytes(v) },
   { key: 'active_users_24h', label: 'Active (24h)', icon: Activity, color: 'var(--color-warning)' },
 ]
@@ -62,15 +62,7 @@ export default function AdminStats() {
         {statCards.map(({ key, label, icon: Icon, color, format }) => {
           const value = data[key]
           return (
-            <div
-              key={key}
-              className="rounded-xl p-4"
-              style={{
-                backgroundColor: 'var(--glass-bg)',
-                border: '1px solid var(--glass-border)',
-                backdropFilter: 'blur(var(--glass-blur))',
-              }}
-            >
+            <div key={key} className="glass rounded-xl p-4">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>
                   {label}
@@ -86,14 +78,7 @@ export default function AdminStats() {
       </div>
 
       {/* Backend breakdown */}
-      <div
-        className="mt-6 rounded-xl p-4"
-        style={{
-          backgroundColor: 'var(--glass-bg)',
-          border: '1px solid var(--glass-border)',
-          backdropFilter: 'blur(var(--glass-blur))',
-        }}
-      >
+      <div className="glass mt-6 rounded-xl p-4">
         <h3 className="mb-3 text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
           Storage Backend Breakdown
         </h3>
@@ -119,7 +104,7 @@ export default function AdminStats() {
                         ? Math.min(100, (stats.total_size / data.total_quota) * 100)
                         : 0
                     }%`,
-                    backgroundColor: name === 'local' ? 'var(--color-accent)' : '#a78bfa',
+                    backgroundColor: 'var(--color-accent)',
                   }}
                 />
               </div>

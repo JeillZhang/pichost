@@ -7,6 +7,7 @@ import { ensureAuth, seedUserSession, type AuthContext } from '../helpers/auth'
 import { FIXTURES } from '../helpers/fixtures'
 import { ImageDetailPage } from '../page-objects/image-detail.po'
 import { API_BASE, uploadFile } from '../helpers/api'
+import { selectGlassOption, expectGlassValue } from '../helpers/glass-select'
 
 let auth: AuthContext
 let imageId: string
@@ -46,22 +47,22 @@ test.describe.serial('image-detail', () => {
     await detail.goto(imageId)
 
     // URL
-    await detail.linkFormatSelect.selectOption({ label: 'URL' })
+    await selectGlassOption(detail.linkFormatSelect, 'URL')
     const urlValue = await detail.linkValue.innerText()
     expect(urlValue).toContain('/u/')
 
     // Markdown
-    await detail.linkFormatSelect.selectOption({ label: 'Markdown' })
+    await selectGlassOption(detail.linkFormatSelect, 'Markdown')
     const mdValue = await detail.linkValue.innerText()
     expect(mdValue).toMatch(/^!\[.*\]\(.*\)$/)
 
     // HTML
-    await detail.linkFormatSelect.selectOption({ label: 'HTML' })
+    await selectGlassOption(detail.linkFormatSelect, 'HTML')
     const htmlValue = await detail.linkValue.innerText()
     expect(htmlValue).toMatch(/^<img /)
 
     // BBCode
-    await detail.linkFormatSelect.selectOption({ label: 'BBCode' })
+    await selectGlassOption(detail.linkFormatSelect, 'BBCode')
     const bbValue = await detail.linkValue.innerText()
     expect(bbValue).toMatch(/^\[img\]/)
   })
@@ -69,8 +70,9 @@ test.describe.serial('image-detail', () => {
   test('category assignment from dropdown', async ({ page, request }) => {
     await seedUserSession(page, request)
     // Create a category via API
+    const catName = `detail-cat-${Date.now()}`
     const res = await request.post(`${API_BASE}/categories`, {
-      data: { name: `detail-cat-${Date.now()}` },
+      data: { name: catName },
       headers: { Authorization: `Bearer ${auth.user.access_token}` },
     })
     expect(res.status()).toBe(201)
@@ -78,17 +80,17 @@ test.describe.serial('image-detail', () => {
 
     const detail = new ImageDetailPage(page)
     await detail.goto(imageId)
-    await detail.categorySelect.selectOption(categoryId)
-    // Mutation completes → image now shows category (select value reflects it)
-    await expect(detail.categorySelect).toHaveValue(categoryId, { timeout: 10_000 })
+    await selectGlassOption(detail.categorySelect, catName)
+    // Mutation completes → combobox trigger now shows the category label
+    await expectGlassValue(detail.categorySelect, catName)
   })
 
   test('category can be cleared back to None', async ({ page, request }) => {
     await seedUserSession(page, request)
     const detail = new ImageDetailPage(page)
     await detail.goto(imageId)
-    await detail.categorySelect.selectOption('')
-    await expect(detail.categorySelect).toHaveValue('', { timeout: 10_000 })
+    await selectGlassOption(detail.categorySelect, 'None')
+    await expectGlassValue(detail.categorySelect, 'None')
   })
 
   test('delete requires two-step confirmation', async ({ page, request }) => {

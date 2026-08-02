@@ -24,6 +24,7 @@ import {
   type UserStorageConfig,
   type CreateStorageConfigRequest,
 } from '../api/client'
+import GlassSelect from './ui/GlassSelect'
 
 // ── Helpers ────────────────────────────────────────────────
 const PROVIDER_OPTIONS = [
@@ -137,8 +138,8 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
   }
 
   const fieldStyle: React.CSSProperties = {
-    backgroundColor: 'var(--color-surface)',
-    border: '1px solid var(--color-border)',
+    background: 'color-mix(in oklch, var(--glass-tint-base) 30%, transparent)',
+    border: '1px solid var(--glass-border-base)',
     color: 'var(--color-text-primary)',
   }
 
@@ -149,9 +150,10 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
       <div
         className="relative w-full max-w-md rounded-xl p-6"
         style={{
-          backgroundColor: 'var(--color-surface-elevated)',
-          border: '1px solid var(--glass-border)',
-          backdropFilter: 'blur(var(--glass-blur))',
+          backgroundColor: 'color-mix(in oklch, var(--glass-tint-base) calc(var(--glass-layer-modal-opacity) * 100%), transparent)',
+          border: '1px solid var(--glass-border-base)',
+          borderTopColor: 'var(--glass-border-strong)',
+          backdropFilter: 'blur(var(--glass-layer-modal-blur)) saturate(var(--glass-layer-modal-saturate))',
           boxShadow: 'var(--glass-shadow)',
         }}
       >
@@ -200,19 +202,13 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
             >
               Provider
             </label>
-            <select
+            <GlassSelect
               value={form.provider}
-              onChange={(e) => set('provider', e.target.value as Provider)}
+              onChange={(v) => set('provider', v as Provider)}
+              options={PROVIDER_OPTIONS}
               disabled={isEdit}
-              className="block w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 disabled:opacity-50"
-              style={fieldStyle}
-            >
-              {PROVIDER_OPTIONS.map(({ value, label }) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+              className="block w-full"
+            />
           </div>
 
           {/* Token */}
@@ -382,9 +378,10 @@ function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
       <div
         className="relative w-full max-w-sm rounded-xl p-6"
         style={{
-          backgroundColor: 'var(--color-surface-elevated)',
-          border: '1px solid var(--glass-border)',
-          backdropFilter: 'blur(var(--glass-blur))',
+          backgroundColor: 'color-mix(in oklch, var(--glass-tint-base) calc(var(--glass-layer-modal-opacity) * 100%), transparent)',
+          border: '1px solid var(--glass-border-base)',
+          borderTopColor: 'var(--glass-border-strong)',
+          backdropFilter: 'blur(var(--glass-layer-modal-blur)) saturate(var(--glass-layer-modal-saturate))',
           boxShadow: 'var(--glass-shadow)',
         }}
       >
@@ -473,7 +470,7 @@ export default function StorageConfigSection() {
 
   return (
     <div
-      className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm"
+      className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--glass-tint-base)]/65 p-4 backdrop-blur-sm"
     >
       {/* Header */}
       <div className="flex items-center justify-between">

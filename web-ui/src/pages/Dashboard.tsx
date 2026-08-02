@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Shield, Trash2, ChevronDown, Plus, X } from 'lucide-react'
+import { Shield, Trash2, Plus, X } from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
 import DropZone from '../components/DropZone'
 import UploadCard from '../components/UploadCard'
@@ -11,6 +11,7 @@ import { useUploadQueue } from '../hooks/useUploadQueue'
 import { useClipboardPaste } from '../hooks/useClipboardPaste'
 import UrlUploadInput from '../components/UrlUploadInput'
 import { PreprocessingStatus } from '../components/PreprocessingStatus'
+import GlassSelect from '../components/ui/GlassSelect'
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -163,21 +164,14 @@ export default function Dashboard() {
           </div>
           {selectedConfigIds.map((selectedId, idx) => (
             <div key={idx} className="relative flex items-center gap-2">
-              <div className="relative flex-1">
-                <select
+              <div className="flex-1">
+                <GlassSelect
                   value={selectedId}
-                  onChange={(e) => handleSlotChange(idx, e.target.value)}
-                  className="input-field appearance-none pr-8"
-                >
-                  {availableForSlot(idx).map((cfg) => (
-                    <option key={cfg.id} value={cfg.id}>
-                      {cfg.name} ({cfg.provider}){cfg.is_default ? ' · default' : ''}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
-                  className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2"
-                  style={{ color: 'var(--color-text-muted)' }}
+                  onChange={(v) => handleSlotChange(idx, v)}
+                  options={availableForSlot(idx).map((cfg) => ({
+                    value: cfg.id,
+                    label: `${cfg.name} (${cfg.provider})${cfg.is_default ? ' · default' : ''}`,
+                  }))}
                 />
               </div>
               {selectedConfigIds.length > 1 && (

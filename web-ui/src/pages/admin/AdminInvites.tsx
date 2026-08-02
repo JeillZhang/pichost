@@ -89,13 +89,7 @@ export default function AdminInvites() {
           </button>
         </div>
 
-        <div
-          className="flex flex-col items-center justify-center rounded-xl py-16"
-          style={{
-            backgroundColor: 'var(--glass-bg)',
-            border: '1px solid var(--glass-border)',
-          }}
-        >
+        <div className="glass flex flex-col items-center justify-center rounded-xl py-16">
           <Clock className="mb-3 h-8 w-8" style={{ color: 'var(--color-text-muted)' }} />
           <p className="mb-1 text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
             No active invite codes
@@ -138,13 +132,7 @@ export default function AdminInvites() {
         </button>
       </div>
 
-      <div
-        className="overflow-hidden rounded-xl"
-        style={{
-          backgroundColor: 'var(--glass-bg)',
-          border: '1px solid var(--glass-border)',
-        }}
-      >
+      <div className="glass overflow-hidden rounded-xl">
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid var(--color-border)' }}>

@@ -75,7 +75,7 @@ export default function CreateInviteDialog({ onClose, onCreated }: CreateInviteD
               className="rounded-lg px-4 py-3 font-mono text-sm select-all break-all"
               style={{
                 backgroundColor: 'var(--color-surface)',
-                border: '1px solid var(--glass-border)',
+                border: '1px solid var(--glass-border-base)',
                 color: 'var(--color-text-primary)',
               }}
             >
