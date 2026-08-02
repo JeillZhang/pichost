@@ -1,4 +1,5 @@
 import { ArrowUpDown } from 'lucide-react'
+import GlassSelect from './ui/GlassSelect'
 
 interface SortDropdownProps {
   sort: string
@@ -22,18 +23,13 @@ export default function SortDropdown({
   return (
     <div className="flex items-center gap-1.5">
       <ArrowUpDown className="h-4 w-4" style={{ color: 'var(--color-text-muted)' }} />
-      <select
+      <GlassSelect
         value={sort}
-        onChange={(e) => onSortChange(e.target.value)}
-        className="input-field w-auto appearance-none py-2 text-sm"
-        style={{ paddingRight: '1.75rem' }}
-      >
-        {SORT_OPTIONS.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
+        onChange={onSortChange}
+        options={SORT_OPTIONS}
+        ariaLabel="Sort images"
+        className="w-auto min-w-[130px]"
+      />
       <button
         onClick={() => onOrderChange(order === 'asc' ? 'desc' : 'asc')}
         className="input-field flex w-10 items-center justify-center px-0 py-2 text-sm transition-colors duration-150 hover:bg-[var(--glass-tint-base)]/85"

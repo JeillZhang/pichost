@@ -1,4 +1,5 @@
 import { usePreprocessingStore } from '../stores/preprocessing'
+import GlassSelect from './ui/GlassSelect'
 
 const FORMAT_OPTIONS = [
   { value: 'image/webp', label: 'WebP' },
@@ -83,18 +84,15 @@ export function PreprocessingSettings() {
         </div>
         {store.formatConvert.enabled && (
           <div className="flex items-center gap-3 pl-2">
-            <select
+            <GlassSelect
               value={store.formatConvert.targetFormat}
-              onChange={(e) => store.updateFormatConvert({
+              onChange={(v) => store.updateFormatConvert({
                 ...store.formatConvert,
-                targetFormat: e.target.value as 'image/jpeg' | 'image/png' | 'image/webp',
+                targetFormat: v as 'image/jpeg' | 'image/png' | 'image/webp',
               })}
-              className="glass-input text-sm"
-            >
-              {FORMAT_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+              options={FORMAT_OPTIONS}
+              className="w-40"
+            />
             <label className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Quality:</label>
             <input
               type="range"

@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { Loader2, Save, Trash2, Image } from 'lucide-react'
 import { updateUserMe } from '../api/client'
 import type { WatermarkConfig, UserProfile } from '../api/client'
+import GlassSelect from './ui/GlassSelect'
 
 const FONT_OPTIONS = [
   'NotoSansSC-Regular',
@@ -125,16 +126,12 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
         {/* Font */}
         <div>
           <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Font</label>
-          <select
+          <GlassSelect
             value={config.font}
-            onChange={e => updateField('font', e.target.value)}
-            className="mt-1 block w-full rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm disabled:opacity-50"
-            style={{ color: 'var(--color-text-primary)' }}
-          >
-            {FONT_OPTIONS.map(f => (
-              <option key={f} value={f}>{f}</option>
-            ))}
-          </select>
+            onChange={(f) => updateField('font', f)}
+            options={FONT_OPTIONS.map((f) => ({ value: f, label: f }))}
+            className="mt-1"
+          />
         </div>
 
         {/* Font size */}
@@ -200,16 +197,12 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
         {/* Position */}
         <div>
           <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Position</label>
-          <select
+          <GlassSelect
             value={config.position}
-            onChange={e => updateField('position', e.target.value as WatermarkConfig['position'])}
-            className="mt-1 block w-full rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm disabled:opacity-50"
-            style={{ color: 'var(--color-text-primary)' }}
-          >
-            {POSITION_OPTIONS.map(p => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
+            onChange={(p) => updateField('position', p as WatermarkConfig['position'])}
+            options={POSITION_OPTIONS.map((p) => ({ value: p, label: p }))}
+            className="mt-1"
+          />
         </div>
 
         {/* Margin X/Y */}

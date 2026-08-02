@@ -24,6 +24,7 @@ import {
   type UserStorageConfig,
   type CreateStorageConfigRequest,
 } from '../api/client'
+import GlassSelect from './ui/GlassSelect'
 
 // ── Helpers ────────────────────────────────────────────────
 const PROVIDER_OPTIONS = [
@@ -201,19 +202,13 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
             >
               Provider
             </label>
-            <select
+            <GlassSelect
               value={form.provider}
-              onChange={(e) => set('provider', e.target.value as Provider)}
+              onChange={(v) => set('provider', v as Provider)}
+              options={PROVIDER_OPTIONS}
               disabled={isEdit}
-              className="block w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 disabled:opacity-50"
-              style={fieldStyle}
-            >
-              {PROVIDER_OPTIONS.map(({ value, label }) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+              className="block w-full"
+            />
           </div>
 
           {/* Token */}

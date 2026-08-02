@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import api from '../api/client'
 import Button from './ui/Button'
+import GlassSelect from './ui/GlassSelect'
 
 interface ConfigResponse {
   database_url: string
@@ -336,15 +337,12 @@ export default function SystemConfig() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <FieldLabel>Default Storage Backend</FieldLabel>
-              <select
+              <GlassSelect
                 value={config.default_backend}
-                onChange={e => updateField('default_backend', e.target.value)}
-                className={`mt-1 ${inputClass}`}
-              >
-                {BACKEND_OPTIONS.map(opt => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
+                onChange={(v) => updateField('default_backend', v)}
+                options={BACKEND_OPTIONS.map((b) => ({ value: b, label: b }))}
+                className="mt-1"
+              />
             </div>
             <div>
               {config.default_backend === 'local' ? (
