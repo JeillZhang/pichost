@@ -184,7 +184,7 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
             <input
               type="text"
               required
-              placeholder="My GitHub Repo"
+              placeholder={form.provider === 'github' ? 'My GitHub Repo' : 'My GitCode Repo'}
               value={form.name}
               onChange={(e) => set('name', e.target.value)}
               className="block w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1"
