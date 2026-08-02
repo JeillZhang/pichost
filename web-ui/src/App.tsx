@@ -30,7 +30,7 @@ export default function App() {
       >
         <div
           className="h-8 w-8 animate-spin rounded-full border-2"
-          style={{ borderColor: 'var(--glass-border)', borderTopColor: 'var(--color-accent)' }}
+          style={{ borderColor: 'var(--glass-border-base)', borderTopColor: 'var(--color-accent)' }}
         />
       </div>
     )

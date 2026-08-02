@@ -151,7 +151,7 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
         style={{
           backgroundColor: 'var(--color-surface-elevated)',
           border: '1px solid var(--glass-border-base)',
-          backdropFilter: 'blur(var(--glass-blur))',
+          backdropFilter: 'blur(var(--glass-layer-card-blur))',
           boxShadow: 'var(--glass-shadow)',
         }}
       >
@@ -384,7 +384,7 @@ function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
         style={{
           backgroundColor: 'var(--color-surface-elevated)',
           border: '1px solid var(--glass-border-base)',
-          backdropFilter: 'blur(var(--glass-blur))',
+          backdropFilter: 'blur(var(--glass-layer-card-blur))',
           boxShadow: 'var(--glass-shadow)',
         }}
       >
