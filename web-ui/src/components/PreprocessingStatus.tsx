@@ -12,11 +12,12 @@ export function PreprocessingStatus() {
 
   if (!hasAny) {
     return (
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
         <span>Preprocessing: Off</span>
         <Link
           to="/settings"
-          className="text-blue-400 hover:text-blue-300 underline underline-offset-2"
+          className="underline underline-offset-2"
+          style={{ color: 'var(--color-accent)' }}
         >
           Configure...
         </Link>
@@ -41,14 +42,20 @@ export function PreprocessingStatus() {
       {tags.map((tag, i) => (
         <span
           key={i}
-          className="rounded bg-blue-500/10 px-1.5 py-0.5 text-blue-400 border border-blue-500/20"
+          className="rounded px-1.5 py-0.5 border text-xs"
+          style={{
+            backgroundColor: 'var(--color-accent-subtle)',
+            color: 'var(--color-accent)',
+            borderColor: 'var(--color-accent-subtle)',
+          }}
         >
           {tag}
         </span>
       ))}
       <Link
         to="/settings"
-        className="ml-1 text-blue-400 hover:text-blue-300 underline underline-offset-2 flex items-center gap-1"
+        className="ml-1 underline underline-offset-2 flex items-center gap-1"
+        style={{ color: 'var(--color-accent)' }}
       >
         <Settings className="h-3 w-3" />
         Configure...
