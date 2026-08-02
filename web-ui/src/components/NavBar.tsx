@@ -20,7 +20,7 @@ export default function NavBar() {
         {/* Brand */}
         <Link to="/dashboard" className="group flex items-center gap-2">
           <span
-            className="bg-gradient-to-br from-indigo-400 via-violet-400 to-indigo-400 bg-clip-text text-xl font-bold text-transparent"
+            className="bg-gradient-to-br from-cyan-400 via-teal-400 to-cyan-400 bg-clip-text text-xl font-bold text-transparent"
             style={{ fontFamily: "'Outfit', system-ui, sans-serif" }}
           >
             PicHost

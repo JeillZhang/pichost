@@ -15,11 +15,11 @@
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    color-scheme: dark;
+    color-scheme: light;
   }
 
-  .light {
-    color-scheme: light;
+  .dark {
+    color-scheme: dark;
   }
 
   body {
@@ -76,8 +76,8 @@
 
 /* ── Ambient Background ────────────────────── */
 @layer base {
-  /* Subtle ambient light blobs behind the page content.
-     Only active in dark mode for the atmospheric feel. */
+  /* Subtle ambient light for light mode — clean, fresh feel.
+     Warm neutral tones keep the gallery feeling airy. */
   body::before {
     content: '';
     position: fixed;
@@ -85,16 +85,16 @@
     z-index: -1;
     pointer-events: none;
     background:
-      radial-gradient(ellipse 60% 50% at 20% 10%, rgba(99, 102, 241, 0.04) 0%, transparent 70%),
-      radial-gradient(ellipse 50% 40% at 80% 80%, rgba(168, 85, 247, 0.03) 0%, transparent 70%),
-      radial-gradient(ellipse 40% 50% at 50% 50%, rgba(129, 140, 248, 0.02) 0%, transparent 70%);
+      radial-gradient(ellipse 60% 50% at 15% 5%, rgba(8, 145, 178, 0.03) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 40% at 85% 90%, rgba(34, 211, 238, 0.02) 0%, transparent 70%);
   }
 
-  /* Light mode: softer ambient */
-  .light body::before {
+  /* Dark mode: subtle cyan ambient for depth without dominating */
+  .dark body::before {
     background:
-      radial-gradient(ellipse 60% 50% at 10% 0%, rgba(99, 102, 241, 0.03) 0%, transparent 70%),
-      radial-gradient(ellipse 40% 40% at 90% 100%, rgba(168, 85, 247, 0.02) 0%, transparent 70%);
+      radial-gradient(ellipse 60% 50% at 20% 10%, rgba(8, 145, 178, 0.04) 0%, transparent 70%),
+      radial-gradient(ellipse 50% 40% at 80% 80%, rgba(34, 211, 238, 0.03) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 50% at 50% 50%, rgba(6, 182, 212, 0.02) 0%, transparent 70%);
   }
 }
 
@@ -251,12 +251,12 @@
   select {
     color: var(--color-text-primary);
     background-color: var(--color-surface);
-    color-scheme: dark;
+    color-scheme: light;
   }
   select option {
     color: var(--color-text-primary);
     background-color: var(--color-bg);
-    color-scheme: dark;
+    color-scheme: light;
   }
   select option:hover {
     background-color: var(--color-accent-strong);
@@ -266,11 +266,11 @@
     color: var(--color-text-on-accent);
     font-weight: 600;
   }
-  .light select {
-    color-scheme: light;
+  .dark select {
+    color-scheme: dark;
   }
-  .light select option {
-    color-scheme: light;
+  .dark select option {
+    color-scheme: dark;
   }
 
   /* ── Glass input / select (Preprocessing settings) ── */
