@@ -1,4 +1,5 @@
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Check, ChevronDown } from 'lucide-react'
 
 export interface GlassSelectOption<T extends string = string> {
@@ -17,6 +18,12 @@ interface GlassSelectProps<T extends string = string> {
   ariaLabel?: string
 }
 
+interface PopoverPos {
+  top: number
+  left: number
+  width: number
+}
+
 export default function GlassSelect<T extends string = string>({
   value,
   onChange,
@@ -29,22 +36,42 @@ export default function GlassSelect<T extends string = string>({
 }: GlassSelectProps<T>) {
   const [open, setOpen] = useState(false)
   const [highlightIndex, setHighlightIndex] = useState(0)
+  const [pos, setPos] = useState<PopoverPos | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
 
   const selected = options.find((o) => o.value === value)
 
   const close = useCallback(() => setOpen(false), [])
 
+  const updatePosition = useCallback(() => {
+    const trigger = containerRef.current
+    if (!trigger) return
+    const rect = trigger.getBoundingClientRect()
+    setPos({
+      top: rect.bottom + 6,
+      left: rect.left,
+      width: rect.width,
+    })
+  }, [])
+
   useEffect(() => {
     if (!open) return
     const current = options.findIndex((o) => o.value === value)
     setHighlightIndex(current >= 0 ? current : 0)
-  }, [open, options, value])
+    updatePosition()
+  }, [open, options, value, updatePosition])
 
   useEffect(() => {
     if (!open) return
     function handlePointerDown(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(target) &&
+        popoverRef.current &&
+        !popoverRef.current.contains(target)
+      ) {
         close()
       }
     }
@@ -54,13 +81,23 @@ export default function GlassSelect<T extends string = string>({
         close()
       }
     }
+    function handleScroll() {
+      updatePosition()
+    }
+    function handleResize() {
+      updatePosition()
+    }
     document.addEventListener('mousedown', handlePointerDown)
     document.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('scroll', handleScroll, true)
+    window.addEventListener('resize', handleResize)
     return () => {
       document.removeEventListener('mousedown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('scroll', handleScroll, true)
+      window.removeEventListener('resize', handleResize)
     }
-  }, [open, close])
+  }, [open, close, updatePosition])
 
   function handleTriggerKeyDown(e: React.KeyboardEvent) {
     if (disabled) return
@@ -116,40 +153,48 @@ export default function GlassSelect<T extends string = string>({
         />
       </button>
 
-      {open && !disabled && (
-        <div
-          role="listbox"
-          aria-label={ariaLabel}
-          className="glass-elevated absolute left-0 right-0 z-50 max-h-60 overflow-auto rounded-lg py-1"
-          style={{ top: 'calc(100% + 0.375rem)', boxShadow: 'var(--glass-shadow)' }}
-        >
-          {options.map((opt, i) => {
-            const isSelected = opt.value === value
-            const isHighlighted = i === highlightIndex
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                role="option"
-                aria-selected={isSelected}
-                onClick={() => {
-                  onChange(opt.value)
-                  close()
-                }}
-                onMouseEnter={() => setHighlightIndex(i)}
-                className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm transition-colors duration-100"
-                style={{
-                  backgroundColor: isHighlighted ? 'var(--color-surface-hover)' : 'transparent',
-                  color: isSelected ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                }}
-              >
-                <span className="flex-1 truncate">{opt.label}</span>
-                {isSelected && <Check className="h-4 w-4 shrink-0" style={{ color: 'var(--color-accent)' }} />}
-              </button>
-            )
-          })}
-        </div>
-      )}
+      {open && !disabled && pos &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            role="listbox"
+            aria-label={ariaLabel}
+            className="glass-elevated fixed z-[9999] max-h-60 overflow-auto rounded-lg py-1"
+            style={{
+              top: pos.top,
+              left: pos.left,
+              width: pos.width,
+              boxShadow: 'var(--glass-shadow)',
+            }}
+          >
+            {options.map((opt, i) => {
+              const isSelected = opt.value === value
+              const isHighlighted = i === highlightIndex
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={() => {
+                    onChange(opt.value)
+                    close()
+                  }}
+                  onMouseEnter={() => setHighlightIndex(i)}
+                  className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm transition-colors duration-100"
+                  style={{
+                    backgroundColor: isHighlighted ? 'var(--color-surface-hover)' : 'transparent',
+                    color: isSelected ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                  }}
+                >
+                  <span className="flex-1 truncate">{opt.label}</span>
+                  {isSelected && <Check className="h-4 w-4 shrink-0" style={{ color: 'var(--color-accent)' }} />}
+                </button>
+              )
+            })}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
