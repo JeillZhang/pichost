@@ -21,8 +21,8 @@ export default function Input({ label, id, style, ...props }: InputProps) {
         {...props}
         className="block w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1"
         style={{
-          backgroundColor: 'var(--color-surface)',
-          border: '1px solid var(--color-border)',
+          backgroundColor: 'color-mix(in oklch, var(--glass-tint-base) calc(var(--glass-layer-card-opacity) * 100%), transparent)',
+          border: '1px solid var(--glass-border-base)',
           color: 'var(--color-text-primary)',
           ...style,
         }}
