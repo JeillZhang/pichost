@@ -15,7 +15,7 @@ export default function ThemeToggle() {
   return (
     <button
       onClick={toggleTheme}
-      className="rounded-lg p-2 transition-all duration-200 hover:bg-[var(--glass-bg)] hover:text-[var(--color-text-secondary)]"
+      className="rounded-lg p-2 transition-all duration-200 hover:bg-[var(--glass-tint-base)]/65 hover:text-[var(--color-text-secondary)]"
       style={{ color: 'var(--color-text-muted)' }}
       title={`Theme: ${theme}. Click to cycle.`}
     >

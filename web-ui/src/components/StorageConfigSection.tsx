@@ -150,7 +150,7 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
         className="relative w-full max-w-md rounded-xl p-6"
         style={{
           backgroundColor: 'var(--color-surface-elevated)',
-          border: '1px solid var(--glass-border)',
+          border: '1px solid var(--glass-border-base)',
           backdropFilter: 'blur(var(--glass-blur))',
           boxShadow: 'var(--glass-shadow)',
         }}
@@ -383,7 +383,7 @@ function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
         className="relative w-full max-w-sm rounded-xl p-6"
         style={{
           backgroundColor: 'var(--color-surface-elevated)',
-          border: '1px solid var(--glass-border)',
+          border: '1px solid var(--glass-border-base)',
           backdropFilter: 'blur(var(--glass-blur))',
           boxShadow: 'var(--glass-shadow)',
         }}
@@ -473,7 +473,7 @@ export default function StorageConfigSection() {
 
   return (
     <div
-      className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm"
+      className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--glass-tint-base)]/65 p-4 backdrop-blur-sm"
     >
       {/* Header */}
       <div className="flex items-center justify-between">

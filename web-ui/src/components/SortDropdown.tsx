@@ -36,7 +36,7 @@ export default function SortDropdown({
       </select>
       <button
         onClick={() => onOrderChange(order === 'asc' ? 'desc' : 'asc')}
-        className="input-field flex w-10 items-center justify-center px-0 py-2 text-sm transition-colors duration-150 hover:bg-[var(--glass-bg-hover)]"
+        className="input-field flex w-10 items-center justify-center px-0 py-2 text-sm transition-colors duration-150 hover:bg-[var(--glass-tint-base)]/85"
         aria-label={`Sort ${order === 'asc' ? 'descending' : 'ascending'}`}
       >
         {order === 'asc' ? '↑' : '↓'}

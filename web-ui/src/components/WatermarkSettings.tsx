@@ -87,7 +87,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
   }
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] p-4 backdrop-blur-sm">
+    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--glass-tint-base)]/65 p-4 backdrop-blur-sm">
       <div className="mb-3 flex items-center gap-2">
         <Image className="h-4 w-4" style={{ color: 'var(--color-text-muted)' }} />
         <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>

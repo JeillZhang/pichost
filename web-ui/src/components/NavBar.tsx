@@ -63,7 +63,7 @@ export default function NavBar() {
           <DropdownMenu
             trigger={
               <span
-                className="flex max-w-[180px] cursor-pointer items-center gap-2 rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] px-2.5 py-1.5 text-sm backdrop-blur-sm transition-all duration-200 hover:border-[var(--glass-border-strong)] hover:bg-[var(--glass-bg-hover)]"
+                className="flex max-w-[180px] cursor-pointer items-center gap-2 rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-2.5 py-1.5 text-sm backdrop-blur-sm transition-all duration-200 hover:border-[var(--glass-border-strong)] hover:bg-[var(--glass-tint-base)]/90"
                 style={{ color: 'var(--color-text-secondary)' }}
               >
                 <User className="h-4 w-4 shrink-0" />

@@ -59,7 +59,7 @@ export default function DropZone({ onUpload }: DropZoneProps) {
       className={`glass group relative cursor-pointer overflow-hidden rounded-xl border-2 border-dashed p-12 text-center transition-all duration-300 ${
         isDragActive
           ? 'scale-[1.01] border-[var(--color-accent)] bg-[var(--color-accent-subtle)] shadow-[var(--shadow-glow)]'
-          : 'border-[var(--color-border)] hover:border-[var(--glass-border-strong)] hover:bg-[var(--glass-bg-hover)]'
+          : 'border-[var(--color-border)] hover:border-[var(--glass-border-base)] hover:bg-[var(--glass-tint-base)]/85'
       }`}
     >
       <input {...getInputProps()} />
@@ -78,7 +78,7 @@ export default function DropZone({ onUpload }: DropZoneProps) {
           className={`flex h-14 w-14 items-center justify-center rounded-2xl transition-all duration-300 ${
             isDragActive
               ? 'scale-110 bg-[var(--color-accent-subtle)] text-[var(--color-accent)]'
-              : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] group-hover:scale-105 group-hover:text-[var(--color-text-secondary)]'
+              : 'bg-[var(--glass-tint-base)]/65 text-[var(--color-text-muted)] group-hover:scale-105 group-hover:text-[var(--color-text-secondary)]'
           }`}
         >
           <Upload className="h-6 w-6" />
