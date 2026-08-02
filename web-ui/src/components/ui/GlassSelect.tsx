@@ -71,6 +71,7 @@ export default function GlassSelect<T extends string = string>({
   }
 
   function handleListKeyDown(e: React.KeyboardEvent) {
+    if (!open) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       setHighlightIndex((i) => Math.min(i + 1, options.length - 1))
@@ -88,7 +89,12 @@ export default function GlassSelect<T extends string = string>({
   }
 
   return (
-    <div ref={containerRef} className={`relative ${className}`} style={style}>
+    <div
+      ref={containerRef}
+      className={`relative ${className}`}
+      style={style}
+      onKeyDown={open ? handleListKeyDown : handleTriggerKeyDown}
+    >
       <button
         type="button"
         role="combobox"
@@ -97,7 +103,6 @@ export default function GlassSelect<T extends string = string>({
         aria-haspopup="listbox"
         disabled={disabled}
         onClick={() => !disabled && setOpen((prev) => !prev)}
-        onKeyDown={handleTriggerKeyDown}
         className="flex w-full items-center justify-between gap-2 rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-left text-sm text-[var(--color-text-primary)] transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <span className={`flex-1 truncate ${selected ? '' : 'text-[var(--color-text-muted)]'}`}>
@@ -117,7 +122,6 @@ export default function GlassSelect<T extends string = string>({
           aria-label={ariaLabel}
           className="glass-elevated absolute left-0 right-0 z-50 max-h-60 overflow-auto rounded-lg py-1"
           style={{ top: 'calc(100% + 0.375rem)', boxShadow: 'var(--glass-shadow)' }}
-          onKeyDown={handleListKeyDown}
         >
           {options.map((opt, i) => {
             const isSelected = opt.value === value

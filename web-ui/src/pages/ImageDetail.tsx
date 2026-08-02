@@ -12,6 +12,7 @@ import {
   type CategoryTreeNode,
 } from '../api/client'
 import LinkCard from '../components/LinkCard'
+import GlassSelect from '../components/ui/GlassSelect'
 
 function flattenCategories(
   nodes: CategoryTreeNode[] | undefined,
@@ -247,24 +248,21 @@ export default function ImageDetail() {
           >
             Category
           </label>
-          <select
+          <GlassSelect
             value={img.category_id ?? ''}
-            onChange={(e) => {
+            onChange={(v) => {
               // Empty string ("None") → null removes the category.
-              moveMutation.mutate({ imageId: id!, categoryId: e.target.value || null })
+              moveMutation.mutate({ imageId: id!, categoryId: v || null })
             }}
             disabled={moveMutation.isPending}
-            className="input-field disabled:opacity-50"
-          >
-            <option value="">None</option>
-            {categories &&
-              flattenCategories(categories).map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {'  '.repeat(cat.depth)}
-                  {cat.name}
-                </option>
-              ))}
-          </select>
+            options={[
+              { value: '', label: 'None' },
+              ...flattenCategories(categories).map((c) => ({
+                value: c.id,
+                label: `${'  '.repeat(c.depth)}${c.name}`,
+              })),
+            ]}
+          />
           {moveMutation.isPending && (
             <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
               Updating...
@@ -299,17 +297,12 @@ export default function ImageDetail() {
         >
           Links
         </label>
-        <select
+        <GlassSelect
           value={linkFormat}
-          onChange={(e) => setLinkFormat(e.target.value as LinkFormat)}
-          className="input-field mb-2"
-        >
-          {LINK_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => setLinkFormat(v as LinkFormat)}
+          options={LINK_OPTIONS}
+          className="mb-2"
+        />
         <LinkCard label={selectedLinkLabel} value={linkValues[linkFormat]} />
       </div>
 

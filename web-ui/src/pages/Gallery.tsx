@@ -7,6 +7,7 @@ import { CheckSquare, Square, Trash2, X, Code2, Server, HardDrive } from 'lucide
 import SearchBar from '../components/SearchBar'
 import SortDropdown from '../components/SortDropdown'
 import CategoryTree from '../components/CategoryTree'
+import GlassSelect from '../components/ui/GlassSelect'
 
 const STORAGE_CONFIG_KEY = 'backend'
 
@@ -195,19 +196,16 @@ export default function Gallery() {
             </div>
 
             {storageConfigs && storageConfigs.length > 0 && (
-              <select
-                value={storageConfigFilter}
-                onChange={(e) => setStorageConfigFilter(e.target.value)}
-                className="input-field w-auto appearance-none"
-                style={{ paddingRight: '2rem' }}
-              >
-                <option value="">All backends</option>
-                {storageConfigs.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <div className="w-44">
+                <GlassSelect
+                  value={storageConfigFilter}
+                  onChange={setStorageConfigFilter}
+                  options={[
+                    { value: '', label: 'All backends' },
+                    ...storageConfigs.map((c) => ({ value: c.id, label: c.name })),
+                  ]}
+                />
+              </div>
             )}
 
             <SortDropdown
