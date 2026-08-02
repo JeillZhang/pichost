@@ -137,8 +137,8 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
   }
 
   const fieldStyle: React.CSSProperties = {
-    backgroundColor: 'var(--color-surface)',
-    border: '1px solid var(--color-border)',
+    background: 'color-mix(in oklch, var(--glass-tint-base) 30%, transparent)',
+    border: '1px solid var(--glass-border-base)',
     color: 'var(--color-text-primary)',
   }
 
@@ -149,9 +149,10 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
       <div
         className="relative w-full max-w-md rounded-xl p-6"
         style={{
-          backgroundColor: 'var(--color-surface-elevated)',
+          backgroundColor: 'color-mix(in oklch, var(--glass-tint-base) calc(var(--glass-layer-modal-opacity) * 100%), transparent)',
           border: '1px solid var(--glass-border-base)',
-          backdropFilter: 'blur(var(--glass-layer-card-blur))',
+          borderTopColor: 'var(--glass-border-strong)',
+          backdropFilter: 'blur(var(--glass-layer-modal-blur)) saturate(var(--glass-layer-modal-saturate))',
           boxShadow: 'var(--glass-shadow)',
         }}
       >
@@ -382,9 +383,10 @@ function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
       <div
         className="relative w-full max-w-sm rounded-xl p-6"
         style={{
-          backgroundColor: 'var(--color-surface-elevated)',
+          backgroundColor: 'color-mix(in oklch, var(--glass-tint-base) calc(var(--glass-layer-modal-opacity) * 100%), transparent)',
           border: '1px solid var(--glass-border-base)',
-          backdropFilter: 'blur(var(--glass-layer-card-blur))',
+          borderTopColor: 'var(--glass-border-strong)',
+          backdropFilter: 'blur(var(--glass-layer-modal-blur)) saturate(var(--glass-layer-modal-saturate))',
           boxShadow: 'var(--glass-shadow)',
         }}
       >
