@@ -8,8 +8,14 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
 
   if (!hasLoaded) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-950">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-white" />
+      <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: 'var(--color-bg)' }}>
+        <div
+          className="h-8 w-8 animate-spin rounded-full border-2"
+          style={{
+            borderColor: 'var(--color-border-strong)',
+            borderTopColor: 'var(--color-text-primary)',
+          }}
+        />
       </div>
     )
   }
