@@ -51,9 +51,7 @@ jobs:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin
         options: >-
-          server /data
-          --console-address ":9001"
-          --health-cmd "curl -s http://localhost:9000/minio/health/live"
+          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
@@ -79,9 +77,9 @@ jobs:
       - name: Create MinIO bucket
         run: |
           docker run --rm --network ${{ job.services.minio.network }} \
-            minio/mc \
-            mc alias set local http://minio:9000 minioadmin minioadmin \
-            && mc mb --ignore-existing local/pichost
+            --entrypoint sh minio/mc -c \
+            "mc alias set local http://minio:9000 minioadmin minioadmin \
+            && mc mb --ignore-existing local/pichost"
 
       - name: Run integration tests
         run: cargo test --workspace -- --include-ignored
