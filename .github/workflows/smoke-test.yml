@@ -43,19 +43,6 @@ jobs:
           --health-timeout 3s
           --health-retries 10
 
-      minio:
-        image: minio/minio:latest
-        ports:
-          - 9000:9000
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-
     steps:
       - uses: actions/checkout@v4
 
@@ -74,11 +61,30 @@ jobs:
             ${{ runner.os }}-cargo-smoke-
             ${{ runner.os }}-cargo-
 
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data --console-address ":9001"
+          # Wait for the health endpoint to come up (retry up to 30s).
+          for i in $(seq 1 30); do
+            if docker exec minio curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
+              echo "MinIO ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "MinIO failed to become ready"
+          docker logs minio
+          exit 1
+
       - name: Create MinIO bucket
         run: |
-          docker run --rm --network ${{ job.services.minio.network }} \
+          docker run --rm --network host \
             --entrypoint sh minio/mc -c \
-            "mc alias set local http://minio:9000 minioadmin minioadmin \
+            "mc alias set local http://localhost:9000 minioadmin minioadmin \
             && mc mb --ignore-existing local/pichost"
 
       - name: Run integration tests
