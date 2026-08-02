@@ -121,14 +121,14 @@
   --color-surface-glass: rgba(255, 255, 255, 0.03);
 
   /* ── Glassmorphism — Overrides (Dark) ── */
-  --glass-highlight: rgba(255, 255, 255, 0.06);
-  --glass-tint-base: oklch(0.12 0.005 260);
-  --glass-border-base: rgba(255, 255, 255, 0.06);
-  --glass-border-strong: rgba(255, 255, 255, 0.10);
-  --glass-layer-card-opacity: 0.06;
-  --glass-layer-elevated-opacity: 0.08;
-  --glass-layer-nav-opacity: 0.10;
-  --glass-layer-modal-opacity: 0.12;
+  --glass-highlight: rgba(255, 255, 255, 0.08);
+  --glass-tint-base: oklch(0.18 0.005 260);
+  --glass-border-base: rgba(255, 255, 255, 0.08);
+  --glass-border-strong: rgba(255, 255, 255, 0.12);
+  --glass-layer-card-opacity: 0.12;
+  --glass-layer-elevated-opacity: 0.18;
+  --glass-layer-nav-opacity: 0.22;
+  --glass-layer-modal-opacity: 0.28;
   --glass-layer-card-blur: 20px;
   --glass-layer-elevated-blur: 28px;
   --glass-layer-nav-blur: 36px;
