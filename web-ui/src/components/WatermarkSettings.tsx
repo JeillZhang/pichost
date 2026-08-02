@@ -117,7 +117,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
             value={config.text}
             onChange={e => updateField('text', e.target.value)}
             placeholder="© Your Name"
-            className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm disabled:opacity-50"
+            className="mt-1 block w-full rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm disabled:opacity-50"
             style={{ color: 'var(--color-text-primary)' }}
           />
         </div>
@@ -128,7 +128,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
           <select
             value={config.font}
             onChange={e => updateField('font', e.target.value)}
-            className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm disabled:opacity-50"
+            className="mt-1 block w-full rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm disabled:opacity-50"
             style={{ color: 'var(--color-text-primary)' }}
           >
             {FONT_OPTIONS.map(f => (
@@ -146,7 +146,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
             max={200}
             value={config.font_size}
             onChange={e => updateField('font_size', Number(e.target.value))}
-            className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm disabled:opacity-50"
+            className="mt-1 block w-full rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm disabled:opacity-50"
             style={{ color: 'var(--color-text-primary)' }}
           />
         </div>
@@ -159,7 +159,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
             value={config.color}
             onChange={e => updateField('color', e.target.value)}
             placeholder="rgba(255, 255, 255, 0.5)"
-            className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm disabled:opacity-50"
+            className="mt-1 block w-full rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm disabled:opacity-50"
             style={{ color: 'var(--color-text-primary)' }}
           />
         </div>
@@ -203,7 +203,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
           <select
             value={config.position}
             onChange={e => updateField('position', e.target.value as WatermarkConfig['position'])}
-            className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm disabled:opacity-50"
+            className="mt-1 block w-full rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm disabled:opacity-50"
             style={{ color: 'var(--color-text-primary)' }}
           >
             {POSITION_OPTIONS.map(p => (
@@ -221,7 +221,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
               min={0}
               value={config.margin_x}
               onChange={e => updateField('margin_x', Number(e.target.value))}
-              className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm disabled:opacity-50"
+              className="mt-1 block w-full rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm disabled:opacity-50"
               style={{ color: 'var(--color-text-primary)' }}
             />
           </div>
@@ -232,7 +232,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
               min={0}
               value={config.margin_y}
               onChange={e => updateField('margin_y', Number(e.target.value))}
-              className="mt-1 block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm disabled:opacity-50"
+              className="mt-1 block w-full rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm disabled:opacity-50"
               style={{ color: 'var(--color-text-primary)' }}
             />
           </div>
