@@ -1,8 +1,4 @@
-/// Integration test for the health check endpoint.
-/// Requires running PostgreSQL + Redis (set DATABASE_URL + PICHOST_REDIS_URL).
-#[tokio::test]
-#[ignore = "requires running PostgreSQL and Redis"]
-async fn test_health_endpoint_returns_healthy() {
-    let healthy = true;
-    assert!(healthy);
-}
+// The real health check endpoint test lives in auth_test.rs as
+// `health_endpoint_returns_healthy`. This file was a dead placeholder
+// (asserting `assert!(true)`) and has been removed. Health check is
+// tested via the production router against real PG+Redis in auth_test.

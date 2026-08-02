@@ -1,0 +1,97 @@
+name: Smoke Tests (API)
+
+# Triggered on every PR to main and on pushes to main.
+# Runs the full Rust integration test suite against real PostgreSQL, Redis, and MinIO.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: API Integration Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: pichost
+          POSTGRES_PASSWORD: pichost
+          POSTGRES_DB: pichost
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pichost -d pichost"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      minio:
+        image: minio/minio:latest
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          server /data
+          --console-address ":9001"
+          --health-cmd "curl -s http://localhost:9000/minio/health/live"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-smoke-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-smoke-
+            ${{ runner.os }}-cargo-
+
+      - name: Create MinIO bucket
+        run: |
+          docker run --rm --network ${{ job.services.minio.network }} \
+            minio/mc \
+            mc alias set local http://minio:9000 minioadmin minioadmin \
+            && mc mb --ignore-existing local/pichost
+
+      - name: Run integration tests
+        run: cargo test --workspace -- --include-ignored
+        env:
+          PICHOST_DATABASE_URL: postgres://pichost:pichost@localhost:5432/pichost
+          PICHOST_REDIS_URL: redis://localhost:6379
+          PICHOST_STORAGE_RUSTFS_ENDPOINT: http://localhost:9000
+          PICHOST_STORAGE_RUSTFS_BUCKET: pichost
+          PICHOST_STORAGE_RUSTFS_ACCESS_KEY: minioadmin
+          PICHOST_STORAGE_RUSTFS_SECRET_KEY: minioadmin
+
+      - name: Lint (clippy)
+        run: cargo clippy --workspace -- -D warnings
