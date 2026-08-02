@@ -48,12 +48,18 @@ export default function GlassSelect<T extends string = string>({
     const trigger = containerRef.current
     if (!trigger) return
     const rect = trigger.getBoundingClientRect()
+    const estHeight = Math.min(options.length * 36 + 16, 240)
+    const spaceBelow = window.innerHeight - rect.bottom - 8
+    const spaceAbove = rect.top - 8
+    const openAbove = spaceBelow < estHeight && spaceAbove > spaceBelow
     setPos({
-      top: rect.bottom + 6,
+      top: openAbove
+        ? Math.max(8, rect.top - estHeight)
+        : rect.bottom + 6,
       left: rect.left,
       width: rect.width,
     })
-  }, [])
+  }, [options.length])
 
   useEffect(() => {
     if (!open) return

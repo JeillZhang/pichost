@@ -255,6 +255,7 @@ export default function ImageDetail() {
               moveMutation.mutate({ imageId: id!, categoryId: v || null })
             }}
             disabled={moveMutation.isPending}
+            ariaLabel="Category"
             options={[
               { value: '', label: 'None' },
               ...flattenCategories(categories).map((c) => ({
@@ -301,6 +302,7 @@ export default function ImageDetail() {
           value={linkFormat}
           onChange={(v) => setLinkFormat(v as LinkFormat)}
           options={LINK_OPTIONS}
+          ariaLabel="Link format"
           className="mb-2"
         />
         <LinkCard label={selectedLinkLabel} value={linkValues[linkFormat]} />

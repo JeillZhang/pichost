@@ -8,7 +8,7 @@ export class GalleryPage {
   }
 
   get sortDropdown() {
-    return this.page.locator('select').filter({ hasText: /upload date|file size|filename/i })
+    return this.page.getByRole('combobox', { name: 'Sort images' })
   }
 
   get emptyState() {
