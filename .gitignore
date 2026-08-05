@@ -14,3 +14,8 @@ web-ui/playwright-report/
 web-ui/test-results/
 # Runtime config backups (from admin config backup tests)
 config.toml.*.bak
+# Release packaging (local verify-release.sh output, CI is ephemeral)
+dist/
+# Python cache
+__pycache__/
+*.pyc

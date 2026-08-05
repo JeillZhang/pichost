@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# verify-release.sh — 本地模拟 .github/workflows/release.yml 的 build + package 流程。
+#
+# 与 CI 完全相同的命令序列（前端构建 → release 构建 → strip → test → clippy → 打包），
+# 并对产物做布局校验、二进制冒烟测试和 install.sh 安装 dry-run。
+# 打 tag 发布前运行一次，可覆盖 CI 中除 GitHub 专属步骤（actions/tag 触发/Release 创建）外的全部环节。
+#
+# 用法:
+#   scripts/verify-release.sh [VERSION] [--skip-test] [--skip-lint] [--skip-install]
+#   VERSION 默认取 Cargo.toml 的 workspace 版本（如 v0.17.5），与 tag 名保持一致。
+#
+# 产物:
+#   dist/pichost-<VERSION>-amd64.tar.gz   （与 CI 的 Package 步骤输出一致，供人工检查）
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+TARGET="x86_64-unknown-linux-gnu"
+ARCH="amd64"
+DIST_DIR="$ROOT/dist"
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+usage() {
+    echo "Usage: $0 [VERSION] [--skip-test] [--skip-lint] [--skip-install]"
+    echo "  VERSION: tag 版本号，如 v0.17.5（默认取 Cargo.toml 版本）"
+}
+
+# --- 参数解析 ---
+SKIP_TEST=0
+SKIP_LINT=0
+SKIP_INSTALL=0
+VERSION=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --skip-test) SKIP_TEST=1 ;;
+        --skip-lint) SKIP_LINT=1 ;;
+        --skip-install) SKIP_INSTALL=1 ;;
+        -h|--help) usage; exit 0 ;;
+        -*) echo "unknown option: $1"; usage; exit 1 ;;
+        *) VERSION="$1" ;;
+    esac
+    shift
+done
+VERSION="${VERSION:-v$(grep -m1 '^version' "$ROOT/Cargo.toml" | awk '{print $3}' | tr -d '"')}"
+PKG_NAME="pichost-${VERSION}-${ARCH}"
+PKG_DIR="$WORK_DIR/$PKG_NAME"
+
+echo "=============================================="
+echo " PicHost release verification"
+echo "   version : $VERSION"
+echo "   target  : $TARGET"
+echo "   pkg     : $PKG_NAME"
+echo "=============================================="
+
+# --- [1/7] 前端构建（与 CI: cd web-ui && npm ci && npm run build 一致） ---
+echo ""
+echo "==> [1/7] Frontend build (npm ci && npm run build)"
+(cd "$ROOT/web-ui" && npm ci && npm run build)
+
+# --- [2/7] 后端 release 构建 + strip（与 CI 一致） ---
+echo ""
+echo "==> [2/7] Backend release build + strip"
+cargo build --release --target "$TARGET" -p pichost-api -p pichost-worker
+strip "$ROOT/target/$TARGET/release/pichost-api" "$ROOT/target/$TARGET/release/pichost-worker"
+
+# --- [3/7] 测试（与 CI: cargo test --workspace 一致） ---
+if [ "$SKIP_TEST" -eq 0 ]; then
+    echo ""
+    echo "==> [3/7] cargo test --workspace"
+    cargo test --workspace
+else
+    echo ""
+    echo "==> [3/7] cargo test --workspace (skipped)"
+fi
+
+# --- [4/7] Lint（与 CI: cargo clippy --workspace -- -D warnings 一致） ---
+if [ "$SKIP_LINT" -eq 0 ]; then
+    echo ""
+    echo "==> [4/7] cargo clippy --workspace -- -D warnings"
+    cargo clippy --workspace -- -D warnings
+else
+    echo ""
+    echo "==> [4/7] cargo clippy --workspace -- -D warnings (skipped)"
+fi
+
+# --- [5/7] 打包（逐行复刻 release.yml 的 Package 步骤） ---
+echo ""
+echo "==> [5/7] Package (mirror of release.yml Package step)"
+rm -rf "$DIST_DIR/$PKG_NAME"
+mkdir -p "$DIST_DIR/$PKG_NAME/web-ui" "$DIST_DIR/$PKG_NAME/scripts"
+cp "$ROOT/target/$TARGET/release/pichost-api" "$DIST_DIR/$PKG_NAME/"
+cp "$ROOT/target/$TARGET/release/pichost-worker" "$DIST_DIR/$PKG_NAME/"
+cp -r "$ROOT/web-ui/dist" "$DIST_DIR/$PKG_NAME/web-ui/"
+cp -r "$ROOT/migrations" "$DIST_DIR/$PKG_NAME/"
+cp -r "$ROOT/nginx" "$DIST_DIR/$PKG_NAME/"
+cp "$ROOT/.env.example" "$DIST_DIR/$PKG_NAME/"
+cp "$ROOT/scripts/install.sh" "$ROOT/scripts/uninstall.sh" "$DIST_DIR/$PKG_NAME/scripts/"
+cp "$ROOT/scripts/pichost-api.service" "$ROOT/scripts/pichost-worker.service" "$DIST_DIR/$PKG_NAME/scripts/"
+cp "$ROOT/README.md" "$DIST_DIR/$PKG_NAME/"
+(cd "$DIST_DIR" && tar czf "${PKG_NAME}.tar.gz" "$PKG_NAME")
+
+# --- [6/7] 产物校验：解包 + 布局检查 + 二进制冒烟 ---
+echo ""
+echo "==> [6/7] Verify package layout"
+mkdir -p "$PKG_DIR"
+tar xzf "$DIST_DIR/${PKG_NAME}.tar.gz" -C "$WORK_DIR"
+for f in \
+    pichost-api \
+    pichost-worker \
+    web-ui/dist/index.html \
+    migrations/0001_create_users.sql \
+    migrations/0010_add_watermark_config.sql \
+    nginx/nginx.conf \
+    .env.example \
+    README.md \
+    scripts/install.sh \
+    scripts/uninstall.sh \
+    scripts/pichost-api.service \
+    scripts/pichost-worker.service; do
+    if [ ! -f "$PKG_DIR/$f" ]; then
+        echo "FAIL: missing $f in package"
+        exit 1
+    fi
+done
+echo "layout OK (12 files checked)"
+
+echo ""
+echo "==> Binary smoke test"
+file "$PKG_DIR/pichost-api" "$PKG_DIR/pichost-worker"
+if ldd "$PKG_DIR/pichost-api" "$PKG_DIR/pichost-worker" 2>&1 | grep -q "not found"; then
+    echo "FAIL: dynamic library missing"
+    exit 1
+fi
+# 用不可达的数据库/Redis 地址启动：二进制应能加载并快速报连接错误，
+# 而非段错误（139）或无法执行（126/127）。
+check_binary() {
+    local bin="$1" url="$2" label="$3"
+    set +e
+    PICHOST_DATABASE_URL="$url" PICHOST_REDIS_URL="$url" timeout 8 "$bin" >/dev/null 2>&1
+    local rc=$?
+    set -e
+    case "$rc" in
+        124) echo "OK  : $label started and kept running (killed by timeout)" ;;
+        0)   echo "OK  : $label exited cleanly" ;;
+        *)   if [ "$rc" -ge 126 ]; then
+                 echo "FAIL: $label crashed (exit $rc)"
+                 exit 1
+             fi
+             echo "OK  : $label exited with expected startup error (exit $rc)" ;;
+    esac
+}
+check_binary "$PKG_DIR/pichost-api" "postgres://127.0.0.1:9/pichost" "pichost-api"
+check_binary "$PKG_DIR/pichost-worker" "redis://127.0.0.1:9/" "pichost-worker"
+
+# --- [7/7] install.sh dry-run（优先在无 systemd 的容器中模拟裸机安装） ---
+if [ "$SKIP_INSTALL" -eq 0 ]; then
+    echo ""
+    echo "==> [7/7] install.sh dry-run"
+    if command -v docker &>/dev/null; then
+        echo ">> running install.sh inside a systemd-free container (ubuntu:24.04)"
+        docker run --rm -v "$PKG_DIR:/$PKG_NAME:ro" ubuntu:24.04 \
+            bash -c "cd /$PKG_NAME && bash scripts/install.sh /opt/pichost /var/lib/pichost /etc/pichost"
+    elif ! command -v systemctl &>/dev/null || [ "$(id -u)" = "0" ]; then
+        (cd "$PKG_DIR" && bash scripts/install.sh /opt/pichost /var/lib/pichost /etc/pichost)
+    else
+        echo ">> SKIP: host has systemd and is not root; run 'sudo bash $0' or use Docker for the install dry-run"
+    fi
+fi
+
+echo ""
+echo "=============================================="
+echo " VERIFICATION PASSED"
+echo " artifact: $DIST_DIR/${PKG_NAME}.tar.gz"
+echo "=============================================="
