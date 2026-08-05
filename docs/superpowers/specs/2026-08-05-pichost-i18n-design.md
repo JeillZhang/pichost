@@ -52,8 +52,9 @@ PicHost 目前所有 UI 文案为硬编码英文,后端错误消息为英文与�
 | 3 | 偏好持久化 | localStorage(`pichost-locale`),仿主题 store 模式 |
 | 4 | 格式化工具 | 新建共享 locale 感知模块,替换全部重复实现 |
 | 5 | 前端机制 | i18next v26 + react-i18next + i18next-browser-languagedetector,构建时打包资源 |
-| 6 | 后端消息 | 配置驱动:按语言分目录的 TOML 文件承载消息,代码经 i18n 模块按 key 取用;en 目录值 = 现有原文,默认部署响应逐字不变 |
-| 7 | 后端语言来源 | 部署环境配置 `i18n.language`(env `PICHOST_I18N_LANGUAGE`,默认 `en`),非每请求语言头;SystemConfig UI 可改(restart required) |
+| 6 | 后端消息 | 配置驱动:按语言分目录的 TOML 文件承载消息,代码经 i18n 模块按 key 取用;en 目录值 = 现有原文,默认(en)响应逐字不变 |
+| 7 | 后端语言来源 | 每请求 `Accept-Language` 协商(前端显式发送当前 UI 语言),部署配置 `i18n.language` 作回退,再回退 en |
+| 8 | 运行期热更新 | 保留:外部消息文件惰性 mtime 检查(节流)+ 配置写入后显式 `I18n::reload()`,改语言/消息无需重启 |
 
 ## 4. 前端 i18n 基础设施
 
@@ -202,17 +203,16 @@ formatNumber(n: number, locale: string): string      // Intl.NumberFormat 千位
 
 ### 6.1 架构总览
 
-后端语言为**部署环境级配置**,消息文本由**按语言分目录的 TOML 配置文件**承载,代码通过 **key** 取用。
+后端语言为**每请求协商**(Accept-Language)+ **部署配置回退**;消息文本由**按语言分目录的 TOML 配置文件**承载,代码通过 **key** 取用;支持**运行期热更新**。
 
 ```mermaid
 flowchart TB
-    A[启动: 读取 i18n.language<br/>PICHOST_I18N_LANGUAGE 默认 en] --> B{locales_dir 配置?}
-    B -->|PICHOST_I18N_LOCALES_DIR 已配置| C[加载 {dir}/{language}/messages.toml<br/>+ en 回退文件]
-    B -->|未配置| D[加载内置默认<br/>pichost-core/src/i18n/locales/{lang}/messages.toml]
-    C --> E[I18n 全局单例<br/>RwLock Option Arc]
-    D --> E
-    E --> F[chokepoint: t key args]
-    F --> G[{"error": 本地化消息, "code": key}]
+    A[请求进入] --> B[Locale 提取器 FromRequestParts<br/>Accept-Language → 部署配置 → en]
+    B --> C[chokepoint: t locale key args]
+    C --> D[{"error": 本地化消息, "code": key}]
+    E[启动装载 / 配置写入触发 reload<br/>内置默认或外部目录] --> F[I18n 全局单例<br/>RwLock Option Arc]
+    F --> G[惰性 mtime 检查 节流<br/>外部消息文件改动自动生效]
+    G --> C
 ```
 
 ### 6.2 i18n 模块(pichost-core 新建 `src/i18n.rs`)
@@ -222,11 +222,14 @@ flowchart TB
 
 ```rust
 I18n::load(language, locales_dir) -> I18n   // 内置默认;外部目录时按语言加载 + en 回退
-i18n.t("auth.invalid_credentials")          // 回退链: 当前语言 → en → key 本身
-i18n.t("rate_limited", &[retry_after])      // {} 占位符参数
+I18n::reload()                               // 配置写入后重新装载(语言/目录/消息)
+i18n.t(locale, key)                          // 回退链: locale → en → key 本身
+i18n.t(locale, key, args)                    // {} 占位符参数
 ```
 
-- 全局单例 `RwLock<Option<Arc<I18n>>>`:启动时装载;RwLock 仅为测试可重置,运行期不热更新
+- 全局单例 `RwLock<Option<Arc<I18n>>>`:`reload()` 重建后原子换入 Arc,`t()` 读锁取 Arc 后无锁调用,无写锁竞争
+- **热更新**: 外部消息文件惰性 mtime 检查(节流,如 ≥5s 一次),文件改动自动生效;内置默认目录不可变,仅外部目录参与检查
+- **Locale 提取器**: axum `FromRequestParts` 实现,解析 `Accept-Language` 首个受支持语言;无头/全部不支持 → 部署配置 `i18n.language`;再回退 en
 - 语言枚举 `Language { En, ZhCN }`:`from_str` 解析未知值告警回退 en;新增语言 = 登记枚举 + 新建语言目录
 
 ### 6.3 消息配置文件(按语言分目录)
@@ -248,7 +251,7 @@ locales/
 ```
 
 - **内置默认**: `pichost-core/src/i18n/locales/{en,zh-CN}/messages.toml`(include_str! 编译进二进制)— 开箱即用
-- **外部覆盖**: `PICHOST_I18N_LOCALES_DIR` env 指向部署目录(如 `/etc/pichost/locales/`),仅加载**当前语言对应文件** + en 回退文件,避免单文件过长
+- **外部覆盖**: `PICHOST_I18N_LOCALES_DIR` env 指向部署目录(如 `/etc/pichost/locales/`),仅加载**当前语言对应文件** + en 回退文件,避免单文件过长;外部文件参与热更新检查,内置默认不可变
 - 新增异常消息 = 对应语言目录文件加 key + 代码 `t("domain.reason")` 取用;**key 即错误信封的 `code` 字段**(细粒度,~110 个)
 
 ### 6.4 信封改造
@@ -257,23 +260,25 @@ locales/
 {"error": "用户名或密码错误", "code": "auth_invalid_credentials"}
 ```
 
-- `error` 消息由 i18n 模块按部署语言生成;en 目录值 = 现有消息原文 → 默认部署(不设语言)响应与今天**逐字相同**,现有测试零破坏
+- `error` 消息由 i18n 模块按**请求 locale(协商结果)**生成;en 目录值 = 现有消息原文 → 不带语言头的请求(含现有测试)回退部署配置默认 en,响应与今天**逐字相同**,现有测试零破坏
 - 配额 413 增强 body(quota_bytes 等附加字段)保持不变
 - code 命名:`{domain}_{reason}` snake_case
 
 ### 6.5 改造点
 
 1. **新模块**: `pichost-core/src/i18n.rs` + 内置目录 `locales/{en,zh-CN}/messages.toml`
-2. **配置**: `config.rs` 新增 `i18n.language`(env `PICHOST_I18N_LANGUAGE`,默认 `en`)、`i18n.locales_dir`(env `PICHOST_I18N_LOCALES_DIR`,可选);config 服务读写 + SystemConfig UI 增加 Language 字段(复用现有 "Save and Restart Required" 模式)
-3. **chokepoint helper 签名**: `error_response(status, key, args)`、`error_json(key, args)`、`err(key, args)`、`too_many_response(retry_after, key)`、`internal_error(key, args)` — 内部 `I18n::global().t(key, args)` 生成消息;~136 调用点改传 key(机械改动)
-4. **`AppError::IntoResponse`**: 保持 en 默认(IntoResponse 无状态上下文);storage_configs.rs 改为经 helper 显式本地化(12 处),其中文消息移入 zh 目录
-5. **`app.rs` 自定义 `JsonRejection` handler**: 畸形 JSON / 缺 Content-Type 统一 `{"error": t("validation_error"), "code": "validation_error"}`(422/415),修复现状明文响应
+2. **配置**: `config.rs` 新增 `i18n.language`(env `PICHOST_I18N_LANGUAGE`,默认 `en`)、`i18n.locales_dir`(env `PICHOST_I18N_LOCALES_DIR`,可选);config 服务读写 + SystemConfig UI 增加 Language 字段;**PUT 写入成功后调用 `I18n::reload()` → 语言字段即时生效,该字段不再要求重启**(其余字段维持现有 "Save and Restart Required" 语义)
+3. **Locale 提取器**: `axum::extract::FromRequestParts` 实现,解析 Accept-Language,回退部署配置 → en
+4. **chokepoint helper 签名**: `error_response(locale, status, key, args)`、`error_json(locale, key, args)`、`err(locale, key, args)`、`too_many_response(locale, retry_after, key)`、`internal_error(locale, key, args)` — 内部 `I18n::global().t(locale, key, args)` 生成消息;~136 调用点改传 key(机械改动)
+5. **`AppError::IntoResponse`**: 保持 en 默认(IntoResponse 无状态上下文);storage_configs.rs 改为经 helper 显式本地化(12 处),其中文消息移入 zh 目录
+6. **`app.rs` 自定义 `JsonRejection` handler**: 畸形 JSON / 缺 Content-Type 统一 `{"error": t(locale, "validation_error"), "code": "validation_error"}`(422/415),修复现状明文响应
 
 ### 6.6 前端
 
-- `api/client.ts` 错误解析升级:`ApiError { status, code, message }`;UI **直接显示后端 message**(已是部署语言),不再维护 `errors.*` 翻译键
+- `api/client.ts` 错误解析升级:`ApiError { status, code, message }`;UI **直接显示后端 message**(已是协商后的语言),不再维护 `errors.*` 翻译键
+- ky `beforeRequest` hook 显式设置 `Accept-Language: i18n.language` — 手动切换的 UI 语言优先于浏览器默认
 - `code` 仅用于行为判断:`auth_invalid_token` → 登出跳转、`upload_quota_exceeded` → 配额提示等
-- 未知 code 无碍 — message 已按部署语言本地化
+- 未知 code 无碍 — message 已按请求语言本地化
 
 ## 7. 字符串抽取策略
 
@@ -310,7 +315,7 @@ preprocessing.* / upload.* / common.*
 3. 主页面:Dashboard / Gallery / ImageDetail / Settings
 4. 重组件:CategoryTree / StorageConfigSection / SystemConfig
 5. Admin 页:AdminStats / AdminUsers / AdminInvites
-6. 后端 i18n 模块 + 消息目录(en/zh)+ 配置接入 + 6 出口改造(136 调用点改传 key)+ JsonRejection + 前端 ApiError 解析与行为 code 判断
+6. 后端 i18n 模块 + 消息目录(en/zh)+ 配置接入与热更新 + Locale 提取器 + 6 出口改造(136 调用点改传 key)+ JsonRejection + 前端 ApiError 解析与行为 code 判断
 
 ## 8. 测试与验证
 
@@ -324,7 +329,9 @@ preprocessing.* / upload.* / common.*
 
 ### 后端 cargo
 
-- **i18n 模块单测**(pichost-core): 目录加载(存在/缺失)、回退链(zh 缺失 → en → key 本身)、外部目录合并覆盖、`{}` 参数格式化、`Language::from_str` 解析(未知值回退 en)
+- **i18n 模块单测**(pichost-core): 目录加载(存在/缺失)、回退链(zh 缺失 → en → key 本身)、外部目录合并覆盖、`{}` 参数格式化、`Language::from_str` 解析(未知值回退 en)、`reload()` 原子替换后新消息生效
+- **协商测试**: `Accept-Language: zh-CN` → 中文;无头 → 部署配置(默认 en);不支持语言 → 回退
+- **热更新测试**: 外部消息文件修改后经惰性 mtime 检查生效;配置写入触发 reload 后立即生效
 - **集成测试**: `PichostEnvGuard` 设置 `PICHOST_I18N_LANGUAGE=zh-CN`(必要时 + `PICHOST_I18N_LOCALES_DIR`)→ 断言关键错误路径返回中文;默认配置 → 英文(与现状逐字一致)
 - 现有断言消息文本的测试 → 改为断言 `code` + status(消息成为 locale 相关字段,code 更稳定,符合冒烟测试设计指南)
 - `JsonRejection` handler 测试: 畸形 JSON → 422 + `validation_error`
@@ -343,8 +350,8 @@ npm run build
 ## 9. 范围边界(明确不做)
 
 - 不做 URL 路径语言前缀(`/en/...`)— localStorage 检测足够,与 Gallery 现有 URL searchParams 过滤不冲突
-- 后端语言为部署级配置,不做每请求语言协商(Accept-Language 协商)— 前端直接展示后端消息
-- 后端 i18n 不做运行期热更新 — 改语言/消息文件后重启 API 生效(复用现有 "Save and Restart Required" 模式)
+- 每请求语言协商保留:Accept-Language 优先,部署配置回退,en 兜底;前端显式发送当前 UI 语言
+- 运行期热更新保留:外部消息文件惰性 mtime 检查(节流)+ 配置写入显式 reload,无需重启;内置默认目录不可变
 - 不做 SSR / Cookie 检测 / 多命名空间 / 按需加载翻译
 - 不引入 eslint-plugin-i18next(列为后续可选防护)
 - 不翻译历史数据(已有用户上传的文件名等)
@@ -353,9 +360,12 @@ npm run build
 
 | 风险 | 应对 |
 |------|------|
-| 现有后端测试断言 `{"error": ...}` 消息文本 — 本地化后成为 locale 相关字段 | 默认部署(无语言配置)响应逐字不变;断言消息的测试迁移为断言 `code` + status |
+| 现有后端测试断言 `{"error": ...}` 消息文本 — 本地化后成为 locale 相关字段 | 无语言头的测试请求回退部署配置默认 en,响应逐字不变;断言消息的测试迁移为断言 `code` + status |
 | ~136 处调用点改传 key 工作量大 | 机械改动,按文件分批;6 出口先行,调用点随动;key 缺失时回退显示 key 本身,便于排查 |
 | 语言文件缺失/损坏 | 回退链兜底(当前语言 → en → key);外部目录加载失败时告警并回退内置默认 |
+| 热更新竞态 | `reload()` 重建后原子替换 Arc,`t()` 读锁取 Arc 后无锁调用;文件损坏时保留旧消息表并告警 |
+| 惰性 mtime 检查成本 | 节流(≥5s 一次)仅检查已加载外部文件;内置默认不参与检查 |
+| Accept-Language 解析边界 | 仅取首个受支持语言;全不支持/无头回退部署配置 → en |
 | i18n 全局单例与并行测试隔离 | `RwLock<Option<Arc<I18n>>>` 可重置;单测构造本地 `I18n` 实例,集成测试用 `PichostEnvGuard` |
 | 语言配置值未知 | `Language::from_str` 解析未知值告警并回退 en |
 | en/zh key 集漂移 | 前端 `i18n.test.ts` key 一致性测试;后端单测断言目录加载后 key 非空 |
