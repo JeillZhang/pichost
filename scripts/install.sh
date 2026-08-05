@@ -4,7 +4,9 @@ set -euo pipefail
 INSTALL_DIR="${1:-/opt/pichost}"
 DATA_DIR="${2:-/var/lib/pichost}"
 CONFIG_DIR="${3:-/etc/pichost}"
-VERSION="${PICHOST_VERSION:-unknown}"
+PKG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+VERSION="${PICHOST_VERSION:-$(basename "$PKG_DIR" | sed -nE 's/^pichost-v([0-9]+\.[0-9]+\.[0-9]+)-.*$/\1/p')}"
+VERSION="${VERSION:-unknown}"
 
 echo "PicHost v${VERSION} installing..."
 
