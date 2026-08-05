@@ -38,17 +38,15 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           PKG_NAME="pichost-${VERSION}-${{ matrix.arch }}"
-          mkdir -p dist/$PKG_NAME
+          mkdir -p dist/$PKG_NAME/web-ui dist/$PKG_NAME/scripts
           cp target/${{ matrix.target }}/release/pichost-api dist/$PKG_NAME/
           cp target/${{ matrix.target }}/release/pichost-worker dist/$PKG_NAME/
-          cp -r web-ui/dist dist/$PKG_NAME/
+          cp -r web-ui/dist dist/$PKG_NAME/web-ui/
           cp -r migrations dist/$PKG_NAME/
           cp -r nginx dist/$PKG_NAME/
           cp .env.example dist/$PKG_NAME/
-          cp scripts/install.sh dist/$PKG_NAME/ 2>/dev/null || true
-          cp scripts/uninstall.sh dist/$PKG_NAME/ 2>/dev/null || true
-          cp scripts/pichost-api.service dist/$PKG_NAME/ 2>/dev/null || true
-          cp scripts/pichost-worker.service dist/$PKG_NAME/ 2>/dev/null || true
+          cp scripts/install.sh scripts/uninstall.sh dist/$PKG_NAME/scripts/
+          cp scripts/pichost-api.service scripts/pichost-worker.service dist/$PKG_NAME/scripts/
           cp README.md dist/$PKG_NAME/
           cd dist && tar czf "${PKG_NAME}.tar.gz" "$PKG_NAME"
       - name: Upload artifact
@@ -74,7 +72,7 @@ jobs:
             ```bash
             tar xzf pichost-${{ github.ref_name }}-amd64.tar.gz
             cd pichost-${{ github.ref_name }}-amd64
-            sudo bash install.sh
+            sudo bash scripts/install.sh
             ```
             ### Architecture Support
             | Arch | Filename |
