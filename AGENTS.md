@@ -127,7 +127,7 @@
 - Postgres/Redis ports not exposed to host — internal Docker network only.
 - Two compose files: `docker-compose.yml` (local dev/S3) and `docker-compose.prod.yml` (production S3, `.env`-driven).
 - Bare-metal packaging: `scripts/pichost-api.service` + `scripts/pichost-worker.service` (systemd, `User=pichost`, `EnvironmentFile=/etc/pichost/.env`), install/uninstall via `scripts/install.sh` / `scripts/uninstall.sh`. Pre-tag verification: `scripts/verify-release.sh` (local mirror of release.yml build→package→install dry-run).
-- CI: `.github/workflows/smoke-test.yml` — PR to `main` → full API integration suite (`cargo test --workspace -- --include-ignored`, ~555 tests) against PG+Redis+MinIO service containers + clippy gate. `.github/workflows/release.yml` — `v*` tags → build x86_64-unknown-linux-gnu, test + clippy, package `.tar.gz`. `.github/workflows/e2e.yml` — Playwright E2E, PG+Redis service containers. Release body links `CHANGELOG.md` (Keep a Changelog format, updated per release).
+- CI: `.github/workflows/smoke-test.yml` — PR to `main` → full API integration suite (`cargo test --workspace -- --include-ignored`, ~555 tests) against PG+Redis+MinIO service containers + clippy gate. `.github/workflows/release.yml` — `v*` tags → build x86_64-unknown-linux-gnu, test + clippy, package `.tar.gz`; `-rc/-beta/-alpha/-pre` tag suffixes or manual dispatch mark the release as draft/pre-release. `.github/workflows/e2e.yml` — Playwright E2E, PG+Redis service containers. Release body links `CHANGELOG.md` (Keep a Changelog format, updated per release).
 
 ## API Endpoints Summary
 

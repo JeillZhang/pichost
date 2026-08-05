@@ -2,6 +2,23 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Manual trigger for safe testing: Actions → Release → Run workflow → select a tag ref.
+  #   draft=true      → creates a draft release (invisible until manually published)
+  #   prerelease=true → marks the release as pre-release (does not become Latest)
+  # Automatic behavior derives from the tag name (see the release job):
+  #   v1.2.3-rc.1 / -beta / -alpha / -pre  → pre-release
+  #   v1.2.3-draft                         → draft release
+  #   v1.2.3                               → public final release
+  workflow_dispatch:
+    inputs:
+      draft:
+        type: boolean
+        default: false
+        description: Create the release as a draft (invisible until published)
+      prerelease:
+        type: boolean
+        default: false
+        description: Mark the release as a pre-release
 jobs:
   build:
     name: Build (${{ matrix.target }})
@@ -82,5 +99,6 @@ jobs:
             See [CHANGELOG](https://github.com/JeillZhang/pichost/blob/main/CHANGELOG.md)
           files: |
             pichost-amd64/dist/*.tar.gz
-          draft: false
-          prerelease: false
+          # Inputs win when manually dispatched; otherwise derive from the tag name
+          draft: ${{ inputs.draft == 'true' || contains(github.ref_name, '-draft') }}
+          prerelease: ${{ inputs.prerelease == 'true' || contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-pre') }}
