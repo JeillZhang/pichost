@@ -10,7 +10,7 @@ PicHost 目前所有 UI 文案为硬编码英文,后端错误消息为英文与�
 
 **目标**:
 1. 前端全部 UI 文本支持 en / zh-CN 双语切换,浏览器自动检测 + 手动切换
-2. 后端错误响应引入机器可读 `code` 字段,前端将已知 code 映射为本地化文案,未知 code 回退显示原文
+2. 后端错误消息按部署语言配置本地化:消息文本由按语言分目录的配置文件承载,i18n 模块按 key 取用;错误响应携带机器可读 `code` 字段供前端行为判断
 3. 日期/数字/文件大小格式化统一为 locale 感知的共享模块
 4. 语言偏好持久化遵循现有主题偏好模式(localStorage)
 
@@ -52,7 +52,8 @@ PicHost 目前所有 UI 文案为硬编码英文,后端错误消息为英文与�
 | 3 | 偏好持久化 | localStorage(`pichost-locale`),仿主题 store 模式 |
 | 4 | 格式化工具 | 新建共享 locale 感知模块,替换全部重复实现 |
 | 5 | 前端机制 | i18next v26 + react-i18next + i18next-browser-languagedetector,构建时打包资源 |
-| 6 | 后端消息 | 保留原文(不重写,避免破坏测试),`code` 字段成为权威标识 |
+| 6 | 后端消息 | 配置驱动:按语言分目录的 TOML 文件承载消息,代码经 i18n 模块按 key 取用;en 目录值 = 现有原文,默认部署响应逐字不变 |
+| 7 | 后端语言来源 | 部署环境配置 `i18n.language`(env `PICHOST_I18N_LANGUAGE`,默认 `en`),非每请求语言头;SystemConfig UI 可改(restart required) |
 
 ## 4. 前端 i18n 基础设施
 
@@ -197,93 +198,82 @@ formatNumber(n: number, locale: string): string      // Intl.NumberFormat 千位
 
 **顺带修复**: AdminStats `formatBytes` 缺 index clamp 的 TB+ bug;单位保持 B/KB/MB/GB 技术惯例,数字部分 locale 化。
 
-## 6. 后端错误码机制
+## 6. 后端 i18n 模块与错误码机制
 
-### 6.1 信封改造
+### 6.1 架构总览
 
-```json
-// 改造前
-{"error": "invalid username or password"}
-// 改造后
-{"error": "invalid username or password", "code": "auth_invalid_credentials"}
-```
-
-- `error` 消息字段**原样保留**(不重写消息,不破坏现有集成测试)
-- 配额 413 增强 body(quota_bytes 等附加字段)保持不变
-- code 命名:`{domain}_{reason}` snake_case
-
-### 6.2 code 集(行为级粗粒度,~35 个)
-
-```
-# auth
-auth_invalid_credentials / auth_invalid_token / auth_revoked_token
-auth_insufficient_permissions
-# invite
-invite_invalid / invite_expired / invite_used
-# user
-user_not_found / username_taken / email_taken / password_too_weak
-current_password_incorrect
-# image
-image_not_found / thumbnail_not_ready / webp_not_ready
-# upload
-upload_too_large / upload_invalid_image / upload_quota_exceeded
-# url upload
-url_invalid / url_ssrf_blocked / url_download_failed
-# category
-category_not_found / category_name_exists / category_depth_exceeded
-category_invalid_name
-# storage config
-storage_config_not_found / storage_config_limit / storage_config_in_use
-storage_repo_unreachable / storage_payload_too_large
-# 通用
-rate_limited / validation_error / not_found / internal_error / conflict
-```
-
-原则:前端需要区分的行为才有独立 code;细分到行为级,不追求每条消息一个 code。
-
-### 6.3 改造点
+后端语言为**部署环境级配置**,消息文本由**按语言分目录的 TOML 配置文件**承载,代码通过 **key** 取用。
 
 ```mermaid
 flowchart TB
-    A[路由 handler 出错] --> B{错误出口}
-    B -->|AppError 路径| C[AppError::IntoResponse<br/>variant → 兜底 code]
-    B -->|helper 路径| D[error_response / error_json / err<br/>too_many_response / internal_error<br/>签名扩展 + code 参数]
-    C --> E[{"error": msg, "code": code}]
+    A[启动: 读取 i18n.language<br/>PICHOST_I18N_LANGUAGE 默认 en] --> B{locales_dir 配置?}
+    B -->|PICHOST_I18N_LOCALES_DIR 已配置| C[加载 {dir}/{language}/messages.toml<br/>+ en 回退文件]
+    B -->|未配置| D[加载内置默认<br/>pichost-core/src/i18n/locales/{lang}/messages.toml]
+    C --> E[I18n 全局单例<br/>RwLock Option Arc]
     D --> E
-    E --> F[客户端]
+    E --> F[chokepoint: t key args]
+    F --> G[{"error": 本地化消息, "code": key}]
 ```
 
-1. **`pichost-core/src/error.rs` `AppError::IntoResponse`**:按 variant 推导兜底 code — `NotFound` → `not_found`、`Validation` → `validation_error`、`RateLimited` → `rate_limited`、`Internal` → `internal_error`、`Storage(PayloadTooLarge)` → `storage_payload_too_large`(覆盖 git.rs 中文 413)
-2. **5 个 helper 签名扩展**:`error_response(status, msg, code)`、`error_json(msg, code)`、`err(msg, code)`、`too_many_response(retry_after, code)`、`internal_error(msg, code)`
-3. **~136 处调用点补 code 参数**(机械改动)
-4. **`app.rs` 自定义 `JsonRejection` handler**:畸形 JSON / 缺 Content-Type 统一为 `{"error": "...", "code": "validation_error"}`(422/415),修复现状明文响应
+### 6.2 i18n 模块(pichost-core 新建 `src/i18n.rs`)
 
-storage_configs.rs 现有中文消息不改原文 — 前端对全部 storage_config code 有映射,中文原文不再展示给用户,中英混杂问题随之解决。
+- 依赖: pichost-core 新增 `toml` crate(纯解析,无 web 依赖,符合 crate 边界)
+- API:
 
-### 6.4 前端映射
-
-新文件 `web-ui/src/api/errors.ts`:
-
-```typescript
-// 示意
-export interface ApiError { status: number; code: string; message: string; }
-export function getErrorMessage(err: ApiError, t: TFunction): string {
-    const key = `errors.${err.code}`;
-    return i18n.exists(key) ? t(key) : err.message;  // 未知 code 回退原文
-}
+```rust
+I18n::load(language, locales_dir) -> I18n   // 内置默认;外部目录时按语言加载 + en 回退
+i18n.t("auth.invalid_credentials")          // 回退链: 当前语言 → en → key 本身
+i18n.t("rate_limited", &[retry_after])      // {} 占位符参数
 ```
 
-- `api/client.ts` 错误解析升级:提取 `{ status, code, message }`
-- 全部 `toast.error(err.message)` 调用点(~10 个组件)替换为 `toast.error(getErrorMessage(err))`
-- 翻译文件新增 `errors.*` 命名空间键(en/zh 各 ~35 条)
+- 全局单例 `RwLock<Option<Arc<I18n>>>`:启动时装载;RwLock 仅为测试可重置,运行期不热更新
+- 语言枚举 `Language { En, ZhCN }`:`from_str` 解析未知值告警回退 en;新增语言 = 登记枚举 + 新建语言目录
 
-```mermaid
-flowchart LR
-    A[后端错误 JSON] --> B[ky 解析 ApiError]
-    B --> C{getErrorMessage}
-    C -->|已知 code| D[t errors.code 本地化]
-    C -->|未知 code| E[显示原始 message]
+### 6.3 消息配置文件(按语言分目录)
+
 ```
+locales/
+├── en/
+│   └── messages.toml        # 英文消息(现有 ~110 条原文)
+└── zh-CN/
+    └── messages.toml        # 中文消息
+```
+
+- 文件内为扁平 key,无语言包裹层:
+
+```toml
+# locales/zh-CN/messages.toml
+"auth.invalid_credentials" = "用户名或密码错误"
+"upload.quota_exceeded" = "存储配额已超出"
+```
+
+- **内置默认**: `pichost-core/src/i18n/locales/{en,zh-CN}/messages.toml`(include_str! 编译进二进制)— 开箱即用
+- **外部覆盖**: `PICHOST_I18N_LOCALES_DIR` env 指向部署目录(如 `/etc/pichost/locales/`),仅加载**当前语言对应文件** + en 回退文件,避免单文件过长
+- 新增异常消息 = 对应语言目录文件加 key + 代码 `t("domain.reason")` 取用;**key 即错误信封的 `code` 字段**(细粒度,~110 个)
+
+### 6.4 信封改造
+
+```json
+{"error": "用户名或密码错误", "code": "auth_invalid_credentials"}
+```
+
+- `error` 消息由 i18n 模块按部署语言生成;en 目录值 = 现有消息原文 → 默认部署(不设语言)响应与今天**逐字相同**,现有测试零破坏
+- 配额 413 增强 body(quota_bytes 等附加字段)保持不变
+- code 命名:`{domain}_{reason}` snake_case
+
+### 6.5 改造点
+
+1. **新模块**: `pichost-core/src/i18n.rs` + 内置目录 `locales/{en,zh-CN}/messages.toml`
+2. **配置**: `config.rs` 新增 `i18n.language`(env `PICHOST_I18N_LANGUAGE`,默认 `en`)、`i18n.locales_dir`(env `PICHOST_I18N_LOCALES_DIR`,可选);config 服务读写 + SystemConfig UI 增加 Language 字段(复用现有 "Save and Restart Required" 模式)
+3. **chokepoint helper 签名**: `error_response(status, key, args)`、`error_json(key, args)`、`err(key, args)`、`too_many_response(retry_after, key)`、`internal_error(key, args)` — 内部 `I18n::global().t(key, args)` 生成消息;~136 调用点改传 key(机械改动)
+4. **`AppError::IntoResponse`**: 保持 en 默认(IntoResponse 无状态上下文);storage_configs.rs 改为经 helper 显式本地化(12 处),其中文消息移入 zh 目录
+5. **`app.rs` 自定义 `JsonRejection` handler**: 畸形 JSON / 缺 Content-Type 统一 `{"error": t("validation_error"), "code": "validation_error"}`(422/415),修复现状明文响应
+
+### 6.6 前端
+
+- `api/client.ts` 错误解析升级:`ApiError { status, code, message }`;UI **直接显示后端 message**(已是部署语言),不再维护 `errors.*` 翻译键
+- `code` 仅用于行为判断:`auth_invalid_token` → 登出跳转、`upload_quota_exceeded` → 配额提示等
+- 未知 code 无碍 — message 已按部署语言本地化
 
 ## 7. 字符串抽取策略
 
@@ -292,8 +282,10 @@ flowchart LR
 ```
 login.* / register.* / dashboard.* / gallery.* / imageDetail.* / settings.*
 admin.* / nav.* / categoryTree.* / storageConfig.* / systemConfig.* / watermark.*
-preprocessing.* / upload.* / common.* / errors.*
+preprocessing.* / upload.* / common.*
 ```
+
+注: 后端错误消息由后端 i18n 模块本地化,前端不维护 errors.* 翻译键(见 §6.6)。
 
 ### 7.2 动态字符串规则
 
@@ -318,7 +310,7 @@ preprocessing.* / upload.* / common.* / errors.*
 3. 主页面:Dashboard / Gallery / ImageDetail / Settings
 4. 重组件:CategoryTree / StorageConfigSection / SystemConfig
 5. Admin 页:AdminStats / AdminUsers / AdminInvites
-6. 后端 code 改造(6 出口 + 136 调用点 + JsonRejection)+ 前端 errors 映射
+6. 后端 i18n 模块 + 消息目录(en/zh)+ 配置接入 + 6 出口改造(136 调用点改传 key)+ JsonRejection + 前端 ApiError 解析与行为 code 判断
 
 ## 8. 测试与验证
 
@@ -327,14 +319,15 @@ preprocessing.* / upload.* / common.* / errors.*
 | 测试文件 | 覆盖 |
 |----------|------|
 | `format.test.ts` | formatBytes/formatDate/formatNumber 双 locale 断言(en 与 zh-CN 输出) |
-| `errors.test.ts` | code → 文案映射;未知 code 回退原文 |
 | `i18n.test.ts` | en.json 与 zh-CN.json key 集一致性;localStorage 读写 |
+| `apiErrors.test.ts` | ApiError 解析;行为 code 判断(auth_invalid_token → 登出、upload_quota_exceeded → 配额提示) |
 
 ### 后端 cargo
 
-- 现有集成测试关键路径追加 code 断言:登录失败 401 → `auth_invalid_credentials`、配额 413 → `upload_quota_exceeded`、404 → `not_found`/`image_not_found`、429 → `rate_limited`
-- `AppError::IntoResponse` code 推导单元测试
-- JsonRejection handler 测试:畸形 JSON → 422 + `validation_error`
+- **i18n 模块单测**(pichost-core): 目录加载(存在/缺失)、回退链(zh 缺失 → en → key 本身)、外部目录合并覆盖、`{}` 参数格式化、`Language::from_str` 解析(未知值回退 en)
+- **集成测试**: `PichostEnvGuard` 设置 `PICHOST_I18N_LANGUAGE=zh-CN`(必要时 + `PICHOST_I18N_LOCALES_DIR`)→ 断言关键错误路径返回中文;默认配置 → 英文(与现状逐字一致)
+- 现有断言消息文本的测试 → 改为断言 `code` + status(消息成为 locale 相关字段,code 更稳定,符合冒烟测试设计指南)
+- `JsonRejection` handler 测试: 畸形 JSON → 422 + `validation_error`
 
 ### 质量门
 
@@ -350,7 +343,8 @@ npm run build
 ## 9. 范围边界(明确不做)
 
 - 不做 URL 路径语言前缀(`/en/...`)— localStorage 检测足够,与 Gallery 现有 URL searchParams 过滤不冲突
-- 后端不感知语言:只发 code,消息保留原文作回退
+- 后端语言为部署级配置,不做每请求语言协商(Accept-Language 协商)— 前端直接展示后端消息
+- 后端 i18n 不做运行期热更新 — 改语言/消息文件后重启 API 生效(复用现有 "Save and Restart Required" 模式)
 - 不做 SSR / Cookie 检测 / 多命名空间 / 按需加载翻译
 - 不引入 eslint-plugin-i18next(列为后续可选防护)
 - 不翻译历史数据(已有用户上传的文件名等)
@@ -359,8 +353,10 @@ npm run build
 
 | 风险 | 应对 |
 |------|------|
-| 现有后端测试断言 `{"error": ...}` — 加 code 字段可能破坏精确 JSON 匹配 | 实现时先跑测试基线;测试若用 `json["error"]` 取值则不受影响;必要时微调测试 |
-| ~136 处调用点补 code 参数工作量大 | 机械改动,按文件分批;6 出口先行,调用点随动 |
+| 现有后端测试断言 `{"error": ...}` 消息文本 — 本地化后成为 locale 相关字段 | 默认部署(无语言配置)响应逐字不变;断言消息的测试迁移为断言 `code` + status |
+| ~136 处调用点改传 key 工作量大 | 机械改动,按文件分批;6 出口先行,调用点随动;key 缺失时回退显示 key 本身,便于排查 |
+| 语言文件缺失/损坏 | 回退链兜底(当前语言 → en → key);外部目录加载失败时告警并回退内置默认 |
+| i18n 全局单例与并行测试隔离 | `RwLock<Option<Arc<I18n>>>` 可重置;单测构造本地 `I18n` 实例,集成测试用 `PichostEnvGuard` |
+| 语言配置值未知 | `Language::from_str` 解析未知值告警并回退 en |
+| en/zh key 集漂移 | 前端 `i18n.test.ts` key 一致性测试;后端单测断言目录加载后 key 非空 |
 | i18next 依赖体积 ~40KB gzip | 对已有 react-query/zustand 的项目可接受;2 语言资源构建时打包 |
-| en/zh key 集漂移 | `i18n.test.ts` key 一致性测试兜底 |
-| 未知后端 code 出现 | 前端回退显示原文,不阻塞;新 code 后续补翻译 |
