@@ -237,7 +237,8 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 ├── nginx/
 │   └── nginx.conf           Reverse proxy + cache + rate limiting
 ├── migrations/              10 SQL migrations (0001–0010)
-├── scripts/                 systemd services + install/uninstall scripts
+├── scripts/                 systemd services + install/uninstall + verify-release scripts
+├── CHANGELOG.md             Keep a Changelog, linked from every GitHub Release
 ├── .github/workflows/       Smoke tests (PR → 555-test suite), Release CI (v* tags → build, test, package .tar.gz)
 ├── Dockerfile.api           Multi-stage Rust build for API
 ├── Dockerfile.worker        Multi-stage Rust build for Worker
@@ -272,7 +273,7 @@ sudo ./scripts/install.sh          # installs binaries to /opt/pichost, configur
 sudo ./scripts/uninstall.sh        # removes installation and services
 ```
 
-Units: `pichost-api.service` (API) + `pichost-worker.service` (worker), run as user `pichost` with `EnvironmentFile=/etc/pichost/.env`. Release artifacts (`.tar.gz`) are built by GitHub Actions on `v*` tags.
+Units: `pichost-api.service` (API) + `pichost-worker.service` (worker), run as user `pichost` with `EnvironmentFile=/etc/pichost/.env`. Release artifacts (`.tar.gz`) are built by GitHub Actions on `v*` tags. Run `bash scripts/verify-release.sh` locally before tagging — it mirrors the release build→package steps and dry-runs `install.sh` in a systemd-free container.
 
 ### Production checklist
 

@@ -18,6 +18,7 @@
 | Run API server | `cargo run -p pichost-api` | Requires PostgreSQL + Redis |
 | Frontend dev | `cd web-ui && npm run dev` | Vite proxies `/api`, `/u` → `localhost:3000` |
 | Frontend build | `cd web-ui && npm run build` | `tsc -b && vite build` |
+| Verify release pkg | `bash scripts/verify-release.sh` | Local simulation of release.yml build→package→install dry-run; run before tagging `v*` |
 | Docker stack | `docker compose up --build -d` | Nginx :80, API×2, Worker×2, PG, Redis |
 | Docker stop | `docker compose down` | Add `-v` to wipe volumes |
 
@@ -125,8 +126,8 @@
 - API is stateless (state in PostgreSQL + Redis) — scale horizontally.
 - Postgres/Redis ports not exposed to host — internal Docker network only.
 - Two compose files: `docker-compose.yml` (local dev/S3) and `docker-compose.prod.yml` (production S3, `.env`-driven).
-- Bare-metal packaging: `scripts/pichost-api.service` + `scripts/pichost-worker.service` (systemd, `User=pichost`, `EnvironmentFile=/etc/pichost/.env`), install/uninstall via `scripts/install.sh` / `scripts/uninstall.sh`.
-- CI: `.github/workflows/smoke-test.yml` — PR to `main` → full API integration suite (`cargo test --workspace -- --include-ignored`, ~555 tests) against PG+Redis+MinIO service containers + clippy gate. `.github/workflows/release.yml` — `v*` tags → build x86_64-unknown-linux-gnu, test + clippy, package `.tar.gz`. `.github/workflows/e2e.yml` — Playwright E2E, PG+Redis service containers.
+- Bare-metal packaging: `scripts/pichost-api.service` + `scripts/pichost-worker.service` (systemd, `User=pichost`, `EnvironmentFile=/etc/pichost/.env`), install/uninstall via `scripts/install.sh` / `scripts/uninstall.sh`. Pre-tag verification: `scripts/verify-release.sh` (local mirror of release.yml build→package→install dry-run).
+- CI: `.github/workflows/smoke-test.yml` — PR to `main` → full API integration suite (`cargo test --workspace -- --include-ignored`, ~555 tests) against PG+Redis+MinIO service containers + clippy gate. `.github/workflows/release.yml` — `v*` tags → build x86_64-unknown-linux-gnu, test + clippy, package `.tar.gz`. `.github/workflows/e2e.yml` — Playwright E2E, PG+Redis service containers. Release body links `CHANGELOG.md` (Keep a Changelog format, updated per release).
 
 ## API Endpoints Summary
 
