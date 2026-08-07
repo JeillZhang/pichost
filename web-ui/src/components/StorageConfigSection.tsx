@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -65,6 +66,7 @@ interface ConfigModalProps {
 }
 
 function ConfigModal({ editing, onClose }: ConfigModalProps) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [form, setForm] = useState<FormState>(
     editing
@@ -88,11 +90,11 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
   }
 
   function validate(): string | null {
-    if (!form.name.trim()) return 'Name is required'
-    if (!isEdit && !form.token.trim()) return 'Token is required'
-    if (!form.repo.trim()) return 'Repo is required'
-    if (!form.branch.trim()) return 'Branch is required'
-    if (!form.repo.includes('/')) return 'Repo must be in owner/repo format'
+    if (!form.name.trim()) return t('storageConfig.nameRequired')
+    if (!isEdit && !form.token.trim()) return t('storageConfig.tokenRequired')
+    if (!form.repo.trim()) return t('storageConfig.repoRequired')
+    if (!form.branch.trim()) return t('storageConfig.branchRequired')
+    if (!form.repo.includes('/')) return t('storageConfig.repoFormat')
     return null
   }
 
@@ -114,7 +116,7 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
         }
         if (form.token.trim()) data.token = form.token.trim()
         await updateStorageConfig(editing.id, data)
-        toast.success('Config updated')
+        toast.success(t('storageConfig.configUpdated'))
       } else {
         const data: CreateStorageConfigRequest = {
           name: form.name.trim(),
@@ -126,12 +128,12 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
           is_default: form.is_default,
         }
         await createStorageConfig(data)
-        toast.success('Config created')
+        toast.success(t('storageConfig.configCreated'))
       }
       queryClient.invalidateQueries({ queryKey: ['storage-configs'] })
       onClose()
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Save failed')
+      toast.error(e instanceof Error ? e.message : t('storageConfig.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -163,7 +165,7 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
             className="text-lg font-semibold"
             style={{ color: 'var(--color-text-primary)' }}
           >
-            {isEdit ? 'Edit Storage Config' : 'Add Storage Config'}
+            {isEdit ? t('storageConfig.editTitle') : t('storageConfig.addTitle')}
           </h2>
           <button
             onClick={onClose}
@@ -181,12 +183,12 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
               className="mb-1 block text-sm font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Name
+              {t('storageConfig.name')}
             </label>
             <input
               type="text"
               required
-              placeholder={form.provider === 'github' ? 'My GitHub Repo' : 'My GitCode Repo'}
+              placeholder={form.provider === 'github' ? t('storageConfig.namePlaceholderGithub') : t('storageConfig.namePlaceholderGitcode')}
               value={form.name}
               onChange={(e) => set('name', e.target.value)}
               className="block w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1"
@@ -200,7 +202,7 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
               className="mb-1 block text-sm font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Provider
+              {t('storageConfig.provider')}
             </label>
             <GlassSelect
               value={form.provider}
@@ -217,13 +219,13 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
               className="mb-1 block text-sm font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Token {isEdit && '(leave blank to keep current)'}
+              {t('storageConfig.token')} {isEdit && t('storageConfig.tokenKeepHint')}
             </label>
             <div className="relative">
               <input
                 type={showToken ? 'text' : 'password'}
                 required={!isEdit}
-                placeholder={isEdit ? '••••••••' : 'ghp_...'}
+                placeholder={isEdit ? t('storageConfig.tokenPlaceholderEdit') : t('storageConfig.tokenPlaceholderNew')}
                 value={form.token}
                 onChange={(e) => set('token', e.target.value)}
                 className="block w-full rounded-lg py-2 pl-3 pr-10 text-sm focus:outline-none focus:ring-1"
@@ -247,12 +249,12 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
               className="mb-1 block text-sm font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Repo (owner/repo)
+              {t('storageConfig.repo')}
             </label>
             <input
               type="text"
               required
-              placeholder="owner/repo"
+              placeholder={t('storageConfig.repoPlaceholder')}
               value={form.repo}
               onChange={(e) => set('repo', e.target.value)}
               className="block w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1"
@@ -267,7 +269,7 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
                 className="mb-1 block text-sm font-medium"
                 style={{ color: 'var(--color-text-secondary)' }}
               >
-                Branch
+                {t('storageConfig.branch')}
               </label>
               <input
                 type="text"
@@ -283,11 +285,11 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
                 className="mb-1 block text-sm font-medium"
                 style={{ color: 'var(--color-text-secondary)' }}
               >
-                Path Prefix
+                {t('storageConfig.pathPrefix')}
               </label>
               <input
                 type="text"
-                placeholder="images/"
+                placeholder={t('storageConfig.pathPrefixPlaceholder')}
                 value={form.path_prefix}
                 onChange={(e) => set('path_prefix', e.target.value)}
                 className="block w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1"
@@ -305,7 +307,7 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
               className="rounded"
             />
             <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              Set as default
+              {t('storageConfig.setAsDefault')}
             </span>
           </label>
 
@@ -319,7 +321,7 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
                 className="rounded-lg px-4 py-2 text-sm transition-colors"
                 style={{ color: 'var(--color-text-muted)' }}
               >
-                Cancel
+                {t('storageConfig.cancel')}
               </button>
               <button
                 type="submit"
@@ -330,12 +332,12 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
                 {saving ? (
                   <>
                     <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" />
-                    Saving…
+                    {t('storageConfig.saving')}
                   </>
                 ) : isEdit ? (
-                  'Update'
+                  t('storageConfig.update')
                 ) : (
-                  'Create'
+                  t('storageConfig.create')
                 )}
               </button>
             </div>
@@ -354,6 +356,7 @@ interface DeleteConfirmProps {
 }
 
 function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [deleting, setDeleting] = useState(false)
 
@@ -361,11 +364,11 @@ function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
     setDeleting(true)
     try {
       await deleteStorageConfig(config.id)
-      toast.success('Config deleted')
+      toast.success(t('storageConfig.configDeleted'))
       queryClient.invalidateQueries({ queryKey: ['storage-configs'] })
       onClose()
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Delete failed')
+      toast.error(e instanceof Error ? e.message : t('storageConfig.deleteFailed'))
     } finally {
       setDeleting(false)
     }
@@ -389,13 +392,15 @@ function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
           className="mb-2 text-lg font-semibold"
           style={{ color: 'var(--color-text-primary)' }}
         >
-          Delete Config
+          {t('storageConfig.deleteConfigTitle')}
         </h2>
         <p className="mb-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          Are you sure you want to delete <strong>{config.name}</strong>?
+          {t('storageConfig.deleteConfirmPrefix')}{' '}
+          <strong>{config.name}</strong>
+          {t('storageConfig.deleteConfirmSuffix')}
         </p>
         <p className="mb-4 text-xs" style={{ color: 'var(--color-danger)' }}>
-          Images stored via this config will remain but may become unreachable.
+          {t('storageConfig.deleteWarning')}
         </p>
 
         <div className="flex justify-end gap-3">
@@ -406,7 +411,7 @@ function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
             className="rounded-lg px-4 py-2 text-sm transition-colors"
             style={{ color: 'var(--color-text-muted)' }}
           >
-            Cancel
+            {t('storageConfig.cancel')}
           </button>
           <button
             type="button"
@@ -418,10 +423,10 @@ function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
             {deleting ? (
               <>
                 <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" />
-                Deleting…
+                {t('storageConfig.deleting')}
               </>
             ) : (
-              'Delete'
+              t('storageConfig.delete')
             )}
           </button>
         </div>
@@ -433,6 +438,7 @@ function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
 
 // ── Main Section ───────────────────────────────────────────
 export default function StorageConfigSection() {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { data: configs, isLoading, error } = useQuery({
     queryKey: ['storage-configs'],
@@ -461,10 +467,10 @@ export default function StorageConfigSection() {
   async function handleSetDefault(id: string) {
     try {
       await setDefaultStorageConfig(id)
-      toast.success('Default config updated')
+      toast.success(t('storageConfig.defaultUpdated'))
       queryClient.invalidateQueries({ queryKey: ['storage-configs'] })
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to set default')
+      toast.error(e instanceof Error ? e.message : t('storageConfig.setDefaultFailed'))
     }
   }
 
@@ -478,7 +484,7 @@ export default function StorageConfigSection() {
           className="text-sm font-medium"
           style={{ color: 'var(--color-text-primary)' }}
         >
-          Storage Configs
+          {t('storageConfig.title')}
         </h3>
         <button
           onClick={openAdd}
@@ -486,7 +492,7 @@ export default function StorageConfigSection() {
           style={{ backgroundColor: 'var(--color-accent)' }}
         >
           <Plus className="h-3.5 w-3.5" />
-          Add
+          {t('storageConfig.addButton')}
         </button>
       </div>
 
@@ -506,7 +512,7 @@ export default function StorageConfigSection() {
           className="py-3 text-center text-sm"
           style={{ color: 'var(--color-danger)' }}
         >
-          Failed to load storage configs.
+          {t('storageConfig.failedToLoad')}
         </p>
       )}
 
@@ -516,7 +522,7 @@ export default function StorageConfigSection() {
           className="py-6 text-center text-sm"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          No storage configs yet. Add one to use GitHub/GitCode as storage backend.
+          {t('storageConfig.emptyState')}
         </p>
       )}
 
@@ -567,7 +573,7 @@ export default function StorageConfigSection() {
                         }}
                       >
                         <Star className="h-2.5 w-2.5" />
-                        Default
+                        {t('storageConfig.defaultBadge')}
                       </span>
                     )}
                   </div>
@@ -588,7 +594,7 @@ export default function StorageConfigSection() {
                       onClick={() => handleSetDefault(cfg.id)}
                       className="rounded p-1.5 transition-colors hover:bg-[var(--color-surface)]"
                       style={{ color: 'var(--color-text-muted)' }}
-                      title="Set as default"
+                      title={t('storageConfig.setDefaultTitle')}
                     >
                       <Check className="h-3.5 w-3.5" />
                     </button>
@@ -597,7 +603,7 @@ export default function StorageConfigSection() {
                     onClick={() => openEdit(cfg)}
                     className="rounded p-1.5 transition-colors hover:bg-[var(--color-surface)]"
                     style={{ color: 'var(--color-text-muted)' }}
-                    title="Edit"
+                    title={t('storageConfig.editAria')}
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
@@ -605,7 +611,7 @@ export default function StorageConfigSection() {
                     onClick={() => setDeletingConfig(cfg)}
                     className="rounded p-1.5 transition-colors hover:bg-[var(--color-surface)]"
                     style={{ color: 'var(--color-text-muted)' }}
-                    title="Delete"
+                    title={t('storageConfig.deleteAria')}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>

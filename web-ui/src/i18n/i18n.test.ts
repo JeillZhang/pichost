@@ -84,3 +84,11 @@ it('imageDetail and settings prefixes exist in both locales', async () => {
     expect(Object.keys(zh)).toContain(prefix)
   }
 })
+it('categoryTree and storageConfig prefixes exist in both locales', async () => {
+  const en = (await import('./locales/en.json')).default as Record<string, unknown>
+  const zh = (await import('./locales/zh-CN.json')).default as Record<string, unknown>
+  for (const prefix of ['categoryTree', 'storageConfig']) {
+    expect(Object.keys(en)).toContain(prefix)
+    expect(Object.keys(zh)).toContain(prefix)
+  }
+})
