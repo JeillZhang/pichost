@@ -85,5 +85,35 @@
     "open": "Open",
     "copyUrl": "Copy URL",
     "copyMd": "Copy MD"
+  },
+  "gallery": {
+    "title": "Gallery",
+    "imagesCount": "{{count}} images",
+    "allBackends": "All backends",
+    "selected": "{{count}} selected",
+    "deselectAll": "Deselect All",
+    "selectAll": "Select All",
+    "delete": "Delete",
+    "moveToCategory": "Move to category",
+    "loading": "Loading…",
+    "failedToLoad": "Failed to load images.",
+    "noImagesFound": "No images found.",
+    "tryDifferentSearch": "Try a different search term.",
+    "selectAria": "Select {{name}}",
+    "loadingMore": "Loading more…",
+    "allLoaded": "All {{count}} images loaded",
+    "deleteConfirm_one": "Delete {{count}} image?",
+    "deleteConfirm_other": "Delete {{count}} images?",
+    "cancel": "Cancel",
+    "deleting": "Deleting…"
+  },
+  "urlUpload": {
+    "placeholder": "Paste image URL...",
+    "uploadButton": "Upload"
+  },
+  "linkCard": {
+    "copied": "{{label}} copied",
+    "copyFailed": "Failed to copy",
+    "copyTitle": "Copy {{label}}"
   }
 }

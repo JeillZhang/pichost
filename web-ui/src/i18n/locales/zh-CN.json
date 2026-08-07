@@ -85,5 +85,35 @@
     "open": "打开",
     "copyUrl": "复制链接",
     "copyMd": "复制 MD"
+  },
+  "gallery": {
+    "title": "图库",
+    "imagesCount": "{{count}} 张图片",
+    "allBackends": "全部后端",
+    "selected": "已选 {{count}} 张",
+    "deselectAll": "取消全选",
+    "selectAll": "全选",
+    "delete": "删除",
+    "moveToCategory": "移动到分类",
+    "loading": "加载中…",
+    "failedToLoad": "加载图片失败。",
+    "noImagesFound": "没有找到图片。",
+    "tryDifferentSearch": "尝试其他搜索词。",
+    "selectAria": "选择 {{name}}",
+    "loadingMore": "加载更多…",
+    "allLoaded": "已加载全部 {{count}} 张图片",
+    "deleteConfirm_one": "删除 {{count}} 张图片？",
+    "deleteConfirm_other": "删除 {{count}} 张图片？",
+    "cancel": "取消",
+    "deleting": "删除中…"
+  },
+  "urlUpload": {
+    "placeholder": "粘贴图片 URL…",
+    "uploadButton": "上传"
+  },
+  "linkCard": {
+    "copied": "{{label}} 已复制",
+    "copyFailed": "复制失败",
+    "copyTitle": "复制 {{label}}"
   }
 }

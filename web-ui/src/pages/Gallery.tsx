@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { listImages, batchDeleteImages, listStorageConfigs } from '../api/client'
 import type { ImageInfo, PaginatedListParams } from '../api/client'
 import { CheckSquare, Square, Trash2, X, Code2, Server, HardDrive } from 'lucide-react'
@@ -23,6 +24,7 @@ function getProviderIcon(provider: string) {
 }
 
 export default function Gallery() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -180,13 +182,13 @@ export default function Gallery() {
             className="text-lg font-bold"
             style={{ color: 'var(--color-text-primary)', fontFamily: "'Outfit', system-ui, sans-serif" }}
           >
-            Gallery
+            {t('gallery.title')}
             {total > 0 && (
               <span
                 className="ml-2 text-sm font-normal"
                 style={{ color: 'var(--color-text-muted)' }}
               >
-                ({total} images)
+                ({t('gallery.imagesCount', { count: total })})
               </span>
             )}
           </h1>
@@ -201,7 +203,7 @@ export default function Gallery() {
                   value={storageConfigFilter}
                   onChange={setStorageConfigFilter}
                   options={[
-                    { value: '', label: 'All backends' },
+                    { value: '', label: t('gallery.allBackends') },
                     ...storageConfigs.map((c) => ({ value: c.id, label: c.name })),
                   ]}
                 />
@@ -227,7 +229,7 @@ export default function Gallery() {
             }}
           >
             <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-              {selected.size} selected
+              {t('gallery.selected', { count: selected.size })}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -235,7 +237,7 @@ export default function Gallery() {
                 className="rounded-lg px-2 py-1 text-xs transition-colors duration-150 hover:bg-[var(--color-surface-hover)]"
                 style={{ color: 'var(--color-text-secondary)' }}
               >
-                {selected.size === allImages.length ? 'Deselect All' : 'Select All'}
+                {selected.size === allImages.length ? t('gallery.deselectAll') : t('gallery.selectAll')}
               </button>
               <button
                 onClick={() => setShowConfirm(true)}
@@ -247,13 +249,13 @@ export default function Gallery() {
                 }}
               >
                 <Trash2 className="h-3 w-3" />
-                Delete
+                {t('gallery.delete')}
               </button>
               <button
                 onClick={handleBatchMove}
                 className="btn-ghost px-3 py-1.5 text-xs"
               >
-                Move to category
+                {t('gallery.moveToCategory')}
               </button>
               <button
                 onClick={clearSelection}
@@ -272,12 +274,12 @@ export default function Gallery() {
             className="flex min-h-[200px] items-center justify-center"
             style={{ color: 'var(--color-text-muted)' }}
           >
-            Loading…
+            {t('gallery.loading')}
           </div>
         )}
         {isError && (
           <div className="flex min-h-[200px] items-center justify-center" style={{ color: 'var(--color-danger)' }}>
-            Failed to load images.
+            {t('gallery.failedToLoad')}
           </div>
         )}
         {!isLoading && !isError && allImages.length === 0 && (
@@ -285,8 +287,8 @@ export default function Gallery() {
             className="flex min-h-[200px] flex-col items-center justify-center gap-2"
             style={{ color: 'var(--color-text-muted)' }}
           >
-            <p>No images found.</p>
-            {search && <p className="text-sm">Try a different search term.</p>}
+            <p>{t('gallery.noImagesFound')}</p>
+            {search && <p className="text-sm">{t('gallery.tryDifferentSearch')}</p>}
           </div>
         )}
 
@@ -306,7 +308,7 @@ export default function Gallery() {
                         e.stopPropagation()
                         toggleSelect(img.id)
                       }}
-                      aria-label={`Select ${img.original_name}`}
+                      aria-label={t('gallery.selectAria', { name: img.original_name })}
                       className={`absolute left-2 top-2 z-10 rounded-lg p-1 backdrop-blur-sm transition-all duration-150 ${
                         selectMode
                           ? 'bg-black/50 hover:bg-black/70'
@@ -358,7 +360,7 @@ export default function Gallery() {
                 className="mt-4 flex items-center justify-center py-4 text-sm"
                 style={{ color: 'var(--color-text-muted)' }}
               >
-                Loading more…
+                {t('gallery.loadingMore')}
               </div>
             )}
             {!hasNextPage && allImages.length > 0 && (
@@ -366,7 +368,7 @@ export default function Gallery() {
                 className="mt-4 flex items-center justify-center py-4 text-sm"
                 style={{ color: 'var(--color-text-muted)' }}
               >
-                All {total} images loaded
+                {t('gallery.allLoaded', { count: total })}
               </div>
             )}
           </>
@@ -380,14 +382,14 @@ export default function Gallery() {
                 className="mb-2 text-lg font-semibold"
                 style={{ color: 'var(--color-text-primary)' }}
               >
-                Delete {selected.size} image{selected.size !== 1 ? 's' : ''}?
+                {t('gallery.deleteConfirm', { count: selected.size })}
               </h2>
               <p className="mb-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                 This cannot be undone. Images will be permanently deleted from storage.
               </p>
               <div className="flex justify-end gap-3">
                 <button onClick={() => setShowConfirm(false)} className="btn-ghost">
-                  Cancel
+                  {t('gallery.cancel')}
                 </button>
                 <button
                   onClick={confirmDelete}
@@ -398,7 +400,7 @@ export default function Gallery() {
                     color: 'white',
                   }}
                 >
-                  {isDeleting ? 'Deleting…' : 'Delete'}
+                  {isDeleting ? t('gallery.deleting') : t('gallery.delete')}
                 </button>
               </div>
             </div>
