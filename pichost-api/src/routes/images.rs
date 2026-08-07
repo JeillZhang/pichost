@@ -184,7 +184,9 @@ pub async fn upload_handler(
     let (bytes, file_name, storage_config_ids) =
         extract_upload_parts(&mut multipart, locale.0).await?;
 
-    match upload::process_upload(&state, &user, bytes, file_name, storage_config_ids).await {
+    match upload::process_upload(&state, &user, bytes, file_name, storage_config_ids, locale.0)
+        .await
+    {
         Ok(results) => {
             crate::metrics::UPLOADS_TOTAL.inc();
             Ok((StatusCode::CREATED, Json(results)))
@@ -224,9 +226,10 @@ pub async fn url_upload_handler(
 ) -> Result<(StatusCode, Json<Vec<UploadResult>>), RouteError> {
     validate_url_not_empty(&payload.url, locale.0)?;
 
-    let (bytes, file_name) = upload_url::fetch_image_from_url(&payload.url).await?;
+    let (bytes, file_name) = upload_url::fetch_image_from_url(&payload.url, locale.0).await?;
 
-    match upload::process_upload(&state, &user, bytes, file_name, payload.storage_config_ids).await
+    match upload::process_upload(&state, &user, bytes, file_name, payload.storage_config_ids, locale.0)
+        .await
     {
         Ok(results) => {
             crate::metrics::UPLOADS_TOTAL.inc();

@@ -11,10 +11,12 @@ use uuid::Uuid;
 
 use crate::app::AppState;
 use crate::cache::CachePool;
+use crate::i18n_ext::{error_json, error_json_args, error_json_extra};
 use crate::middleware::auth::AuthUser;
 use crate::services::html_escape;
 use deadpool_redis::redis::AsyncCommands;
 use pichost_core::crypto::decode_key;
+use pichost_core::i18n::Language;
 use pichost_core::models::UserStorageConfig;
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -261,6 +263,7 @@ async fn check_upload_quotas(
     state: &AppState,
     user: &AuthUser,
     file_size: u64,
+    locale: Language,
 ) -> Result<(), ApiError> {
     let max_size = if user.is_admin {
         state.config.upload.max_file_size_admin
@@ -268,9 +271,10 @@ async fn check_upload_quotas(
         state.config.upload.max_file_size_user
     };
     if file_size > max_size {
-        return Err((
+        return Err(error_json(
+            locale,
             StatusCode::PAYLOAD_TOO_LARGE,
-            Json(serde_json::json!({"error": "file exceeds maximum allowed size"})),
+            "upload.file_too_large",
         ));
     }
 
@@ -283,22 +287,20 @@ async fn check_upload_quotas(
         .await
         .map_err(|e| {
             tracing::warn!("Quota usage query failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
-            )
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })?;
 
         let new_file_size = file_size as i64;
         if current_usage + new_file_size > quota {
-            return Err((
+            return Err(error_json_extra(
+                locale,
                 StatusCode::PAYLOAD_TOO_LARGE,
-                Json(serde_json::json!({
-                    "error": "storage quota exceeded",
+                "upload.quota_exceeded",
+                serde_json::json!({
                     "quota_bytes": quota,
                     "used_bytes": current_usage,
                     "file_bytes": new_file_size,
-                })),
+                }),
             ));
         }
     }
@@ -313,11 +315,12 @@ async fn try_dedup(
     user_id: Uuid,
     sha256: &str,
     storage_config_id: Option<Uuid>,
+    locale: Language,
 ) -> Result<Option<UploadResult>, ApiError> {
-    if !dedup_exists(state, user_id, sha256, storage_config_id).await? {
+    if !dedup_exists(state, user_id, sha256, storage_config_id, locale).await? {
         return Ok(None);
     }
-    let row = fetch_dedup_row(state, user_id, sha256, storage_config_id).await?;
+    let row = fetch_dedup_row(state, user_id, sha256, storage_config_id, locale).await?;
     Ok(Some(UploadResult::from_row(row)))
 }
 
@@ -328,6 +331,7 @@ async fn dedup_exists(
     user_id: Uuid,
     sha256: &str,
     storage_config_id: Option<Uuid>,
+    locale: Language,
 ) -> Result<bool, ApiError> {
     sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM images \
@@ -341,10 +345,7 @@ async fn dedup_exists(
     .await
     .map_err(|e| {
         tracing::warn!("Dedup query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })
 }
 
@@ -354,6 +355,7 @@ async fn fetch_dedup_row(
     user_id: Uuid,
     sha256: &str,
     storage_config_id: Option<Uuid>,
+    locale: Language,
 ) -> Result<ImageRow, ApiError> {
     sqlx::query_as::<_, ImageRow>(
         "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size, \
@@ -372,15 +374,12 @@ async fn fetch_dedup_row(
     .await
     .map_err(|e| {
         tracing::warn!("Failed to fetch existing image: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })
 }
 
 /// Generates a collision-free 6-char hex public key.
-async fn generate_public_key(state: &AppState) -> Result<String, ApiError> {
+async fn generate_public_key(state: &AppState, locale: Language) -> Result<String, ApiError> {
     use rand::Rng;
     loop {
         let key = format!("{:06x}", rand::thread_rng().gen::<u32>() & 0xFFFFFF);
@@ -391,9 +390,10 @@ async fn generate_public_key(state: &AppState) -> Result<String, ApiError> {
                 .await
                 .map_err(|e| {
                     tracing::warn!("Public key uniqueness check failed: {e}");
-                    (
+                    error_json(
+                        locale,
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({"error": "internal server error"})),
+                        "common.internal_error",
                     )
                 })?;
         if !key_exists {
@@ -432,15 +432,17 @@ fn image_dimensions(bytes: &[u8]) -> (Option<i32>, Option<i32>) {
 
 /// Decode the token encryption key from config, returning a zeroed key if
 /// none is configured (local-only uploads still work).
-fn resolve_encryption_key(config: &pichost_core::config::AppConfig) -> Result<[u8; 32], ApiError> {
+fn resolve_encryption_key(
+    config: &pichost_core::config::AppConfig,
+    locale: Language,
+) -> Result<[u8; 32], ApiError> {
     match &config.token_encryption_key {
         Some(encoded) => decode_key(encoded).map_err(|e| {
             tracing::warn!("Invalid token encryption key: {e}");
-            (
+            error_json(
+                locale,
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "server misconfiguration: invalid encryption key"
-                })),
+                "upload.encryption_key_invalid",
             )
         }),
         None => Ok([0u8; 32]),
@@ -454,16 +456,17 @@ async fn resolve_upload_configs(
     pool: &PgPool,
     user_id: Uuid,
     storage_config_ids: Option<Vec<Uuid>>,
+    locale: Language,
 ) -> Result<Vec<UserStorageConfig>, ApiError> {
     if let Some(ids) = storage_config_ids {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        return fetch_configs_by_ids(pool, user_id, &ids).await;
+        return fetch_configs_by_ids(pool, user_id, &ids, locale).await;
     }
 
     // Backward compat: use user's default config, or local fallback
-    if let Some(config) = fetch_default_config(pool, user_id).await? {
+    if let Some(config) = fetch_default_config(pool, user_id, locale).await? {
         return Ok(vec![config]);
     }
 
@@ -476,6 +479,7 @@ async fn fetch_configs_by_ids(
     pool: &PgPool,
     user_id: Uuid,
     ids: &[Uuid],
+    locale: Language,
 ) -> Result<Vec<UserStorageConfig>, ApiError> {
     let configs = sqlx::query_as::<_, UserStorageConfig>(
         "SELECT id, user_id, name, provider, is_default, \
@@ -490,18 +494,14 @@ async fn fetch_configs_by_ids(
     .await
     .map_err(|e| {
         tracing::warn!("Failed to resolve upload configs: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?;
 
     if configs.is_empty() {
-        return Err((
+        return Err(error_json(
+            locale,
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "storage_config_ids: no matching configs found"
-            })),
+            "upload.configs_none_match",
         ));
     }
     Ok(configs)
@@ -511,6 +511,7 @@ async fn fetch_configs_by_ids(
 async fn fetch_default_config(
     pool: &PgPool,
     user_id: Uuid,
+    locale: Language,
 ) -> Result<Option<UserStorageConfig>, ApiError> {
     sqlx::query_as::<_, UserStorageConfig>(
         "SELECT id, user_id, name, provider, is_default, \
@@ -523,10 +524,7 @@ async fn fetch_default_config(
     .await
     .map_err(|e| {
         tracing::warn!("Failed to fetch default config: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })
 }
 
@@ -545,21 +543,22 @@ fn local_fallback_config(user_id: Uuid) -> UserStorageConfig {
 }
 
 /// Validate upload configs: max 2 configs, at least one must be "local".
-fn validate_upload_configs(configs: &[UserStorageConfig]) -> Result<(), ApiError> {
+fn validate_upload_configs(
+    configs: &[UserStorageConfig],
+    locale: Language,
+) -> Result<(), ApiError> {
     if configs.len() > 2 {
-        return Err((
+        return Err(error_json(
+            locale,
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "at most 2 storage_config_ids are allowed"
-            })),
+            "upload.configs_too_many",
         ));
     }
     if !configs.iter().any(|c| c.provider == "local") {
-        return Err((
+        return Err(error_json(
+            locale,
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "at least one storage config must use 'local' provider"
-            })),
+            "upload.configs_need_local",
         ));
     }
     Ok(())
@@ -567,12 +566,22 @@ fn validate_upload_configs(configs: &[UserStorageConfig]) -> Result<(), ApiError
 
 // ── Storage / DB persistence helpers ───────────────────────────────────────
 
-/// Maps a `StorageError` to an HTTP status code and error message.
-fn storage_error_response(e: &pichost_core::error::StorageError) -> (StatusCode, String) {
+/// Maps a `StorageError` to an HTTP status code and localized error body.
+fn storage_error_response(locale: Language, e: &pichost_core::error::StorageError) -> ApiError {
     use pichost_core::error::StorageError;
     match e {
-        StorageError::PayloadTooLarge(m) => (StatusCode::PAYLOAD_TOO_LARGE, m.clone()),
-        _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        StorageError::PayloadTooLarge(m) => error_json_args(
+            locale,
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "common.db_error",
+            std::slice::from_ref(m),
+        ),
+        _ => error_json_args(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error_detail",
+            &[e.to_string()],
+        ),
     }
 }
 
@@ -585,14 +594,14 @@ async fn write_to_storage(
     public_key: &str,
     bytes: &[u8],
     mime_type: &str,
+    locale: Language,
 ) -> Result<(String, String, String), ApiError> {
     let storage_key = storage
         .put(&format!("{}/{}", user_id, public_key), bytes, mime_type)
         .await
         .map_err(|e| {
             tracing::warn!("Storage write failed on {}: {e}", storage.backend_name());
-            let (status, msg) = storage_error_response(&e);
-            (status, Json(serde_json::json!({"error": msg})))
+            storage_error_response(locale, &e)
         })?;
     let backend_name = storage.backend_name().to_string();
     let url = if backend_name == "local" {
@@ -619,6 +628,7 @@ async fn insert_image_record(
     sha256: &str,
     url: &str,
     storage_config_id: Option<Uuid>,
+    locale: Language,
 ) -> Result<Uuid, ApiError> {
     sqlx::query_scalar(
         r#"INSERT INTO images
@@ -644,9 +654,10 @@ async fn insert_image_record(
     .await
     .map_err(|e| {
         tracing::warn!("Image insert failed: {e}");
-        (
+        error_json(
+            locale,
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "failed to save image metadata"})),
+            "upload.save_failed",
         )
     })
 }
@@ -665,19 +676,21 @@ async fn persist_image_for_config(
     width: Option<i32>,
     height: Option<i32>,
     sha256: &str,
+    locale: Language,
 ) -> Result<(Uuid, String, String, String, String), ApiError> {
     let storage = state
         .router
         .for_config(config, encryption_key)
         .map_err(|e| {
             tracing::warn!("Failed to resolve backend for config {}: {e}", config.id);
-            (
+            error_json(
+                locale,
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "failed to resolve storage backend"})),
+                "upload.backend_resolve_failed",
             )
         })?;
 
-    let public_key = generate_public_key(state).await?;
+    let public_key = generate_public_key(state, locale).await?;
 
     let (storage_key, url, backend_name) = write_to_storage(
         &storage,
@@ -686,6 +699,7 @@ async fn persist_image_for_config(
         &public_key,
         bytes,
         mime_type,
+        locale,
     )
     .await?;
 
@@ -716,6 +730,7 @@ async fn persist_image_for_config(
         sha256,
         &url,
         db_config_id,
+        locale,
     )
     .await?;
 
@@ -791,6 +806,7 @@ async fn upload_to_single_backend(
     mime_type: &str,
     width: Option<i32>,
     height: Option<i32>,
+    locale: Language,
 ) -> Result<UploadResult, ApiError> {
     let config_id = if config.id.is_nil() {
         None
@@ -799,7 +815,7 @@ async fn upload_to_single_backend(
     };
 
     // Deduplicate per config
-    if let Some(existing) = try_dedup(state, user.id, sha256, config_id).await? {
+    if let Some(existing) = try_dedup(state, user.id, sha256, config_id, locale).await? {
         return Ok(existing);
     }
 
@@ -814,6 +830,7 @@ async fn upload_to_single_backend(
         width,
         height,
         sha256,
+        locale,
     )
     .await?;
 
@@ -854,21 +871,24 @@ pub async fn process_upload(
     bytes: Vec<u8>,
     file_name: String,
     storage_config_ids: Option<Vec<Uuid>>,
+    locale: Language,
 ) -> Result<Vec<UploadResult>, ApiError> {
     if !infer::is_image(&bytes) {
-        return Err((
+        return Err(error_json(
+            locale,
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "file is not a valid image"})),
+            "upload.not_an_image",
         ));
     }
 
-    check_upload_quotas(state, user, bytes.len() as u64).await?;
+    check_upload_quotas(state, user, bytes.len() as u64, locale).await?;
 
     let sha256 = format!("{:x}", sha2::Sha256::digest(&bytes));
-    let configs = resolve_upload_configs(&state.pool, user.id, storage_config_ids).await?;
-    validate_upload_configs(&configs)?;
+    let configs =
+        resolve_upload_configs(&state.pool, user.id, storage_config_ids, locale).await?;
+    validate_upload_configs(&configs, locale)?;
 
-    let encryption_key = resolve_encryption_key(&state.config)?;
+    let encryption_key = resolve_encryption_key(&state.config, locale)?;
     let mime_type = detect_mime(&bytes);
     let (width, height) = image_dimensions(&bytes);
 
@@ -882,6 +902,7 @@ pub async fn process_upload(
         mime_type: &mime_type,
         width,
         height,
+        locale,
     };
     run_backend_uploads(&ctx, &configs).await
 }
@@ -897,6 +918,7 @@ struct UploadCtx<'a> {
     mime_type: &'a str,
     width: Option<i32>,
     height: Option<i32>,
+    locale: Language,
 }
 
 /// Runs the upload against 1-2 storage configs, uploading the second config
@@ -917,6 +939,7 @@ async fn run_backend_uploads(
             ctx.mime_type,
             ctx.width,
             ctx.height,
+            ctx.locale,
         )
         .await?;
         return Ok(vec![result]);
@@ -932,6 +955,7 @@ async fn run_backend_uploads(
         ctx.mime_type,
         ctx.width,
         ctx.height,
+        ctx.locale,
     );
     let fut1 = upload_to_single_backend(
         ctx.state,
@@ -944,6 +968,7 @@ async fn run_backend_uploads(
         ctx.mime_type,
         ctx.width,
         ctx.height,
+        ctx.locale,
     );
     let (r0, r1) = tokio::join!(fut0, fut1);
     Ok(vec![r0?, r1?])
@@ -1258,36 +1283,40 @@ mod tests {
 
     #[test]
     fn test_validate_upload_configs() {
-        assert!(validate_upload_configs(&[]).is_err());
-        assert!(validate_upload_configs(&[git_config("local")]).is_ok());
+        assert!(validate_upload_configs(&[], Language::En).is_err());
+        assert!(validate_upload_configs(&[git_config("local")], Language::En).is_ok());
         let three = vec![git_config("local"), git_config("github"), git_config("gitcode")];
-        let err = validate_upload_configs(&three).unwrap_err();
+        let err = validate_upload_configs(&three, Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
         let no_local = vec![git_config("github"), git_config("gitcode")];
-        let err = validate_upload_configs(&no_local).unwrap_err();
+        let err = validate_upload_configs(&no_local, Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        assert!(validate_upload_configs(&[git_config("local"), git_config("github")]).is_ok());
+        assert!(
+            validate_upload_configs(&[git_config("local"), git_config("github")], Language::En)
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_storage_error_response() {
         use pichost_core::error::StorageError;
-        let (status, msg) = storage_error_response(&StorageError::PayloadTooLarge("big".into()));
+        let (status, json) =
+            storage_error_response(Language::En, &StorageError::PayloadTooLarge("big".into()));
         assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(msg, "big");
-        let (status, _) = storage_error_response(&StorageError::NotFound("x".into()));
+        assert_eq!(json.0["error"], "big");
+        let (status, _) = storage_error_response(Language::En, &StorageError::NotFound("x".into()));
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[test]
     fn test_resolve_encryption_key() {
         let config = pichost_core::config::AppConfig::default();
-        assert_eq!(resolve_encryption_key(&config).unwrap(), [0u8; 32]);
+        assert_eq!(resolve_encryption_key(&config, Language::En).unwrap(), [0u8; 32]);
         let mut config = config;
         config.token_encryption_key = Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".into());
-        assert_eq!(resolve_encryption_key(&config).unwrap(), [1u8; 32]);
+        assert_eq!(resolve_encryption_key(&config, Language::En).unwrap(), [1u8; 32]);
         config.token_encryption_key = Some("not-base64!!".into());
-        let err = resolve_encryption_key(&config).unwrap_err();
+        let err = resolve_encryption_key(&config, Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
     }
 
