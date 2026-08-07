@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.17.5` — P4-I complete + API smoke test CI. System config management (admin config API + config.toml read/write), Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI), PR-triggered API smoke tests (PG+Redis+MinIO service containers).
+- Version: `0.18.0` — i18n complete. Bilingual UI (en/zh-CN via i18next + LanguageSwitcher), localized API errors with error codes (`{"error","code"}` envelope + Accept-Language negotiation), deployment language config (`PICHOST_I18N_LANGUAGE` + admin config hot reload).
 
 ## Key Commands
 
@@ -13,7 +13,7 @@
 |---|---|---|
 | Build all | `cargo build --workspace` | |
 | Check only api | `cargo check -p pichost-api` | Fast compile-check |
-| Test all | `cargo test --workspace` | 313 pass without infra; 555 pass + 0 fail with `-- --include-ignored` (Docker PG+Redis+MinIO) |
+| Test all | `cargo test --workspace` | 324 pass without infra; 575 pass + 0 fail with `-- --include-ignored` (Docker PG+Redis+MinIO) |
 | Lint | `cargo clippy --workspace -- -D warnings` | Zero warnings required |
 | Run API server | `cargo run -p pichost-api` | Requires PostgreSQL + Redis |
 | Frontend dev | `cd web-ui && npm run dev` | Vite proxies `/api`, `/u` → `localhost:3000` |
@@ -44,6 +44,8 @@
   - `PICHOST_STORAGE_MAX_USER_CONFIGS` — max Git storage configs per user (default 5)
   - `PICHOST_TOKEN_ENCRYPTION_KEY` — AES-256-GCM key for Git token encryption (base64-encoded, 32 bytes)
   - Rate limit overrides: `PICHOST_RATE_LIMIT_AUTH_MAX`, `PICHOST_RATE_LIMIT_UPLOAD_MAX`, `PICHOST_RATE_LIMIT_GENERAL_MAX`, `PICHOST_RATE_LIMIT_PUBLIC_MAX`
+  - `PICHOST_I18N_LANGUAGE` — deployment default UI language (default `"en"`, e.g. `"zh-CN"`)
+  - `PICHOST_I18N_LOCALES_DIR` — optional external locale override dir (per-language subdirs, merge-override)
 - **Config separator**: `.env.example` uses `__` double-underscore for nested keys (`PICHOST_AUTH__JWT_SECRET` → `auth.jwt_secret`). Single `_` also works for 2-segment flat keys (`PICHOST_DATABASE_URL` → `database.url`). Docker compose (both `docker-compose.yml` and `docker-compose.prod.yml`) uses single `_`.
 - No `config.toml` in repo — env vars are the intended override mechanism.
 
@@ -115,10 +117,22 @@
 - Design token `--color-surface-hover` added to theme.css.
 
 ### System Config
-- Config service in `pichost-api/src/services/config.rs` — reads/writes `config.toml` with figment-compatible nested keys (`[database] url`, `[redis] url`, `[server] public_url`, `[storage] default_backend`/`local_base_path`), timestamped `.bak` backups, `test_database_connection` (5s timeout) / `test_redis_connection`.
+- Config service in `pichost-api/src/services/config.rs` — reads/writes `config.toml` with figment-compatible nested keys (`[database] url`, `[redis] url`, `[server] public_url`, `[storage] default_backend`/`local_base_path`, `[i18n] language`/`locales_dir`), timestamped `.bak` backups, `test_database_connection` (5s timeout) / `test_redis_connection`.
 - Admin config API (6 JWT+Admin endpoints under `/admin/config`): GET current config (sensitive fields masked), PUT write with auto-backup, POST test connections, POST backup, GET backups list, POST restore.
-- Frontend: `SystemConfig.tsx` component (Database/Redis/Server/Security/Backups sections, test-connection buttons, save/restore) wired to a "Config" tab in the Admin page.
+- Frontend: `SystemConfig.tsx` component (Database/Redis/Server/Security/Localization/Backups sections, test-connection buttons, save/restore) wired to a "Config" tab in the Admin page.
 - Design tokens `--color-success` / `--color-success-hover` / `--color-success-subtle` added to theme.css.
+
+### 国际化 (i18n)
+- **Backend module** (`pichost-core/src/i18n.rs`): `Language` enum (En/ZhCN), `I18n` struct with `t(locale, key)` / `t_args(locale, key, args)` fallback chain (locale → en → key). Global singleton `RwLock<Option<Arc<I18n>>>` with lazy 5s mtime hot-check via `I18n::global()`, plus `init_global`/`reload_global`/`maybe_reload`.
+- **Message catalogs**: `pichost-core/src/i18n/locales/{en,zh-CN}/messages.toml` (110 keys), embedded via `include_str!`. Optional external override dir via `PICHOST_I18N_LOCALES_DIR` (per-language subdirs, merge-override).
+- **Error envelope (breaking)**: all API errors now `{"error": <localized message>, "code": <key>}`. Route-level keys are dotted (`auth.invalid_credentials`, `image.not_found`, `validation.body_invalid`); `AppError::code()` emits coarse underscore codes (`auth_failed`, `validation_error`, etc.) for internal paths — dual convention is intentional.
+- **Accept-Language negotiation**: per request header → deployment `i18n.language` → en. Frontend sends `Accept-Language: <UI language>` on every request (ky beforeRequest hook).
+- **JsonBody<T> extractor** (`pichost-api/src/i18n_ext.rs`) replaces `Json<T>`: malformed JSON / wrong content-type → 422/415 with `{"error": localized, "code": "validation.body_invalid"}` instead of axum plain-text. Also `Locale` extractor (FromRequestParts for AppState + Arc<AppState>) + `error_json`/`error_json_args`/`error_json_extra`.
+- **Hot reload**: config service reads/writes `[i18n] language` / `[i18n] locales_dir`; PUT `/admin/config` and POST `/admin/config/restore` trigger `I18n::reload_global` — language changes apply WITHOUT restart. Admin SystemConfig UI has a Localization section (language selector).
+- **Frontend stack**: i18next ^26 + react-i18next ^17 + i18next-browser-languagedetector ^8. `web-ui/src/i18n/` — init, `getCurrentLocale`, `applyLang` (syncs `<html lang>`), catalogs `{en,zh-CN}.json` (364 keys, key-set equality tested), `types/i18next.d.ts` (typed t() keys), index.html FOUC inline script, main.tsx wraps app in `I18nextProvider`.
+- **LanguageSwitcher** component: NavBar + Login/Register pages; localStorage key `pichost-locale`.
+- **Format module**: `web-ui/src/lib/format.ts` + `web-ui/src/hooks/useFormat.ts` — shared locale-aware formatBytes/formatDate/formatNumber (replaced 5 duplicated implementations + hardcoded 'en-US' dates).
+- **API error parsing**: `web-ui/src/api/errors.ts` (getErrorCode/isErrorCode); `client.ts` beforeError hook sets `error.message` from backend localized body + attaches code.
 
 ### Deployment
 - Nginx :80 → API upstream `least_conn` (2 replicas).
@@ -127,11 +141,11 @@
 - Postgres/Redis ports not exposed to host — internal Docker network only.
 - Two compose files: `docker-compose.yml` (local dev/S3) and `docker-compose.prod.yml` (production S3, `.env`-driven).
 - Bare-metal packaging: `scripts/pichost-api.service` + `scripts/pichost-worker.service` (systemd, `User=pichost`, `EnvironmentFile=/etc/pichost/.env`), install/uninstall via `scripts/install.sh` / `scripts/uninstall.sh`. Pre-tag verification: `scripts/verify-release.sh` (local mirror of release.yml build→package→install dry-run).
-- CI: `.github/workflows/smoke-test.yml` — PR to `main` → full API integration suite (`cargo test --workspace -- --include-ignored`, ~555 tests) against PG+Redis+MinIO service containers + clippy gate. `.github/workflows/release.yml` — `v*` tags → build x86_64-unknown-linux-gnu, test + clippy, package `.tar.gz`; `-rc/-beta/-alpha/-pre` tag suffixes or manual dispatch mark the release as draft/pre-release. `.github/workflows/e2e.yml` — Playwright E2E, PG+Redis service containers. Release body links `CHANGELOG.md` (Keep a Changelog format, updated per release).
+- CI: `.github/workflows/smoke-test.yml` — PR to `main` → full API integration suite (`cargo test --workspace -- --include-ignored`, ~575 tests) against PG+Redis+MinIO service containers + clippy gate. `.github/workflows/release.yml` — `v*` tags → build x86_64-unknown-linux-gnu, test + clippy, package `.tar.gz`; `-rc/-beta/-alpha/-pre` tag suffixes or manual dispatch mark the release as draft/pre-release. `.github/workflows/e2e.yml` — Playwright E2E (73 specs), PG+Redis service containers. Release body links `CHANGELOG.md` (Keep a Changelog format, updated per release).
 
 ## API Endpoints Summary
 
-All paths below are relative to `/api/v1/` prefix unless otherwise noted. The `/u/`, `/metrics`, and `/health` paths are at root level (no `/api/v1/` prefix).
+All paths below are relative to `/api/v1/` prefix unless otherwise noted. The `/u/`, `/metrics`, and `/health` paths are at root level (no `/api/v1/` prefix). All API errors return `{"error": <localized message>, "code": <error key>}` (see the 国际化 (i18n) section).
 
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
@@ -175,24 +189,24 @@ All paths below are relative to `/api/v1/` prefix unless otherwise noted. The `/
 
 ## Testing
 
-- **Full suite**: `cargo test --workspace` → **313 pass, 0 fail** without infra (242 DB/Redis/S3 tests `#[ignore]`-gated). With Docker PG+Redis+MinIO running: `cargo test --workspace -- --include-ignored` → **555 pass, 0 fail**.
+- **Full suite**: `cargo test --workspace` → **324 pass, 0 fail** without infra (242 DB/Redis/S3 tests `#[ignore]`-gated). With Docker PG+Redis+MinIO running: `cargo test --workspace -- --include-ignored` → **575 pass, 0 fail**.
 - **CI**: every PR to `main` runs the full suite automatically via `.github/workflows/smoke-test.yml` (see the smoke test design guide `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md`). New API features must add a smoke test before coding (TDD).
 - **Coverage**: `cargo llvm-cov --workspace --ignore-filename-regex 'tests/|test_' -- --include-ignored` → **91.56% line coverage**. `cargo-llvm-cov` must be installed (`cargo install cargo-llvm-cov`).
 - **Test infrastructure**: `pichost-api/tests/common/mod.rs` harness builds a real `AppState` (PG+Redis) + production router (`configure_app`) and drives it via `tower::ServiceExt::oneshot`. The router-assembly functions live in `pichost-api/src/app.rs` (moved from `main.rs`) so integration tests exercise the exact production routing.
 - **Docker test services**: `postgres:18-alpine` (:5432), `redis:8-alpine` (:6379), `minio/minio` (:9000, bucket `pichost`, minioadmin/minioadmin). Used for the previously-ignored DB/Redis/S3 integration tests.
 - **Test conventions**: async tests use `#[tokio::test(flavor = "multi_thread", worker_threads = 4)]` (current-thread runtime deadlocks deadpool-redis/sqlx). Each test creates its own small PG pool (≤5 conns). Env-sensitive tests isolate `PICHOST_*` vars via a `PichostEnvGuard` snapshot/restore helper. Config-endpoint tests use `serial_test::serial` and clean up `config.toml`.
-- **Run focused**: `cargo test -p pichost-api test_image_list` — matches test name prefix. No frontend tests.
+- **Run focused**: `cargo test -p pichost-api test_image_list` — matches test name prefix. Frontend: `cd web-ui && npx vitest run` (42 tests) + Playwright E2E (73 specs).
 - Integration test files in `pichost-api/tests/`: `auth_test`, `images_test`, `users_test`, `categories_test`, `admin_test`, `cache_test`, `gaps_*`, `gaps2_*` — run against real PG+Redis (Docker).
 
 ## Frontend (web-ui/)
 
 - React 19, Vite 8, Tailwind CSS 4, TypeScript 7.
 - State: Zustand (client) + TanStack Query v5 (server).
-- HTTP: `ky`. Routing: `react-router-dom` v7. Upload: `react-dropzone`. Toasts: `sonner`.
+- HTTP: `ky` (beforeRequest sends `Accept-Language`, beforeError parses localized error body). Routing: `react-router-dom` v7. Upload: `react-dropzone`. Toasts: `sonner`. i18n: i18next ^26 + react-i18next ^17 (see 国际化 (i18n) section).
 - Entry: `src/main.tsx` → `App.tsx`. Dev server :5173, proxy to :3000.
 - **CSS variables**: Design system uses `var(--color-*)` tokens for theming. Glass effects via `backdrop-blur-sm`, `bg-[var(--glass-bg)]`, `border-[var(--color-border)]`.
-- **Hooks**: `useUploadQueue` (multi-file upload with concurrency pool), `useInfiniteQuery` (Gallery scroll).
-- **Components**: `CategoryTree` (sidebar with inline CRUD — context menu, rename, delete confirmation, create modal), `ui/DropdownMenu` (NavBar user menu), `SystemConfig` (admin config management — test connections, save/restore).
+- **Hooks**: `useUploadQueue` (multi-file upload with concurrency pool), `useInfiniteQuery` (Gallery scroll), `useFormat` (locale-aware formatBytes/formatDate/formatNumber).
+- **Components**: `CategoryTree` (sidebar with inline CRUD — context menu, rename, delete confirmation, create modal), `ui/DropdownMenu` (NavBar user menu), `SystemConfig` (admin config management — test connections, save/restore), `LanguageSwitcher` (NavBar + Login/Register).
 
 ## Rules
 

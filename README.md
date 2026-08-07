@@ -2,14 +2,14 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.17.5** — P4-G/H/I complete. Settings UI optimization (user dropdown + accordion), software packaging (systemd + install scripts + release CI), system config management (admin config API + config.toml read/write), PR-triggered API smoke tests (555-test suite on PG+Redis+MinIO).
+**v0.18.0** — i18n complete. English/简体中文 UI switching (i18next + LanguageSwitcher, persisted), localized API errors with error codes (`{"error","code"}` envelope), deployment language config with admin hot reload (no restart).
 
 ## Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Backend | Rust 1.96+ (Axum 0.8, Tokio, sqlx) |
-| Frontend | React 19, Vite 8, TypeScript 7, Tailwind CSS 4 |
+| Frontend | React 19, Vite 8, TypeScript 7, Tailwind CSS 4, i18next |
 | Database | PostgreSQL 18 |
 | Cache / Queue | Redis 8 |
 | Proxy / CDN | Nginx 1.27 (reverse proxy, cache, rate limiting) |
@@ -93,14 +93,14 @@ cd web-ui && npm install && npm run dev  # → http://localhost:5173
 ### Test & Lint
 
 ```bash
-cargo test --workspace                      # 313 pass without infra (DB tests #[ignore]-gated)
-cargo test --workspace -- --include-ignored  # 555 pass with Docker PG+Redis+MinIO
+cargo test --workspace                      # 324 pass without infra (DB tests #[ignore]-gated)
+cargo test --workspace -- --include-ignored  # 575 pass with Docker PG+Redis+MinIO
 cargo clippy --workspace -- -D warnings      # zero warnings required
 cargo llvm-cov --workspace -- --include-ignored  # 91.56% line coverage (needs Docker PG+Redis+MinIO)
 cd web-ui && npm run build                   # tsc -b && vite build
 ```
 
-The full 555-test suite runs automatically on every PR to `main` via `.github/workflows/smoke-test.yml` (PG+Redis+MinIO service containers + clippy gate). See `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md` for the smoke test design guide.
+The full 575-test suite runs automatically on every PR to `main` via `.github/workflows/smoke-test.yml` (PG+Redis+MinIO service containers + clippy gate). See `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md` for the smoke test design guide.
 
 Run a single test: `cargo test -p pichost-api test_image_list`
 
@@ -126,11 +126,15 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 | `PICHOST_STORAGE_RUSTFS_SECRET_KEY` | RustFS | — | Secret key |
 | `PICHOST_STORAGE_MAX_USER_CONFIGS` | — | `5` | Max Git storage configs per user |
 | `PICHOST_AUTH_TOKEN_ENCRYPTION_KEY` | Git storage | — | AES-256-GCM key for Git token encryption |
+| `PICHOST_I18N_LANGUAGE` | — | `en` | Default UI language (`en` / `zh-CN`) |
+| `PICHOST_I18N_LOCALES_DIR` | — | — | Optional external locale override directory (per-language subdirs, merge-override) |
 | `DATABASE_URL` | Docker only | — | sqlx CLI helper (not consumed by app) |
 
 **Important**: `DATABASE_URL` and `PICHOST_DATABASE_URL` are separate vars. Only `PICHOST_DATABASE_URL` is consumed at runtime. Both are set in docker-compose for convenience.
 
 ## API Endpoints
+
+All API error responses use `{"error": <localized message>, "code": <error key>}`. Messages are localized via `Accept-Language` negotiation, falling back to the deployment's `PICHOST_I18N_LANGUAGE`.
 
 ### Auth
 | Method | Path | Auth | Notes |
@@ -219,19 +223,25 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 - [x] **Settings UI optimization** — NavBar user dropdown (Settings/Admin/Logout), accordion settings with hash-based section expand
 - [x] **Software packaging** — systemd services, install/uninstall scripts, GitHub Actions release CI (`v*` tags → `.tar.gz`)
 - [x] **System config management** — admin config.toml read/write API, DB/Redis connection tests, backup/restore
+- [x] **Internationalization (i18n)** — English/简体中文 UI switching via i18next + LanguageSwitcher (persisted, ~364 UI strings extracted), typed t() keys
+- [x] **Localized API errors** — all errors return `{"error": localized message, "code": error key}`, Accept-Language negotiation per request
+- [x] **Deployment language config** — `PICHOST_I18N_LANGUAGE` / `PICHOST_I18N_LOCALES_DIR`, admin config hot reload without restart
 
 ## Project Structure
 
 ```
 ├── pichost-core/            Domain models, config, StorageBackend trait,
 │                            LocalStorage, RustfsStorage, GitStorage,
-│                            StorageRouter, AES-256-GCM crypto
+│                            StorageRouter, AES-256-GCM crypto, i18n module
+│   └── src/i18n/locales/    Message catalogs (en, zh-CN), 110 keys
 ├── pichost-api/             Axum server — routes, middleware, services,
 │                            DB pool, Redis, rate limiting, storage config CRUD,
 │                            system config service (config.toml + backups)
 ├── pichost-worker/          Background processing — thumbnails, WebP, watermarks
 │   └── fonts/               5 built-in TTF fonts (rusttype + imageproc)
-├── web-ui/                  React SPA — Zustand, TanStack Query, Tailwind CSS 4
+├── web-ui/                  React SPA — Zustand, TanStack Query, i18next, Tailwind CSS 4
+│   ├── src/i18n/            i18next init + locale catalogs (en, zh-CN), typed t() keys
+│   ├── src/lib/format.ts    Locale-aware formatBytes/formatDate/formatNumber
 │   └── src/components/      Components (SystemConfig, CategoryTree, ...)
 │       └── ui/              UI primitives (Button, Input, DropdownMenu)
 ├── nginx/
@@ -239,7 +249,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 ├── migrations/              10 SQL migrations (0001–0010)
 ├── scripts/                 systemd services + install/uninstall + verify-release scripts
 ├── CHANGELOG.md             Keep a Changelog, linked from every GitHub Release
-├── .github/workflows/       Smoke tests (PR → 555-test suite), Release CI (v* tags → build, test, package .tar.gz)
+├── .github/workflows/       Smoke tests (PR → 575-test suite), Release CI (v* tags → build, test, package .tar.gz)
 ├── Dockerfile.api           Multi-stage Rust build for API
 ├── Dockerfile.worker        Multi-stage Rust build for Worker
 ├── docker-compose.yml       Full stack: Nginx, API×2, Worker×2, PostgreSQL, Redis
