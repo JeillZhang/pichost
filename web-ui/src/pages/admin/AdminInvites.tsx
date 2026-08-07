@@ -2,38 +2,10 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Copy, Clock } from 'lucide-react'
 import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next'
+import { useFormat } from '../../hooks/useFormat'
 import { listInviteCodes, type InviteCodeInfo } from '../../api/client'
 import CreateInviteDialog from '../../components/CreateInviteDialog'
-
-function formatDate(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function timeRemaining(expiresAt: number): string {
-  const now = Math.floor(Date.now() / 1000)
-  const diff = expiresAt - now
-  if (diff <= 0) return 'Expired'
-  const days = Math.floor(diff / 86400)
-  const hours = Math.floor((diff % 86400) / 3600)
-  if (days > 0) return `${days}d ${hours}h remaining`
-  return `${hours}h remaining`
-}
-
-function getStatus(code: InviteCodeInfo): { label: string; color: string } {
-  if (code.used_by) {
-    return { label: 'Used', color: 'var(--color-text-muted)' }
-  }
-  const now = Math.floor(Date.now() / 1000)
-  if (code.expires_at <= now) {
-    return { label: 'Expired', color: 'var(--color-danger)' }
-  }
-  return { label: 'Active', color: 'var(--color-success)' }
-}
 
 function truncateCode(code: string, maxLen = 16): string {
   if (code.length <= maxLen) return code
@@ -41,6 +13,8 @@ function truncateCode(code: string, maxLen = 16): string {
 }
 
 export default function AdminInvites() {
+  const { t } = useTranslation()
+  const { formatDate } = useFormat()
   const [showCreate, setShowCreate] = useState(false)
   const queryClient = useQueryClient()
 
@@ -50,12 +24,33 @@ export default function AdminInvites() {
     refetchInterval: 30_000,
   })
 
+  function timeRemaining(expiresAt: number): string {
+    const now = Math.floor(Date.now() / 1000)
+    const diff = expiresAt - now
+    if (diff <= 0) return t('adminInvites.statusExpired')
+    const days = Math.floor(diff / 86400)
+    const hours = Math.floor((diff % 86400) / 3600)
+    if (days > 0) return t('adminInvites.timeRemaining', { days, hours })
+    return t('adminInvites.timeRemainingHours', { hours })
+  }
+
+  function getStatus(code: InviteCodeInfo): { key: string; label: string; color: string } {
+    if (code.used_by) {
+      return { key: 'used', label: t('adminInvites.statusUsed'), color: 'var(--color-text-muted)' }
+    }
+    const now = Math.floor(Date.now() / 1000)
+    if (code.expires_at <= now) {
+      return { key: 'expired', label: t('adminInvites.statusExpired'), color: 'var(--color-danger)' }
+    }
+    return { key: 'active', label: t('adminInvites.statusActive'), color: 'var(--color-success)' }
+  }
+
   async function handleCopy(code: string) {
     try {
       await navigator.clipboard.writeText(code)
-      toast.success('Copied to clipboard')
+      toast.success(t('adminInvites.copySuccess'))
     } catch {
-      toast.error('Failed to copy')
+      toast.error(t('adminInvites.copyFailed'))
     }
   }
 
@@ -67,7 +62,7 @@ export default function AdminInvites() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20" style={{ color: 'var(--color-text-muted)' }}>
-        Loading invite codes…
+        {t('adminInvites.loading')}
       </div>
     )
   }
@@ -77,7 +72,7 @@ export default function AdminInvites() {
       <div>
         <div className="mb-3 flex items-center justify-between">
           <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            0 codes
+            {t('adminInvites.totalCount', { count: codes?.length ?? 0 })}
           </p>
           <button
             onClick={() => setShowCreate(true)}
@@ -85,14 +80,14 @@ export default function AdminInvites() {
             style={{ backgroundColor: 'var(--color-accent)' }}
           >
             <Plus className="h-4 w-4" />
-            Create Code
+            {t('adminInvites.createCode')}
           </button>
         </div>
 
         <div className="glass flex flex-col items-center justify-center rounded-xl py-16">
           <Clock className="mb-3 h-8 w-8" style={{ color: 'var(--color-text-muted)' }} />
           <p className="mb-1 text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            No active invite codes
+            {t('adminInvites.emptyState')}
           </p>
           <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
             <button
@@ -100,9 +95,9 @@ export default function AdminInvites() {
               className="font-medium underline transition-colors"
               style={{ color: 'var(--color-accent)' }}
             >
-              Create one
+              {t('adminInvites.createOne')}
             </button>{' '}
-            to let others join
+            {t('adminInvites.toLetOthersJoin')}
           </p>
         </div>
 
@@ -120,7 +115,7 @@ export default function AdminInvites() {
     <div>
       <div className="mb-3 flex items-center justify-between">
         <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-          {codes.length} code{codes.length !== 1 ? 's' : ''}
+          {t('adminInvites.totalCount', { count: codes.length })}
         </p>
         <button
           onClick={() => setShowCreate(true)}
@@ -128,7 +123,7 @@ export default function AdminInvites() {
           style={{ backgroundColor: 'var(--color-accent)' }}
         >
           <Plus className="h-4 w-4" />
-          Create Code
+          {t('adminInvites.createCode')}
         </button>
       </div>
 
@@ -136,11 +131,11 @@ export default function AdminInvites() {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-              <th className="px-4 py-3 text-left font-medium" style={{ color: 'var(--color-text-muted)' }}>Code</th>
-              <th className="hidden px-4 py-3 text-left font-medium sm:table-cell" style={{ color: 'var(--color-text-muted)' }}>Created</th>
-              <th className="hidden px-4 py-3 text-left font-medium md:table-cell" style={{ color: 'var(--color-text-muted)' }}>Expires</th>
-              <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--color-text-muted)' }}>Status</th>
-              <th className="px-4 py-3 text-right font-medium" style={{ color: 'var(--color-text-muted)' }}>Actions</th>
+              <th className="px-4 py-3 text-left font-medium" style={{ color: 'var(--color-text-muted)' }}>{t('adminInvites.tableCode')}</th>
+              <th className="hidden px-4 py-3 text-left font-medium sm:table-cell" style={{ color: 'var(--color-text-muted)' }}>{t('adminInvites.tableCreated')}</th>
+              <th className="hidden px-4 py-3 text-left font-medium md:table-cell" style={{ color: 'var(--color-text-muted)' }}>{t('adminInvites.tableExpires')}</th>
+              <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--color-text-muted)' }}>{t('adminInvites.tableStatus')}</th>
+              <th className="px-4 py-3 text-right font-medium" style={{ color: 'var(--color-text-muted)' }}>{t('adminInvites.tableActions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -156,7 +151,7 @@ export default function AdminInvites() {
                     <span title={code.code}>{truncateCode(code.code)}</span>
                   </td>
                   <td className="hidden px-4 py-3 sm:table-cell" style={{ color: 'var(--color-text-secondary)' }}>
-                    {formatDate(code.created_at)}
+                    {formatDate(code.created_at * 1000)}
                   </td>
                   <td className="hidden px-4 py-3 md:table-cell" style={{ color: 'var(--color-text-secondary)' }}>
                     <span className="inline-flex items-center gap-1">
@@ -169,9 +164,9 @@ export default function AdminInvites() {
                       className="inline-block rounded px-2 py-0.5 text-xs font-medium"
                       style={{
                         backgroundColor:
-                          status.label === 'Active'
+                          status.key === 'active'
                             ? 'var(--color-success-subtle)'
-                            : status.label === 'Expired'
+                            : status.key === 'expired'
                               ? 'var(--color-danger-subtle)'
                               : 'var(--color-surface)',
                         color: status.color,

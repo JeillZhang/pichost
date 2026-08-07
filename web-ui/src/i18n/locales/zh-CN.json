@@ -368,5 +368,49 @@
     "save": "保存",
     "userUpdated": "用户已更新",
     "updateFailed": "更新失败"
+  },
+  "adminInvites": {
+    "loading": "正在加载邀请码…",
+    "statusUsed": "已使用",
+    "statusExpired": "已过期",
+    "statusActive": "有效",
+    "timeRemaining": "剩余 {{days}} 天 {{hours}} 小时",
+    "timeRemainingHours": "剩余 {{hours}} 小时",
+    "tableCode": "邀请码",
+    "tableCreated": "创建时间",
+    "tableExpires": "过期时间",
+    "tableStatus": "状态",
+    "tableActions": "操作",
+    "createCode": "创建邀请码",
+    "emptyState": "暂无有效的邀请码",
+    "createOne": "创建一个",
+    "toLetOthersJoin": "以允许他人加入",
+    "copySuccess": "已复制到剪贴板",
+    "copyFailed": "复制失败",
+    "totalCount_one": "共 {{count}} 个邀请码",
+    "totalCount_other": "共 {{count}} 个邀请码"
+  },
+  "createInvite": {
+    "title": "创建邀请码",
+    "expiresIn": "有效期（天）",
+    "created": "邀请码已创建",
+    "shareHint": "将此邀请码分享给你想邀请的人。有效期 {{count}} {{days}}。",
+    "dayLabel_one": "天",
+    "dayLabel_other": "天",
+    "copied": "已复制",
+    "copyCode": "复制邀请码",
+    "done": "完成",
+    "cancel": "取消",
+    "creating": "创建中…",
+    "create": "创建",
+    "createFailed": "创建邀请码失败",
+    "copyFailed": "复制失败"
+  },
+  "adminTabs": {
+    "title": "管理面板",
+    "overview": "概览",
+    "users": "用户",
+    "invites": "邀请码",
+    "systemConfig": "系统配置"
   }
 }

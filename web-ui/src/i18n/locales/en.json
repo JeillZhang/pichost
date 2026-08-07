@@ -368,5 +368,49 @@
     "save": "Save",
     "userUpdated": "User updated",
     "updateFailed": "Update failed"
+  },
+  "adminInvites": {
+    "loading": "Loading invite codes…",
+    "statusUsed": "Used",
+    "statusExpired": "Expired",
+    "statusActive": "Active",
+    "timeRemaining": "{{days}}d {{hours}}h remaining",
+    "timeRemainingHours": "{{hours}}h remaining",
+    "tableCode": "Code",
+    "tableCreated": "Created",
+    "tableExpires": "Expires",
+    "tableStatus": "Status",
+    "tableActions": "Actions",
+    "createCode": "Create Code",
+    "emptyState": "No active invite codes",
+    "createOne": "Create one",
+    "toLetOthersJoin": "to let others join",
+    "copySuccess": "Copied to clipboard",
+    "copyFailed": "Failed to copy",
+    "totalCount_one": "{{count}} code",
+    "totalCount_other": "{{count}} codes"
+  },
+  "createInvite": {
+    "title": "Create Invite Code",
+    "expiresIn": "Expires in (days)",
+    "created": "Invite Code Created",
+    "shareHint": "Share this code with the person you want to invite. It expires in {{count}} {{days}}.",
+    "dayLabel_one": "day",
+    "dayLabel_other": "days",
+    "copied": "Copied",
+    "copyCode": "Copy Code",
+    "done": "Done",
+    "cancel": "Cancel",
+    "creating": "Creating…",
+    "create": "Create",
+    "createFailed": "Failed to create invite code",
+    "copyFailed": "Failed to copy"
+  },
+  "adminTabs": {
+    "title": "Admin Panel",
+    "overview": "Overview",
+    "users": "Users",
+    "invites": "Invites",
+    "systemConfig": "System Config"
   }
 }
