@@ -2,11 +2,14 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { LogIn, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/auth'
+import LanguageSwitcher from '../components/LanguageSwitcher'
 
 export default function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const { t } = useTranslation()
   const { login, isLoading, error } = useAuthStore()
   const navigate = useNavigate()
 
@@ -15,16 +18,19 @@ export default function Login() {
     await login(username, password)
     const state = useAuthStore.getState()
     if (state.isAuthenticated) {
-      toast.success('Logged in!')
+      toast.success(t('login.loggedIn'))
       navigate('/dashboard', { replace: true })
     }
   }
 
   return (
     <div
-      className="flex min-h-screen items-center justify-center p-4"
+      className="relative flex min-h-screen items-center justify-center p-4"
       style={{ backgroundColor: 'var(--color-bg)' }}
     >
+      <div className="absolute right-4 top-4">
+        <LanguageSwitcher />
+      </div>
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="mb-8 text-center">
@@ -40,7 +46,7 @@ export default function Login() {
             PicHost
           </h1>
           <p className="mt-1.5 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            Self-hosted image hosting
+            {t('login.title')}
           </p>
         </div>
 
@@ -65,7 +71,7 @@ export default function Login() {
               className="mb-1.5 block text-xs font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Username
+              {t('login.username')}
             </label>
             <input
               id="username"
@@ -75,7 +81,7 @@ export default function Login() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="input-field"
-              placeholder="your username"
+              placeholder={t('login.usernamePlaceholder')}
             />
           </div>
 
@@ -85,7 +91,7 @@ export default function Login() {
               className="mb-1.5 block text-xs font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Password
+              {t('login.password')}
             </label>
             <input
               id="password"
@@ -105,17 +111,17 @@ export default function Login() {
             ) : (
               <LogIn className="h-4 w-4" />
             )}
-            Sign In
+            {t('login.signIn')}
           </button>
 
           <p className="text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            Don't have an account?{' '}
+            {t('login.noAccount')}{' '}
             <Link
               to="/register"
               style={{ color: 'var(--color-accent)' }}
               className="font-medium hover:underline"
             >
-              Register
+              {t('login.register')}
             </Link>
           </p>
         </form>

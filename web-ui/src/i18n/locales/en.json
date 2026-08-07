@@ -12,5 +12,32 @@
     "admin": "Admin",
     "settings": "Settings",
     "logout": "Logout"
+  },
+  "login": {
+    "title": "Self-hosted image hosting",
+    "username": "Username",
+    "usernamePlaceholder": "your username",
+    "password": "Password",
+    "signIn": "Sign In",
+    "noAccount": "Don't have an account?",
+    "register": "Register",
+    "loggedIn": "Logged in!"
+  },
+  "register": {
+    "createAccount": "Create your account",
+    "username": "Username",
+    "usernamePlaceholder": "your username",
+    "password": "Password",
+    "inviteCode": "Invite Code",
+    "invitePlaceholder": "optional invite code",
+    "submit": "Register",
+    "alreadyHaveAccount": "Already have an account?",
+    "signIn": "Sign in",
+    "adminCreated": "Admin account created! You are now the administrator.",
+    "registered": "Registered!"
+  },
+  "languageSwitcher": {
+    "english": "English",
+    "chinese": "简体中文"
   }
 }
