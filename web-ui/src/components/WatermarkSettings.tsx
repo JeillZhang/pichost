@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Loader2, Save, Trash2, Image } from 'lucide-react'
 import { updateUserMe } from '../api/client'
@@ -41,6 +42,7 @@ interface WatermarkSettingsProps {
 }
 
 export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettingsProps) {
+  const { t } = useTranslation()
   const [config, setConfig] = useState<WatermarkConfig>(DEFAULT_CONFIG)
   const [saving, setSaving] = useState(false)
   const [clearing, setClearing] = useState(false)
@@ -65,9 +67,9 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
     try {
       const updated = await updateUserMe({ watermark_config: config })
       onUpdate(updated)
-      toast.success('Watermark settings saved')
+      toast.success(t('watermark.saved'))
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to save watermark settings')
+      toast.error(e instanceof Error ? e.message : t('watermark.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -79,9 +81,9 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
       const updated = await updateUserMe({ watermark_config: null })
       setConfig(DEFAULT_CONFIG)
       onUpdate(updated)
-      toast.success('Watermark settings cleared')
+      toast.success(t('watermark.cleared'))
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to clear watermark settings')
+      toast.error(e instanceof Error ? e.message : t('watermark.clearFailed'))
     } finally {
       setClearing(false)
     }
@@ -92,7 +94,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
       <div className="mb-3 flex items-center gap-2">
         <Image className="h-4 w-4" style={{ color: 'var(--color-text-muted)' }} />
         <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-          Default Watermark
+          {t('watermark.defaultWatermark')}
         </h3>
       </div>
 
@@ -105,19 +107,19 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
           className="rounded border-[var(--color-border)]"
           style={{ accentColor: 'var(--color-accent)' }}
         />
-        Enable watermark
+        {t('watermark.enable')}
       </label>
 
       {/* Config fields */}
       <fieldset disabled={!config.enabled} className="mt-3 space-y-3">
         {/* Text */}
         <div>
-          <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Watermark Text</label>
+          <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>{t('watermark.text')}</label>
           <input
             type="text"
             value={config.text}
             onChange={e => updateField('text', e.target.value)}
-            placeholder="© Your Name"
+            placeholder={t('watermark.textPlaceholder')}
             className="mt-1 block w-full rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm disabled:opacity-50"
             style={{ color: 'var(--color-text-primary)' }}
           />
@@ -125,7 +127,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
 
         {/* Font */}
         <div>
-          <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Font</label>
+          <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>{t('watermark.font')}</label>
           <GlassSelect
             value={config.font}
             onChange={(f) => updateField('font', f)}
@@ -136,7 +138,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
 
         {/* Font size */}
         <div>
-          <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Font Size</label>
+          <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>{t('watermark.fontSize')}</label>
           <input
             type="number"
             min={8}
@@ -150,7 +152,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
 
         {/* Color */}
         <div>
-          <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Color</label>
+          <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>{t('watermark.color')}</label>
           <input
             type="text"
             value={config.color}
@@ -164,7 +166,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
         {/* Rotation */}
         <div>
           <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-            Rotation ({config.rotation}°)
+            {t('watermark.rotation', { value: config.rotation })}
           </label>
           <input
             type="range"
@@ -180,7 +182,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
         {/* Scale */}
         <div>
           <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-            Scale ({config.scale.toFixed(2)})
+            {t('watermark.scale', { value: config.scale.toFixed(2) })}
           </label>
           <input
             type="range"
@@ -196,7 +198,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
 
         {/* Position */}
         <div>
-          <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Position</label>
+          <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>{t('watermark.position')}</label>
           <GlassSelect
             value={config.position}
             onChange={(p) => updateField('position', p as WatermarkConfig['position'])}
@@ -208,7 +210,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
         {/* Margin X/Y */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Margin X</label>
+            <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>{t('watermark.marginX')}</label>
             <input
               type="number"
               min={0}
@@ -219,7 +221,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
             />
           </div>
           <div>
-            <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Margin Y</label>
+            <label className="block text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>{t('watermark.marginY')}</label>
             <input
               type="number"
               min={0}
@@ -242,7 +244,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
           style={{ backgroundColor: 'var(--color-accent)' }}
         >
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-          Save
+          {t('watermark.save')}
         </button>
         <button
           type="button"
@@ -256,7 +258,7 @@ export default function WatermarkSettings({ profile, onUpdate }: WatermarkSettin
           }}
         >
           {clearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-          Clear
+          {t('watermark.clear')}
         </button>
       </div>
     </div>

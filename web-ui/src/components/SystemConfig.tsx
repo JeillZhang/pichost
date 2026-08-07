@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
   Archive,
@@ -46,6 +47,7 @@ const cardClass =
   'rounded-lg border border-[var(--color-border)] bg-[var(--glass-tint-base)]/65 p-4 backdrop-blur-sm'
 
 function TestStatus({ result }: { result: string | null }) {
+  const { t } = useTranslation()
   if (!result) return null
   const ok = result === 'ok'
   return (
@@ -54,7 +56,7 @@ function TestStatus({ result }: { result: string | null }) {
       style={{ color: ok ? 'var(--color-success)' : 'var(--color-danger)' }}
     >
       {ok ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
-      {ok ? 'Connection OK' : result.replace(/^fail:\s*/, '')}
+      {ok ? t('systemConfig.connectionOk') : result.replace(/^fail:\s*/, '')}
     </p>
   )
 }
@@ -79,32 +81,33 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
 /** Explains where the selected backend's own credentials are configured.
  *  Git providers are per-user storage configs; RustFS lives in config.toml. */
 function BackendConfigHint({ backend }: { backend: string }) {
+  const { t } = useTranslation()
   const hint: Record<string, React.ReactNode> = {
     rustfs: (
       <>
-        RustFS (S3-compatible) connection parameters are managed in the{' '}
+        {t('systemConfig.backendHintRustfsBefore')}{' '}
         <code className="rounded bg-[var(--color-surface)] px-1 py-0.5 text-[11px]">
-          [storage.rustfs]
+          {t('systemConfig.backendHintRustfsCode')}
         </code>{' '}
-        section of config.toml.
+        {t('systemConfig.backendHintRustfsAfter')}
       </>
     ),
     github: (
       <>
-        GitHub storage is configured per user in{' '}
+        {t('systemConfig.backendHintGitHubBefore')}{' '}
         <span className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
-          Settings → Storage Backends
+          {t('systemConfig.backendHintSettingsLink')}
         </span>{' '}
-        — repo (owner/repo), branch and access token.
+        {t('systemConfig.backendHintGitAfter')}
       </>
     ),
     gitcode: (
       <>
-        GitCode storage is configured per user in{' '}
+        {t('systemConfig.backendHintGitCodeBefore')}{' '}
         <span className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
-          Settings → Storage Backends
+          {t('systemConfig.backendHintSettingsLink')}
         </span>{' '}
-        — repo (owner/repo), branch and access token.
+        {t('systemConfig.backendHintGitAfter')}
       </>
     ),
   }
@@ -120,6 +123,7 @@ function BackendConfigHint({ backend }: { backend: string }) {
 }
 
 export default function SystemConfig() {
+  const { t } = useTranslation()
   const [config, setConfig] = useState<ConfigResponse | null>(null)
   const [dirty, setDirty] = useState<Partial<ConfigResponse>>({})
   const [loading, setLoading] = useState(true)
@@ -140,7 +144,7 @@ export default function SystemConfig() {
       setConfig(cfg)
       setDirty({})
     } catch (e: unknown) {
-      setLoadError(e instanceof Error ? e.message : 'Failed to load config')
+      setLoadError(e instanceof Error ? e.message : t('systemConfig.failedToLoadConfig'))
     } finally {
       setLoading(false)
     }
@@ -151,7 +155,7 @@ export default function SystemConfig() {
       const list = await api.get('admin/config/backups').json<BackupInfo[]>()
       setBackups(list)
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load backups')
+      toast.error(e instanceof Error ? e.message : t('systemConfig.failedToLoadBackups'))
     }
   }, [])
 
@@ -178,15 +182,15 @@ export default function SystemConfig() {
       if (status === 'ok') {
         if (target === 'database') setDbResult('ok')
         else setRedisResult('ok')
-        toast.success('Connection OK')
+        toast.success(t('systemConfig.connectionOk'))
       } else {
-        const msg = status?.replace(/^fail:\s*/, '') ?? 'Connection failed'
+        const msg = status?.replace(/^fail:\s*/, '') ?? t('systemConfig.connectionFailed')
         if (target === 'database') setDbResult(`fail: ${msg}`)
         else setRedisResult(`fail: ${msg}`)
         toast.error(msg)
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Connection test failed'
+      const msg = e instanceof Error ? e.message : t('systemConfig.connectionTestFailed')
       if (target === 'database') setDbResult(`fail: ${msg}`)
       else setRedisResult(`fail: ${msg}`)
       toast.error(msg)
@@ -198,7 +202,7 @@ export default function SystemConfig() {
   async function handleSave() {
     const changed = Object.keys(dirty)
     if (changed.length === 0) {
-      toast.info('No changes to save')
+      toast.info(t('systemConfig.noChangesToSave'))
       return
     }
     setSaving(true)
@@ -206,10 +210,10 @@ export default function SystemConfig() {
       const updated = await api.put('admin/config', { json: dirty }).json<ConfigResponse>()
       setConfig(updated)
       setDirty({})
-      toast.success('Config saved. Restart service to apply.')
+      toast.success(t('systemConfig.configSaved'))
       void fetchBackups()
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to save config')
+      toast.error(e instanceof Error ? e.message : t('systemConfig.failedToSaveConfig'))
     } finally {
       setSaving(false)
     }
@@ -219,28 +223,28 @@ export default function SystemConfig() {
     setBackingUp(true)
     try {
       const { filename } = await api.post('admin/config/backup').json<BackupInfo>()
-      toast.success(`Config backed up as ${filename}`)
+      toast.success(t('systemConfig.configBackedUp', { filename }))
       void fetchBackups()
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Backup failed')
+      toast.error(e instanceof Error ? e.message : t('systemConfig.backupFailed'))
     } finally {
       setBackingUp(false)
     }
   }
 
   async function handleRestore(filename: string) {
-    if (!window.confirm(`Restore config from "${filename}"? This replaces the current config.`)) return
+    if (!window.confirm(t('systemConfig.restoreConfirm', { filename }))) return
     setRestoring(filename)
     try {
       const res = await api
         .post('admin/config/restore', { json: { backup_file: filename } })
         .json<{ status: string; from: string }>()
-      toast.success(`Config restored from ${res.from}`)
+      toast.success(t('systemConfig.configRestored', { from: res.from }))
       await fetchConfig()
       setDbResult(null)
       setRedisResult(null)
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Restore failed')
+      toast.error(e instanceof Error ? e.message : t('systemConfig.restoreFailed'))
     } finally {
       setRestoring(null)
     }
@@ -250,7 +254,7 @@ export default function SystemConfig() {
     return (
       <div className="flex flex-col items-center gap-3 py-20">
         <p className="text-sm" style={{ color: 'var(--color-danger)' }}>{loadError}</p>
-        <Button variant="ghost" size="sm" onClick={() => void fetchConfig()}>Retry</Button>
+        <Button variant="ghost" size="sm" onClick={() => void fetchConfig()}>{t('systemConfig.retry')}</Button>
       </div>
     )
   }
@@ -258,7 +262,7 @@ export default function SystemConfig() {
   if (loading || !config) {
     return (
       <div className="flex items-center justify-center py-20" style={{ color: 'var(--color-text-muted)' }}>
-        Loading config…
+        {t('systemConfig.loading')}
       </div>
     )
   }
@@ -268,9 +272,9 @@ export default function SystemConfig() {
   return (
     <div className="space-y-4">
       <div className={cardClass}>
-        <CardHeader icon={Database} title="Database" />
+        <CardHeader icon={Database} title={t('systemConfig.database')} />
         <div>
-          <FieldLabel>PostgreSQL URL</FieldLabel>
+          <FieldLabel>{t('systemConfig.postgresqlUrl')}</FieldLabel>
           <div className="mt-1 flex gap-2">
             <input
               type="text"
@@ -287,7 +291,7 @@ export default function SystemConfig() {
               className="shrink-0"
             >
               {testing === 'database' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              Test Connection
+              {t('systemConfig.testConnection')}
             </Button>
           </div>
           <TestStatus result={dbResult} />
@@ -295,9 +299,9 @@ export default function SystemConfig() {
       </div>
 
       <div className={cardClass}>
-        <CardHeader icon={Server} title="Redis" />
+        <CardHeader icon={Server} title={t('systemConfig.redis')} />
         <div>
-          <FieldLabel>Redis URL</FieldLabel>
+          <FieldLabel>{t('systemConfig.redisUrl')}</FieldLabel>
           <div className="mt-1 flex gap-2">
             <input
               type="text"
@@ -314,7 +318,7 @@ export default function SystemConfig() {
               className="shrink-0"
             >
               {testing === 'redis' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              Test Connection
+              {t('systemConfig.testConnection')}
             </Button>
           </div>
           <TestStatus result={redisResult} />
@@ -322,10 +326,10 @@ export default function SystemConfig() {
       </div>
 
       <div className={cardClass}>
-        <CardHeader icon={KeyRound} title="Server" />
+        <CardHeader icon={KeyRound} title={t('systemConfig.server')} />
         <div className="space-y-3">
           <div>
-            <FieldLabel>Public URL</FieldLabel>
+            <FieldLabel>{t('systemConfig.publicUrl')}</FieldLabel>
             <input
               type="text"
               value={config.public_url}
@@ -336,7 +340,7 @@ export default function SystemConfig() {
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <FieldLabel>Default Storage Backend</FieldLabel>
+              <FieldLabel>{t('systemConfig.defaultStorageBackend')}</FieldLabel>
               <GlassSelect
                 value={config.default_backend}
                 onChange={(v) => updateField('default_backend', v)}
@@ -347,7 +351,7 @@ export default function SystemConfig() {
             <div>
               {config.default_backend === 'local' ? (
                 <>
-                  <FieldLabel>Local Storage Path</FieldLabel>
+                  <FieldLabel>{t('systemConfig.localStoragePath')}</FieldLabel>
                   <input
                     type="text"
                     value={config.local_base_path}
@@ -358,7 +362,7 @@ export default function SystemConfig() {
                 </>
               ) : (
                 <>
-                  <FieldLabel>Backend Credentials</FieldLabel>
+                  <FieldLabel>{t('systemConfig.backendCredentials')}</FieldLabel>
                   <BackendConfigHint backend={config.default_backend} />
                 </>
               )}
@@ -368,10 +372,10 @@ export default function SystemConfig() {
       </div>
 
       <div className={cardClass}>
-        <CardHeader icon={KeyRound} title="Security" />
+        <CardHeader icon={KeyRound} title={t('systemConfig.security')} />
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <FieldLabel>JWT Secret</FieldLabel>
+            <FieldLabel>{t('systemConfig.jwtSecret')}</FieldLabel>
             <input
               type="password"
               value={config.jwt_secret}
@@ -381,7 +385,7 @@ export default function SystemConfig() {
             />
           </div>
           <div>
-            <FieldLabel>Token Encryption Key</FieldLabel>
+            <FieldLabel>{t('systemConfig.tokenEncryptionKey')}</FieldLabel>
             <input
               type="password"
               value={config.token_encryption_key}
@@ -392,24 +396,23 @@ export default function SystemConfig() {
           </div>
         </div>
         <p className="mt-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-          Secrets are masked and cannot be read back. To rotate a secret, update the environment
-          variable and restart.
+          {t('systemConfig.secretsNote')}
         </p>
       </div>
 
       <div className={cardClass}>
-        <CardHeader icon={Archive} title="Backups" />
+        <CardHeader icon={Archive} title={t('systemConfig.backups')} />
         <div className="mb-3 flex items-center justify-between">
           <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            {backups.length} backup{backups.length !== 1 ? 's' : ''} on disk
+            {t('systemConfig.backupCount', { count: backups.length })}
           </p>
           <Button variant="ghost" size="sm" onClick={() => void handleBackup()} disabled={backingUp}>
             {backingUp ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
-            Backup Current Config
+            {t('systemConfig.backupCurrent')}
           </Button>
         </div>
         {backups.length === 0 ? (
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No backups yet.</p>
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('systemConfig.noBackups')}</p>
         ) : (
           <ul className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
             {backups.map(b => (
@@ -424,7 +427,7 @@ export default function SystemConfig() {
                   disabled={restoring !== null}
                 >
                   {restoring === b.filename ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-                  Restore
+                  {t('systemConfig.restore')}
                 </Button>
               </li>
             ))}
@@ -435,17 +438,17 @@ export default function SystemConfig() {
       <div className="flex items-center justify-between rounded-lg border border-[var(--color-border)] bg-[var(--glass-tint-base)]/65 p-4 backdrop-blur-sm">
         <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {changedCount > 0
-            ? `${changedCount} field${changedCount !== 1 ? 's' : ''} changed`
-            : 'No unsaved changes'}
+            ? t('systemConfig.changedCount', { count: changedCount })
+            : t('systemConfig.noUnsavedChanges')}
         </p>
         <Button onClick={() => void handleSave()} disabled={saving || changedCount === 0}>
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-          Save and Restart Required
+          {t('systemConfig.saveRestart')}
         </Button>
       </div>
 
       <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-        Config file: <span className="font-mono">{config.config_path}</span>
+        {t('systemConfig.configFile')} <span className="font-mono">{config.config_path}</span>
       </p>
     </div>
   )

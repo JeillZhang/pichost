@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { Settings } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { usePreprocessingStore } from '../stores/preprocessing'
 
 function formatDimensions(w: number, h: number): string {
@@ -7,35 +8,42 @@ function formatDimensions(w: number, h: number): string {
 }
 
 export function PreprocessingStatus() {
+  const { t } = useTranslation()
   const prefs = usePreprocessingStore()
   const hasAny = prefs.hasAnyEnabled()
 
   if (!hasAny) {
     return (
       <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-        <span>Preprocessing: Off</span>
+        <span>{t('preprocessing.off')}</span>
         <Link
           to="/settings"
           className="underline underline-offset-2"
           style={{ color: 'var(--color-accent)' }}
         >
-          Configure...
+          {t('preprocessing.configure')}
         </Link>
       </div>
     )
   }
 
   const tags: string[] = []
-  if (prefs.stripExif) tags.push('EXIF: On')
+  if (prefs.stripExif) tags.push(t('preprocessing.exifOn'))
   if (prefs.resize.enabled) {
-    tags.push(`Resize: ${formatDimensions(prefs.resize.maxWidth, prefs.resize.maxHeight)}`)
+    tags.push(t('preprocessing.resizeLabel', {
+      dimensions: formatDimensions(prefs.resize.maxWidth, prefs.resize.maxHeight),
+    }))
   }
   if (prefs.formatConvert.enabled) {
     const fmt = prefs.formatConvert.targetFormat.split('/')[1].toUpperCase()
-    tags.push(`${fmt}: Q${prefs.formatConvert.quality}`)
+    tags.push(t('preprocessing.formatLabel', { format: fmt, quality: prefs.formatConvert.quality }))
   }
-  if (prefs.compression.enabled) tags.push(`Compress: Q${prefs.compression.quality}`)
-  if (prefs.rotate.enabled) tags.push(`Rotate: ${prefs.rotate.degrees}°`)
+  if (prefs.compression.enabled) {
+    tags.push(t('preprocessing.compressLabel', { quality: prefs.compression.quality }))
+  }
+  if (prefs.rotate.enabled) {
+    tags.push(t('preprocessing.rotateLabel', { degrees: prefs.rotate.degrees }))
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -58,7 +66,7 @@ export function PreprocessingStatus() {
         style={{ color: 'var(--color-accent)' }}
       >
         <Settings className="h-3 w-3" />
-        Configure...
+        {t('preprocessing.configure')}
       </Link>
     </div>
   )
