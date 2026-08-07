@@ -56,5 +56,34 @@
   "languageSwitcher": {
     "english": "English",
     "chinese": "简体中文"
+  },
+  "dashboard": {
+    "adminBanner": "你是管理员。",
+    "goToAdmin": "前往管理面板",
+    "storageBackend": "存储后端",
+    "addSecondBackend": "添加第 2 个后端",
+    "defaultBadge": " · 默认",
+    "uploads": "上传",
+    "active": "个进行中",
+    "clearDone": "清除已完成",
+    "storage": "存储",
+    "recent": "最近",
+    "detail": "详情",
+    "noImagesYet": "还没有图片。上传一张吧！"
+  },
+  "dropzone": {
+    "dropHint": "将图片拖放到此处",
+    "dragHint": "拖拽图片，或点击选择",
+    "formatsHint": "PNG、JPEG、GIF、WebP、SVG、AVIF、BMP — 每张最大 50 MB"
+  },
+  "upload": {
+    "queued": "排队中",
+    "processing": "处理中…",
+    "uploading": "上传中…",
+    "uploaded": "已上传",
+    "failed": "失败",
+    "open": "打开",
+    "copyUrl": "复制链接",
+    "copyMd": "复制 MD"
   }
 }

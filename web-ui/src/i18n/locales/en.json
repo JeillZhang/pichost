@@ -56,5 +56,34 @@
   "languageSwitcher": {
     "english": "English",
     "chinese": "简体中文"
+  },
+  "dashboard": {
+    "adminBanner": "You are an administrator.",
+    "goToAdmin": "Go to Admin Panel",
+    "storageBackend": "Storage Backend",
+    "addSecondBackend": "Add 2nd backend",
+    "defaultBadge": " · default",
+    "uploads": "Uploads",
+    "active": "active",
+    "clearDone": "Clear done",
+    "storage": "Storage",
+    "recent": "Recent",
+    "detail": "Detail",
+    "noImagesYet": "No images yet. Upload one above!"
+  },
+  "dropzone": {
+    "dropHint": "Drop images here",
+    "dragHint": "Drag & drop images, or click to select",
+    "formatsHint": "PNG, JPEG, GIF, WebP, SVG, AVIF, BMP — up to 50 MB each"
+  },
+  "upload": {
+    "queued": "Queued",
+    "processing": "Processing…",
+    "uploading": "Uploading…",
+    "uploaded": "Uploaded",
+    "failed": "Failed",
+    "open": "Open",
+    "copyUrl": "Copy URL",
+    "copyMd": "Copy MD"
   }
 }

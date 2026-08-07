@@ -55,3 +55,11 @@ it('nav, search, sort and themeToggle prefixes exist in both locales', async () 
     expect(Object.keys(zh)).toContain(prefix)
   }
 })
+it('dashboard, dropzone and upload prefixes exist in both locales', async () => {
+  const en = (await import('./locales/en.json')).default as Record<string, unknown>
+  const zh = (await import('./locales/zh-CN.json')).default as Record<string, unknown>
+  for (const prefix of ['dashboard', 'dropzone', 'upload']) {
+    expect(Object.keys(en)).toContain(prefix)
+    expect(Object.keys(zh)).toContain(prefix)
+  }
+})

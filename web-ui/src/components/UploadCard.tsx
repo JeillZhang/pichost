@@ -1,4 +1,6 @@
 import { Check, Loader2, X, AlertTriangle } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { useFormat } from '../hooks/useFormat'
 import type { UploadTask } from '../hooks/useUploadQueue'
 
 interface UploadCardProps {
@@ -13,15 +15,20 @@ const STATUS_ICONS: Record<UploadTask['status'], { icon: typeof Check; cls: stri
   error: { icon: X, cls: 'text-[var(--color-danger)]' },
 }
 
-const STATUS_LABELS: Record<UploadTask['status'], string> = {
-  pending: 'Queued',
-  processing: 'Processing…',
-  uploading: 'Uploading…',
-  done: 'Uploaded',
-  error: 'Failed',
+const STATUS_KEYS: Record<
+  UploadTask['status'],
+  'upload.queued' | 'upload.processing' | 'upload.uploading' | 'upload.uploaded' | 'upload.failed'
+> = {
+  pending: 'upload.queued',
+  processing: 'upload.processing',
+  uploading: 'upload.uploading',
+  done: 'upload.uploaded',
+  error: 'upload.failed',
 }
 
 export default function UploadCard({ task }: UploadCardProps) {
+  const { t } = useTranslation()
+  const { formatBytes } = useFormat()
   const { icon: Icon, cls: iconCls } = STATUS_ICONS[task.status]
 
   return (
@@ -58,11 +65,11 @@ export default function UploadCard({ task }: UploadCardProps) {
             </div>
           )}
           <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            {STATUS_LABELS[task.status]}
+            {t(STATUS_KEYS[task.status])}
           </span>
           {task.status === 'done' && task.result && (
             <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              {(task.result.file_size / 1024).toFixed(1)} KB
+              {formatBytes(task.result.file_size)}
             </span>
           )}
           {task.status === 'error' && task.error && (
@@ -81,21 +88,21 @@ export default function UploadCard({ task }: UploadCardProps) {
               className="text-xs font-medium underline underline-offset-2 hover:opacity-80"
               style={{ color: 'var(--color-accent)' }}
             >
-              Open
+              {t('upload.open')}
             </a>
             <button
               onClick={() => navigator.clipboard.writeText(task.result!.url)}
               className="text-xs font-medium underline underline-offset-2 hover:opacity-80"
               style={{ color: 'var(--color-accent)' }}
             >
-              Copy URL
+              {t('upload.copyUrl')}
             </button>
             <button
               onClick={() => navigator.clipboard.writeText(task.result!.markdown)}
               className="text-xs underline underline-offset-2 hover:opacity-80"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              Copy MD
+              {t('upload.copyMd')}
             </button>
           </div>
         )}

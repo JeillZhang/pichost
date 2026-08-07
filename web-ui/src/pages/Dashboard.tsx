@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Shield, Trash2, Plus, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/auth'
 import DropZone from '../components/DropZone'
 import UploadCard from '../components/UploadCard'
@@ -9,22 +10,18 @@ import type { UserStorageConfig } from '../api/client'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useUploadQueue } from '../hooks/useUploadQueue'
 import { useClipboardPaste } from '../hooks/useClipboardPaste'
+import { useFormat } from '../hooks/useFormat'
 import UrlUploadInput from '../components/UrlUploadInput'
 import { PreprocessingStatus } from '../components/PreprocessingStatus'
 import GlassSelect from '../components/ui/GlassSelect'
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
-  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
-}
 
 export default function Dashboard() {
   const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { queue, addFiles, clearQueue } = useUploadQueue()
+  const { t } = useTranslation()
+  const { formatBytes } = useFormat()
 
   const { data } = useQuery({
     queryKey: ['images'],
@@ -130,12 +127,12 @@ export default function Dashboard() {
         >
           <Shield className="h-4 w-4 shrink-0" />
           <span>
-            You are an administrator.{' '}
+            {t('dashboard.adminBanner')}{' '}
             <button
               onClick={() => navigate('/admin')}
               className="font-semibold underline underline-offset-2 hover:opacity-80"
             >
-              Go to Admin Panel
+              {t('dashboard.goToAdmin')}
             </button>
           </span>
         </div>
@@ -149,7 +146,7 @@ export default function Dashboard() {
               className="text-xs font-semibold uppercase tracking-wider"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              Storage Backend
+              {t('dashboard.storageBackend')}
             </span>
             {canAddSlot && (
               <button
@@ -158,7 +155,7 @@ export default function Dashboard() {
                 style={{ color: 'var(--color-accent)' }}
               >
                 <Plus className="h-3 w-3" />
-                Add 2nd backend
+                {t('dashboard.addSecondBackend')}
               </button>
             )}
           </div>
@@ -170,7 +167,7 @@ export default function Dashboard() {
                   onChange={(v) => handleSlotChange(idx, v)}
                   options={availableForSlot(idx).map((cfg) => ({
                     value: cfg.id,
-                    label: `${cfg.name} (${cfg.provider})${cfg.is_default ? ' · default' : ''}`,
+                    label: `${cfg.name} (${cfg.provider})${cfg.is_default ? t('dashboard.defaultBadge') : ''}`,
                   }))}
                 />
               </div>
@@ -205,11 +202,11 @@ export default function Dashboard() {
         <div className="mt-5 space-y-2">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-              Uploads
+              {t('dashboard.uploads')}
               {hasActiveUploads && (
                 <span className="ml-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
                   {queue.filter((t) => t.status === 'pending' || t.status === 'uploading').length}{' '}
-                  active
+                  {t('dashboard.active')}
                 </span>
               )}
             </h2>
@@ -220,7 +217,7 @@ export default function Dashboard() {
                 style={{ color: 'var(--color-text-muted)' }}
               >
                 <Trash2 className="h-3 w-3" />
-                Clear done
+                {t('dashboard.clearDone')}
               </button>
             )}
           </div>
@@ -234,7 +231,7 @@ export default function Dashboard() {
       {stats && stats.storage_quota != null && (
         <div className="glass mt-5 rounded-lg p-3">
           <div className="mb-1.5 flex items-center justify-between text-xs">
-            <span style={{ color: 'var(--color-text-muted)' }}>Storage</span>
+            <span style={{ color: 'var(--color-text-muted)' }}>{t('dashboard.storage')}</span>
             <span style={{ color: 'var(--color-text-secondary)' }}>
               {formatBytes(stats.total_size)} / {formatBytes(stats.storage_quota)}
             </span>
@@ -266,7 +263,7 @@ export default function Dashboard() {
             className="mb-3 text-sm font-semibold uppercase tracking-wider"
             style={{ color: 'var(--color-text-muted)' }}
           >
-            Recent
+            {t('dashboard.recent')}
           </h2>
           <div className="space-y-2">
             {images.map((img) => (
@@ -284,14 +281,14 @@ export default function Dashboard() {
                     {img.original_name}
                   </p>
                   <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                    {(img.file_size / 1024).toFixed(1)} KB
+                    {formatBytes(img.file_size)}
                   </p>
                 </div>
                 <button
                   onClick={() => navigate(`/images/${img.id}`)}
                   className="btn-ghost shrink-0 px-3 py-1.5 text-xs"
                 >
-                  Detail
+                  {t('dashboard.detail')}
                 </button>
               </div>
             ))}
@@ -302,7 +299,7 @@ export default function Dashboard() {
       {/* Empty state */}
       {images && images.length === 0 && queue.length === 0 && (
         <div className="mt-8 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
-          No images yet. Upload one above!
+          {t('dashboard.noImagesYet')}
         </div>
       )}
     </div>
