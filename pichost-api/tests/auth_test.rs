@@ -5,9 +5,11 @@
 
 mod common;
 
-use axum::http::{Method, StatusCode};
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode};
 use common::*;
 use serde_json::Value;
+use tower::ServiceExt;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires running PostgreSQL and Redis"]
@@ -193,4 +195,44 @@ async fn security_headers_present() {
     );
     assert_eq!(headers.get("x-frame-options").unwrap(), "DENY");
     assert_eq!(headers.get("referrer-policy").unwrap(), "strict-origin-when-cross-origin");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn test_login_failure_returns_code_and_localized_message() {
+    let app = test_app().await;
+    let (status, body) = send_json(
+        &app,
+        Method::POST,
+        "/api/v1/auth/login",
+        None,
+        &serde_json::json!({"username": "nobody", "password": "x"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["code"], "auth.invalid_credentials");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn test_login_failure_zh_negotiation() {
+    let app = test_app().await;
+    let resp = app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/login")
+                .header("content-type", "application/json")
+                .header("accept-language", "zh-CN")
+                .body(Body::from(r#"{"username":"nobody","password":"x"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["error"], "用户名或密码错误");
+    assert_eq!(body["code"], "auth.invalid_credentials");
 }

@@ -41,6 +41,16 @@ impl FromRequestParts<crate::app::AppState> for Locale {
     }
 }
 
+impl FromRequestParts<std::sync::Arc<crate::app::AppState>> for Locale {
+    type Rejection = std::convert::Infallible;
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &std::sync::Arc<crate::app::AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(Self::from_parts(&parts.headers, &state.config))
+    }
+}
+
 fn envelope(locale: Language, key: &str, args: &[String], extra: Value) -> Value {
     let msg = if args.is_empty() {
         I18n::global().t(locale, key)
