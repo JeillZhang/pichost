@@ -10,8 +10,25 @@
     "dashboard": "仪表盘",
     "gallery": "图库",
     "admin": "管理",
+    "adminBadge": "管理",
     "settings": "设置",
     "logout": "退出登录"
+  },
+  "search": {
+    "placeholder": "按文件名搜索…",
+    "clearAria": "清除搜索"
+  },
+  "sort": {
+    "uploadDate": "上传日期",
+    "fileSize": "文件大小",
+    "filename": "文件名",
+    "sortAria": "排序图片",
+    "orderAria": "按{{order}}排序",
+    "ascending": "升序",
+    "descending": "降序"
+  },
+  "themeToggle": {
+    "title": "主题：{{theme}}。点击切换。"
   },
   "login": {
     "title": "自托管图片托管",

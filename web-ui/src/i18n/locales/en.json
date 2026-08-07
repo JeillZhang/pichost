@@ -10,8 +10,25 @@
     "dashboard": "Dashboard",
     "gallery": "Gallery",
     "admin": "Admin",
+    "adminBadge": "Admin",
     "settings": "Settings",
     "logout": "Logout"
+  },
+  "search": {
+    "placeholder": "Search by filename…",
+    "clearAria": "Clear search"
+  },
+  "sort": {
+    "uploadDate": "Upload Date",
+    "fileSize": "File Size",
+    "filename": "Filename",
+    "sortAria": "Sort images",
+    "orderAria": "Sort {{order}}",
+    "ascending": "ascending",
+    "descending": "descending"
+  },
+  "themeToggle": {
+    "title": "Theme: {{theme}}. Click to cycle."
   },
   "login": {
     "title": "Self-hosted image hosting",

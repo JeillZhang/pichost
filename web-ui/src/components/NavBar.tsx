@@ -1,7 +1,9 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { LogOut, Settings, Shield, User } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/auth'
 import ThemeToggle from './ThemeToggle'
+import LanguageSwitcher from './LanguageSwitcher'
 import DropdownMenu, { type DropdownMenuItem } from './ui/DropdownMenu'
 
 const linkBase =
@@ -13,6 +15,7 @@ export default function NavBar() {
   const user = useAuthStore((s) => s.user)
   const logout = useAuthStore((s) => s.logout)
   const navigate = useNavigate()
+  const { t } = useTranslation()
 
   return (
     <nav className="glass-nav sticky top-0 z-50">
@@ -35,7 +38,7 @@ export default function NavBar() {
               `${linkBase} ${isActive ? linkActive : linkInactive}`
             }
           >
-            Dashboard
+            {t('nav.dashboard')}
           </NavLink>
           <NavLink
             to="/gallery"
@@ -43,7 +46,7 @@ export default function NavBar() {
               `${linkBase} ${isActive ? linkActive : linkInactive}`
             }
           >
-            Gallery
+            {t('nav.gallery')}
           </NavLink>
           {user?.is_admin && (
             <NavLink
@@ -52,7 +55,7 @@ export default function NavBar() {
                 `${linkBase} ${isActive ? linkActive : linkInactive}`
               }
             >
-              Admin
+              {t('nav.admin')}
             </NavLink>
           )}
         </div>
@@ -60,6 +63,7 @@ export default function NavBar() {
         {/* User */}
         <div className="flex items-center gap-3">
           <ThemeToggle />
+          <LanguageSwitcher />
           <DropdownMenu
             trigger={
               <span
@@ -77,20 +81,20 @@ export default function NavBar() {
                       borderColor: 'var(--color-accent-strong)',
                     }}
                   >
-                    Admin
+                    {t('nav.adminBadge')}
                   </span>
                 )}
               </span>
             }
             items={(() => {
               const items: DropdownMenuItem[] = [
-                { label: 'Settings', icon: <Settings className="h-4 w-4" />, onClick: () => navigate('/settings') },
+                { label: t('nav.settings'), icon: <Settings className="h-4 w-4" />, onClick: () => navigate('/settings') },
               ]
               if (user?.is_admin) {
-                items.push({ label: 'Admin', icon: <Shield className="h-4 w-4" />, onClick: () => navigate('/admin') })
+                items.push({ label: t('nav.admin'), icon: <Shield className="h-4 w-4" />, onClick: () => navigate('/admin') })
               }
               items.push({
-                label: 'Logout',
+                label: t('nav.logout'),
                 icon: <LogOut className="h-4 w-4" />,
                 onClick: () => {
                   logout()
