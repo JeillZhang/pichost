@@ -1,5 +1,6 @@
 import ky from 'ky'
-import type { KyInstance } from 'ky'
+import type { HTTPError, KyInstance } from 'ky'
+import { getCurrentLocale } from '../i18n'
 
 export interface UserInfo {
   id: string
@@ -134,6 +135,32 @@ function createApi(): KyInstance {
           if (token) {
             request.headers.set('Authorization', `Bearer ${token}`)
           }
+        },
+        ({ request }) => {
+          request.headers.set('Accept-Language', getCurrentLocale())
+        },
+      ],
+      beforeError: [
+        async (state) => {
+          const error = state.error as HTTPError
+          try {
+            const body = (await error.response.clone().json()) as {
+              error?: unknown
+              code?: unknown
+            }
+            // Existing toast.error(err.message) call sites then show the
+            // backend-localized message without any per-call changes.
+            if (typeof body.error === 'string') {
+              error.message = body.error
+            }
+            // Attach the behavior code for getErrorCode()/isErrorCode() consumers.
+            if (typeof body.code === 'string') {
+              ;(error as HTTPError & { code?: string }).code = body.code
+            }
+          } catch {
+            // Non-JSON body — keep the original message.
+          }
+          return error
         },
       ],
       afterResponse: [
