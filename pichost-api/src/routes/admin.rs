@@ -870,6 +870,7 @@ pub async fn get_admin_config(locale: Locale) -> Result<Json<ConfigResponse>, Ad
 /// Merge semantics: fields omitted from the body (None) keep their
 /// current on-disk value, so a partial update never wipes other keys.
 pub async fn update_admin_config(
+    state: State<Arc<AppState>>,
     locale: Locale,
     JsonBody(body): JsonBody<UpdateConfigBody>,
 ) -> Result<Json<ConfigResponse>, AdminError> {
@@ -878,6 +879,14 @@ pub async fn update_admin_config(
     let _ = config::backup_config(&path);
 
     let existing = config::read_config_toml(&path).unwrap_or_default();
+    // i18n 键回退链: body → config.toml → 运行时生效配置(env),避免覆盖 env 部署的默认值
+    let effective_language = state.config.i18n.language.clone();
+    let effective_locales_dir = state
+        .config
+        .i18n
+        .locales_dir
+        .as_ref()
+        .map(|p| p.display().to_string());
     let cfg = SystemConfig {
         database_url: body.database_url.or(existing.database_url),
         redis_url: body.redis_url.or(existing.redis_url),
@@ -890,12 +899,14 @@ pub async fn update_admin_config(
             .i18n
             .as_ref()
             .and_then(|i| i.language.clone())
-            .or(existing.i18n_language),
+            .or(existing.i18n_language)
+            .or(Some(effective_language)),
         i18n_locales_dir: body
             .i18n
             .as_ref()
             .and_then(|i| i.locales_dir.clone())
-            .or(existing.i18n_locales_dir),
+            .or(existing.i18n_locales_dir)
+            .or(effective_locales_dir),
     };
     config::write_config_toml(&path, &cfg).map_err(|e| {
         error_json_args(
@@ -996,6 +1007,15 @@ pub async fn restore_admin_config(
             internal_error(locale.0)
         }
     })?;
+    // 恢复的 config.toml 可能携带不同 i18n 配置 — 立即重载,与 PUT 路径一致
+    let restored = config::read_config_toml(&path).unwrap_or_default();
+    I18n::reload_global(
+        Language::from_str_opt(restored.i18n_language.as_deref().unwrap_or("en")),
+        restored
+            .i18n_locales_dir
+            .as_ref()
+            .map(std::path::PathBuf::from),
+    );
     Ok(Json(serde_json::json!({
         "status": "restored",
         "from": body.backup_file,

@@ -578,7 +578,7 @@ fn storage_error_response(locale: Language, e: &pichost_core::error::StorageErro
         StorageError::PayloadTooLarge(m) => error_json_args(
             locale,
             StatusCode::PAYLOAD_TOO_LARGE,
-            "common.db_error",
+            "storage_payload_too_large",
             std::slice::from_ref(m),
         ),
         _ => error_json_args(

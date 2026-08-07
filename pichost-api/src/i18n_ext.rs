@@ -3,7 +3,6 @@ use axum::http::header::ACCEPT_LANGUAGE;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
-use pichost_core::config::AppConfig;
 use pichost_core::i18n::{I18n, Language};
 use serde_json::Value;
 
@@ -26,8 +25,8 @@ pub fn locale_from_header(value: Option<&HeaderValue>, fallback: Language) -> La
 #[derive(Debug, Clone, Copy)]
 pub struct Locale(pub Language);
 impl Locale {
-    pub fn from_parts(headers: &HeaderMap, config: &AppConfig) -> Self {
-        let fallback = Language::from_str_opt(&config.i18n.language);
+    pub fn from_parts(headers: &HeaderMap) -> Self {
+        let fallback = I18n::global().language();
         Self(locale_from_header(headers.get(ACCEPT_LANGUAGE), fallback))
     }
 }
@@ -35,9 +34,9 @@ impl FromRequestParts<crate::app::AppState> for Locale {
     type Rejection = std::convert::Infallible;
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
-        state: &crate::app::AppState,
+        _state: &crate::app::AppState,
     ) -> Result<Self, Self::Rejection> {
-        Ok(Self::from_parts(&parts.headers, &state.config))
+        Ok(Self::from_parts(&parts.headers))
     }
 }
 
@@ -45,9 +44,9 @@ impl FromRequestParts<std::sync::Arc<crate::app::AppState>> for Locale {
     type Rejection = std::convert::Infallible;
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
-        state: &std::sync::Arc<crate::app::AppState>,
+        _state: &std::sync::Arc<crate::app::AppState>,
     ) -> Result<Self, Self::Rejection> {
-        Ok(Self::from_parts(&parts.headers, &state.config))
+        Ok(Self::from_parts(&parts.headers))
     }
 }
 
