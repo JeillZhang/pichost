@@ -17,7 +17,6 @@ i18n.use(LanguageDetector)
       resources: { en: { translation: en }, 'zh-CN': { translation: zhCN } },
       supportedLngs: ['en', 'zh-CN'],
       fallbackLng: 'en',
-      nonExplicitSupportedLngs: true,
       detection: {
         order: ['localStorage', 'navigator'],
         caches: ['localStorage'],
