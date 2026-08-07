@@ -1,6 +1,7 @@
-use axum::extract::FromRequestParts;
+use axum::extract::{FromRequest, FromRequestParts};
 use axum::http::header::ACCEPT_LANGUAGE;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::IntoResponse;
 use axum::Json;
 use pichost_core::config::AppConfig;
 use pichost_core::i18n::{I18n, Language};
@@ -74,12 +75,35 @@ pub fn error_json_extra(
     (status, Json(envelope(locale, key, &[], extra)))
 }
 
+#[derive(Debug)]
+pub struct JsonBody<T>(pub T);
+impl<T, S> FromRequest<S> for JsonBody<T>
+where
+    T: serde::de::DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = axum::response::Response;
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let fallback = I18n::global().language();
+        let locale = locale_from_header(req.headers().get(ACCEPT_LANGUAGE), fallback);
+        match axum::Json::<T>::from_request(req, state).await {
+            Ok(axum::Json(v)) => Ok(JsonBody(v)),
+            Err(rejection) => Err(
+                error_json(locale, rejection.status(), "validation.body_invalid").into_response(),
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use axum::http::{HeaderValue, StatusCode};
     use pichost_core::i18n::{I18n, Language};
 
-    use super::{error_json, locale_from_header};
+    use super::{error_json, locale_from_header, JsonBody};
 
     #[test]
     fn locale_from_header_resolution() {
@@ -105,5 +129,26 @@ mod tests {
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body.0["error"], "用户名或密码错误");
         assert_eq!(body.0["code"], "validation.invalid_credentials");
+    }
+
+    #[tokio::test]
+    async fn json_body_rejection_localized() {
+        use axum::extract::FromRequest;
+        use axum::http::Request;
+        use axum::response::IntoResponse;
+        I18n::init_global(Language::ZhCN, None);
+        let req = Request::builder()
+            .header("content-type", "application/json")
+            .header("accept-language", "zh-CN")
+            .body(axum::body::Body::from("{\"bad json"))
+            .unwrap();
+        let resp = JsonBody::<serde_json::Value>::from_request(req, &())
+            .await
+            .unwrap_err()
+            .into_response();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["code"], "validation.body_invalid");
+        assert_eq!(v["error"], "请求体无效");
     }
 }

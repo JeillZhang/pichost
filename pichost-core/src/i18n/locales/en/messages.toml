@@ -1,3 +1,4 @@
 "validation.invalid_credentials" = "invalid username or password"
 "validation.password_min_length" = "password must be at least 6 characters"
 "common.internal_error" = "internal server error"
+"validation.body_invalid" = "invalid request body"

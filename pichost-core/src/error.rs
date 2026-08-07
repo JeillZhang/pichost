@@ -55,6 +55,22 @@ impl AppError {
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::Internal(msg.into())
     }
+
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Authentication(_) => "auth_failed",
+            Self::Authorization(_) => "auth_insufficient_permissions",
+            Self::NotFound(_) => "not_found",
+            Self::Validation(_) => "validation_error",
+            Self::Upload(_) => "upload_failed",
+            Self::RateLimited => "rate_limited",
+            Self::Storage(e) => match e {
+                StorageError::PayloadTooLarge(_) => "storage_payload_too_large",
+                _ => "internal_error",
+            },
+            Self::Internal(_) => "internal_error",
+        }
+    }
 }
 
 // ── IntoResponse ────────────────────────────────────────────────────────
@@ -82,7 +98,7 @@ impl IntoResponse for AppError {
                 (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
         };
-        (status, Json(serde_json::json!({ "error": msg }))).into_response()
+        (status, Json(serde_json::json!({ "error": msg, "code": self.code() }))).into_response()
     }
 }
 
@@ -186,6 +202,19 @@ mod tests {
             status(AppError::Internal("a".into())),
             StatusCode::INTERNAL_SERVER_ERROR
         );
+    }
+
+    #[test]
+    fn app_error_codes() {
+        assert_eq!(AppError::Authentication("a".into()).code(), "auth_failed");
+        assert_eq!(AppError::NotFound("a".into()).code(), "not_found");
+        assert_eq!(AppError::Validation("a".into()).code(), "validation_error");
+        assert_eq!(AppError::RateLimited.code(), "rate_limited");
+        assert_eq!(
+            AppError::Storage(StorageError::PayloadTooLarge("a".into())).code(),
+            "storage_payload_too_large"
+        );
+        assert_eq!(AppError::Internal("a".into()).code(), "internal_error");
     }
 
     #[test]
