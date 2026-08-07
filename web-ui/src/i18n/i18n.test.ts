@@ -123,3 +123,7 @@ it('adminInvites, createInvite and adminTabs prefixes exist in both locales', as
     expect(Object.keys(zh)).toContain(prefix)
   }
 })
+it('systemConfig language labels exist', async () => {
+  const en = (await import('./locales/en.json')).default as any
+  expect(en.systemConfig.language).toBeTruthy()
+})

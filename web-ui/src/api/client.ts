@@ -378,6 +378,32 @@ export interface WatermarkConfig {
   margin_y: number
 }
 
+export interface AdminConfigI18n {
+  language?: string
+  locales_dir?: string | null
+}
+
+export interface AdminConfig {
+  database_url: string
+  redis_url: string
+  jwt_secret: string
+  token_encryption_key: string
+  public_url: string
+  default_backend: string
+  local_base_path: string
+  config_path: string
+  i18n?: AdminConfigI18n
+}
+
+export interface AdminConfigUpdate {
+  database_url?: string
+  redis_url?: string
+  public_url?: string
+  default_backend?: string
+  local_base_path?: string
+  i18n?: { language?: string }
+}
+
 export async function batchDeleteImages(ids: string[]): Promise<BatchDeleteResult> {
   return api.post('images/batch-delete', { json: { ids } }).json<BatchDeleteResult>()
 }

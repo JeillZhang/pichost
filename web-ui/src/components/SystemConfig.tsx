@@ -5,6 +5,7 @@ import {
   Archive,
   Check,
   Database,
+  Globe,
   Info,
   KeyRound,
   Loader2,
@@ -14,20 +15,9 @@ import {
   Server,
   X,
 } from 'lucide-react'
-import api from '../api/client'
+import api, { type AdminConfig, type AdminConfigUpdate } from '../api/client'
 import Button from './ui/Button'
 import GlassSelect from './ui/GlassSelect'
-
-interface ConfigResponse {
-  database_url: string
-  redis_url: string
-  jwt_secret: string
-  token_encryption_key: string
-  public_url: string
-  default_backend: string
-  local_base_path: string
-  config_path: string
-}
 
 interface TestResult {
   database: string | null
@@ -39,6 +29,11 @@ interface BackupInfo {
 }
 
 const BACKEND_OPTIONS = ['local', 'rustfs', 'github', 'gitcode']
+
+const LANGUAGE_OPTIONS = [
+  { value: 'en', label: 'English' },
+  { value: 'zh-CN', label: '简体中文' },
+]
 
 const inputClass =
   'w-full rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] disabled:opacity-50'
@@ -124,8 +119,8 @@ function BackendConfigHint({ backend }: { backend: string }) {
 
 export default function SystemConfig() {
   const { t } = useTranslation()
-  const [config, setConfig] = useState<ConfigResponse | null>(null)
-  const [dirty, setDirty] = useState<Partial<ConfigResponse>>({})
+  const [config, setConfig] = useState<AdminConfig | null>(null)
+  const [dirty, setDirty] = useState<Partial<AdminConfig>>({})
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -140,7 +135,7 @@ export default function SystemConfig() {
     setLoading(true)
     setLoadError(null)
     try {
-      const cfg = await api.get('admin/config').json<ConfigResponse>()
+      const cfg = await api.get('admin/config').json<AdminConfig>()
       setConfig(cfg)
       setDirty({})
     } catch (e: unknown) {
@@ -164,9 +159,14 @@ export default function SystemConfig() {
     void fetchBackups()
   }, [fetchConfig, fetchBackups])
 
-  const updateField = useCallback(<K extends keyof ConfigResponse>(key: K, value: string) => {
+  const updateField = useCallback(<K extends keyof AdminConfig>(key: K, value: string) => {
     setConfig(prev => (prev ? { ...prev, [key]: value } : prev))
     setDirty(prev => ({ ...prev, [key]: value }))
+  }, [])
+
+  const updateLanguage = useCallback((language: string) => {
+    setConfig(prev => (prev ? { ...prev, i18n: { ...prev.i18n, language } } : prev))
+    setDirty(prev => ({ ...prev, i18n: { language } }))
   }, [])
 
   async function handleTest(target: 'database' | 'redis') {
@@ -207,7 +207,8 @@ export default function SystemConfig() {
     }
     setSaving(true)
     try {
-      const updated = await api.put('admin/config', { json: dirty }).json<ConfigResponse>()
+      const body = dirty as AdminConfigUpdate
+      const updated = await api.put('admin/config', { json: body }).json<AdminConfig>()
       setConfig(updated)
       setDirty({})
       toast.success(t('systemConfig.configSaved'))
@@ -398,6 +399,24 @@ export default function SystemConfig() {
         <p className="mt-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {t('systemConfig.secretsNote')}
         </p>
+      </div>
+
+      <div className={cardClass}>
+        <CardHeader icon={Globe} title={t('systemConfig.localization')} />
+        <div>
+          <FieldLabel>{t('systemConfig.language')}</FieldLabel>
+          <GlassSelect
+            value={config.i18n?.language ?? 'en'}
+            onChange={updateLanguage}
+            options={LANGUAGE_OPTIONS}
+            ariaLabel={t('systemConfig.language')}
+            className="mt-1 max-w-xs"
+          />
+          <p className="mt-2 flex items-start gap-1.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-accent)' }} />
+            {t('systemConfig.languageHint')}
+          </p>
+        </div>
       </div>
 
       <div className={cardClass}>
