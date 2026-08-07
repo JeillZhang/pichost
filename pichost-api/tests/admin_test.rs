@@ -526,6 +526,43 @@ async fn oauth_link_unconfigured() {
     assert!(resp["error"].as_str().unwrap().contains("client_id not configured"));
 }
 
+// ── Storage config error codes ────────────────────────────────────────
+
+async fn insert_storage_config(app: &TestApp, user_id: Uuid, name: &str) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO user_storage_configs (user_id, name, provider, config) \
+         VALUES ($1, $2, 'github', $3) RETURNING id",
+    )
+    .bind(user_id)
+    .bind(name)
+    .bind(serde_json::json!({
+        "token_encrypted": "enc",
+        "repo": "owner/repo",
+        "branch": "main",
+    }))
+    .fetch_one(app.pool())
+    .await
+    .expect("insert storage config")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn test_duplicate_storage_config_name_returns_code() {
+    let app = test_app().await;
+    let (_, token, user_id) = create_user(&app, "sc_dup_code").await;
+    let _ = insert_storage_config(&app, user_id, "repo").await;
+    let (status, resp) = send_json(
+        &app,
+        Method::POST,
+        "/api/v1/users/me/storage-configs",
+        Some(&token),
+        &serde_json::json!({"name": "repo", "provider": "github", "token": "x", "repo": "owner/repo"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
+    assert_eq!(resp["code"], "storage_config.name_exists");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires running PostgreSQL and Redis"]
 async fn oauth_link_unknown_provider() {
