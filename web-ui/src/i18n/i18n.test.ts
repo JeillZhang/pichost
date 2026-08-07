@@ -76,3 +76,11 @@ it('gallery deleteConfirm plural keys present', async () => {
   expect(en.gallery.deleteConfirm_one).toBeTruthy()
   expect(en.gallery.deleteConfirm_other).toBeTruthy()
 })
+it('imageDetail and settings prefixes exist in both locales', async () => {
+  const en = (await import('./locales/en.json')).default as Record<string, unknown>
+  const zh = (await import('./locales/zh-CN.json')).default as Record<string, unknown>
+  for (const prefix of ['imageDetail', 'settings']) {
+    expect(Object.keys(en)).toContain(prefix)
+    expect(Object.keys(zh)).toContain(prefix)
+  }
+})
