@@ -66,7 +66,7 @@ fn decode_and_validate_jwt(
     validation.validate_exp = true;
     let token_data = decode::<AccessTokenClaims>(token, &key, &validation).map_err(|e| {
         tracing::warn!("JWT decode failed: {e}");
-        error_json(locale, StatusCode::UNAUTHORIZED, "auth.invalid_token")
+        error_json(locale, StatusCode::UNAUTHORIZED, "auth.invalid_or_expired_token")
     })?;
     Ok(token_data.claims)
 }

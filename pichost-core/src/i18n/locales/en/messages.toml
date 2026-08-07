@@ -4,6 +4,7 @@
 "validation.body_invalid" = "invalid request body"
 "auth.invalid_credentials" = "invalid username or password"
 "auth.invalid_token" = "invalid token"
+"auth.invalid_or_expired_token" = "invalid or expired token"
 "auth.invalid_refresh_token" = "invalid or expired refresh token"
 "auth.refresh_token_revoked" = "refresh token has been revoked"
 "auth.invalid_subject" = "invalid token subject"
