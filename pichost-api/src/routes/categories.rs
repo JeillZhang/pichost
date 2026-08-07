@@ -5,11 +5,13 @@ use axum::{
     http::StatusCode,
     Extension,
 };
+use pichost_core::i18n::Language;
 use pichost_core::models::Category;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::i18n_ext::{error_json, error_json_args, JsonBody, Locale};
 use crate::middleware::auth::AuthUser;
 
 type RouteError = (StatusCode, Json<serde_json::Value>);
@@ -34,10 +36,6 @@ pub struct CategoryTreeNode {
     pub name: String,
     pub parent_id: Option<Uuid>,
     pub children: Vec<CategoryTreeNode>,
-}
-
-fn error_json(msg: &str) -> Json<serde_json::Value> {
-    Json(serde_json::json!({"error": msg}))
 }
 
 // ── Tree building helpers ───────────────────────────────────────────────
@@ -76,11 +74,14 @@ async fn validate_depth(
     user_id: Uuid,
     parent_id: Uuid,
     current: i32,
+    locale: Language,
 ) -> Result<(), RouteError> {
     if current >= MAX_DEPTH {
-        return Err((
+        return Err(error_json_args(
+            locale,
             StatusCode::BAD_REQUEST,
-            error_json(&format!("Maximum category depth is {}", MAX_DEPTH)),
+            "category.depth_exceeded",
+            &[MAX_DEPTH.to_string()],
         ));
     }
     let parent: Option<Category> = sqlx::query_as::<_, Category>(
@@ -91,11 +92,19 @@ async fn validate_depth(
     .bind(user_id)
     .fetch_optional(pool)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, error_json(&e.to_string())))?;
-    let parent =
-        parent.ok_or_else(|| (StatusCode::NOT_FOUND, error_json("Parent category not found")))?;
+    .map_err(|e| {
+        error_json_args(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error_detail",
+            &[e.to_string()],
+        )
+    })?;
+    let parent = parent.ok_or_else(|| {
+        error_json(locale, StatusCode::NOT_FOUND, "category.parent_not_found")
+    })?;
     if let Some(gp) = parent.parent_id {
-        Box::pin(validate_depth(pool, user_id, gp, current + 1)).await?;
+        Box::pin(validate_depth(pool, user_id, gp, current + 1, locale)).await?;
     }
     Ok(())
 }
@@ -106,6 +115,7 @@ async fn validate_depth(
 pub async fn list_categories(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
+    Locale(locale): Locale,
 ) -> Result<Json<Vec<CategoryTreeNode>>, RouteError> {
     let rows: Vec<Category> = sqlx::query_as::<_, Category>(
         "SELECT id, user_id, name, parent_id, created_at \
@@ -114,7 +124,14 @@ pub async fn list_categories(
     .bind(user.id)
     .fetch_all(&state.pool)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, error_json(&e.to_string())))?;
+    .map_err(|e| {
+        error_json_args(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error_detail",
+            &[e.to_string()],
+        )
+    })?;
     Ok(Json(build_tree(rows)))
 }
 
@@ -122,17 +139,19 @@ pub async fn list_categories(
 pub async fn create_category(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
-    Json(req): Json<CreateCategoryRequest>,
+    Locale(locale): Locale,
+    JsonBody(req): JsonBody<CreateCategoryRequest>,
 ) -> Result<(StatusCode, Json<Category>), RouteError> {
     let name = req.name.trim().to_string();
     if name.is_empty() || name.len() > 128 {
-        return Err((
+        return Err(error_json(
+            locale,
             StatusCode::BAD_REQUEST,
-            error_json("Name must be 1-128 characters"),
+            "category.invalid_name",
         ));
     }
     if let Some(pid) = req.parent_id {
-        validate_depth(&state.pool, user.id, pid, 1).await?;
+        validate_depth(&state.pool, user.id, pid, 1, locale).await?;
     }
     let category = sqlx::query_as::<_, Category>(
         "INSERT INTO categories (user_id, name, parent_id) \
@@ -147,10 +166,19 @@ pub async fn create_category(
     .map_err(|e| {
         if let sqlx::Error::Database(ref db_err) = e {
             if db_err.constraint() == Some("categories_user_id_name_parent_id_key") {
-                return (StatusCode::CONFLICT, error_json("Category name already exists"));
+                return error_json(
+                    locale,
+                    StatusCode::CONFLICT,
+                    "category.name_exists",
+                );
             }
         }
-        (StatusCode::INTERNAL_SERVER_ERROR, error_json(&e.to_string()))
+        error_json_args(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error_detail",
+            &[e.to_string()],
+        )
     })?;
     Ok((StatusCode::CREATED, Json(category)))
 }
@@ -159,6 +187,7 @@ pub async fn create_category(
 pub async fn get_category(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
+    Locale(locale): Locale,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Category>, RouteError> {
     sqlx::query_as::<_, Category>(
@@ -169,17 +198,25 @@ pub async fn get_category(
     .bind(user.id)
     .fetch_optional(&state.pool)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, error_json(&e.to_string())))?
+    .map_err(|e| {
+        error_json_args(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error_detail",
+            &[e.to_string()],
+        )
+    })?
     .map(Json)
-    .ok_or_else(|| (StatusCode::NOT_FOUND, error_json("Category not found")))
+    .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "category.not_found"))
 }
 
 /// PATCH /api/v1/categories/{id}
 pub async fn update_category(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
+    Locale(locale): Locale,
     Path(id): Path<Uuid>,
-    Json(req): Json<UpdateCategoryRequest>,
+    JsonBody(req): JsonBody<UpdateCategoryRequest>,
 ) -> Result<Json<Category>, RouteError> {
     let existing = sqlx::query_as::<_, Category>(
         "SELECT id, user_id, name, parent_id, created_at \
@@ -189,8 +226,15 @@ pub async fn update_category(
     .bind(user.id)
     .fetch_optional(&state.pool)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, error_json(&e.to_string())))?
-    .ok_or_else(|| (StatusCode::NOT_FOUND, error_json("Category not found")))?;
+    .map_err(|e| {
+        error_json_args(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error_detail",
+            &[e.to_string()],
+        )
+    })?
+    .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "category.not_found"))?;
     let new_name = req.name.unwrap_or(existing.name);
     let category = sqlx::query_as::<_, Category>(
         "UPDATE categories SET name = $1 WHERE id = $2 AND user_id = $3 \
@@ -201,7 +245,14 @@ pub async fn update_category(
     .bind(user.id)
     .fetch_one(&state.pool)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, error_json(&e.to_string())))?;
+    .map_err(|e| {
+        error_json_args(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error_detail",
+            &[e.to_string()],
+        )
+    })?;
     Ok(Json(category))
 }
 
@@ -209,6 +260,7 @@ pub async fn update_category(
 pub async fn delete_category(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
+    Locale(locale): Locale,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, RouteError> {
     let result = sqlx::query("DELETE FROM categories WHERE id = $1 AND user_id = $2")
@@ -216,9 +268,20 @@ pub async fn delete_category(
         .bind(user.id)
         .execute(&state.pool)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, error_json(&e.to_string())))?;
+        .map_err(|e| {
+            error_json_args(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error_detail",
+                &[e.to_string()],
+            )
+        })?;
     if result.rows_affected() == 0 {
-        return Err((StatusCode::NOT_FOUND, error_json("Category not found")));
+        return Err(error_json(
+            locale,
+            StatusCode::NOT_FOUND,
+            "category.not_found",
+        ));
     }
     Ok(StatusCode::OK)
 }
@@ -268,11 +331,5 @@ mod tests {
         let children = build_children(parent, &categories);
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].id, child);
-    }
-
-    #[test]
-    fn test_error_json() {
-        let json = error_json("oops");
-        assert_eq!(json.0["error"], "oops");
     }
 }
