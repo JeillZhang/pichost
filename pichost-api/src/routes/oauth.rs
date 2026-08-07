@@ -14,8 +14,15 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::i18n_ext::{error_json, error_json_args, JsonBody, Locale};
 use crate::middleware::auth::AuthUser;
 use crate::routes::auth::{generate_tokens, AuthResponse, UserInfo};
+use pichost_core::i18n::Language;
+
+enum OAuthClientError {
+    MissingClientId(&'static str),
+    MissingClientSecret(&'static str),
+}
 
 /// Fully-configured OAuth2 client with auth and token endpoints set.
 type ConfiguredOAuthClient = oauth2::Client<
@@ -50,13 +57,9 @@ pub struct OAuthLinkRequest {
 
 pub async fn github_redirect(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
 ) -> Result<Redirect, (StatusCode, Json<serde_json::Value>)> {
-    let client = make_github_client(&state).map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": e})),
-        )
-    })?;
+    let client = make_github_client(&state).map_err(|e| client_error_response(locale.0, e))?;
     let (auth_url, _csrf_token) = client
         .authorize_url(CsrfToken::new_random)
         .add_scope(Scope::new("read:user".to_string()))
@@ -69,13 +72,9 @@ pub async fn github_redirect(
 
 pub async fn google_redirect(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
 ) -> Result<Redirect, (StatusCode, Json<serde_json::Value>)> {
-    let client = make_google_client(&state).map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": e})),
-        )
-    })?;
+    let client = make_google_client(&state).map_err(|e| client_error_response(locale.0, e))?;
     let (auth_url, _csrf_token) = client
         .authorize_url(CsrfToken::new_random)
         .add_scope(Scope::new("openid".to_string()))
@@ -89,16 +88,29 @@ pub async fn google_redirect(
 
 pub async fn github_callback(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<serde_json::Value>)> {
-    oauth_callback(&state, query, "github").await
+    oauth_callback(&state, locale.0, query, "github").await
 }
 
 pub async fn google_callback(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<serde_json::Value>)> {
-    oauth_callback(&state, query, "google").await
+    oauth_callback(&state, locale.0, query, "google").await
+}
+
+fn client_error_response(
+    locale: Language,
+    e: OAuthClientError,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let (key, provider) = match e {
+        OAuthClientError::MissingClientId(p) => ("auth.oauth_not_configured", p),
+        OAuthClientError::MissingClientSecret(p) => ("auth.oauth_secret_not_configured", p),
+    };
+    error_json_args(locale, StatusCode::BAD_REQUEST, key, &[provider.to_string()])
 }
 
 // ── Client builders (return the fully-configured client inline) ──
@@ -111,13 +123,13 @@ macro_rules! oauth_client {
             .auth
             .$client_id_field
             .as_ref()
-            .ok_or(concat!($provider, " OAuth client_id not configured"))?;
+            .ok_or(OAuthClientError::MissingClientId($provider))?;
         let csec = $state
             .config
             .auth
             .$client_secret_field
             .as_ref()
-            .ok_or(concat!($provider, " OAuth client_secret not configured"))?;
+            .ok_or(OAuthClientError::MissingClientSecret($provider))?;
         BasicClient::new(ClientId::new(cid.clone()))
             .set_client_secret(ClientSecret::new(csec.clone()))
             .set_auth_uri(
@@ -138,7 +150,7 @@ macro_rules! oauth_client {
     }};
 }
 
-fn make_github_client(state: &AppState) -> Result<ConfiguredOAuthClient, String> {
+fn make_github_client(state: &AppState) -> Result<ConfiguredOAuthClient, OAuthClientError> {
     Ok(oauth_client!(
         state,
         oauth_github_client_id,
@@ -149,7 +161,7 @@ fn make_github_client(state: &AppState) -> Result<ConfiguredOAuthClient, String>
     ))
 }
 
-fn make_google_client(state: &AppState) -> Result<ConfiguredOAuthClient, String> {
+fn make_google_client(state: &AppState) -> Result<ConfiguredOAuthClient, OAuthClientError> {
     Ok(oauth_client!(
         state,
         oauth_google_client_id,
@@ -206,22 +218,22 @@ async fn fetch_google_user(token: &str) -> Result<OAuthUserInfo, Box<dyn std::er
 
 async fn oauth_exchange_and_fetch_user(
     state: &AppState,
+    locale: Language,
     provider: &str,
     code: String,
 ) -> Result<OAuthUserInfo, (StatusCode, Json<serde_json::Value>)> {
     let oauth_client = match provider {
-        "github" => make_github_client(state),
-        "google" => make_google_client(state),
-        _ => Err("unknown provider".to_string()),
-    }
-    .map_err(|e| (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": e}))))?;
+        "github" => make_github_client(state).map_err(|e| client_error_response(locale, e)),
+        "google" => make_google_client(state).map_err(|e| client_error_response(locale, e)),
+        _ => Err(error_json(locale, StatusCode::BAD_REQUEST, "auth.unknown_provider")),
+    }?;
 
     let http_client = reqwest::ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| {
             tracing::warn!("Failed to build HTTP client: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
         })?;
 
     let token = oauth_client
@@ -230,18 +242,18 @@ async fn oauth_exchange_and_fetch_user(
         .await
         .map_err(|e| {
             tracing::warn!("OAuth token exchange failed: {e}");
-            (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "invalid authorization code"})))
+            error_json(locale, StatusCode::BAD_REQUEST, "auth.invalid_oauth_code")
         })?;
 
     let access_token = token.access_token().secret();
     match provider {
         "github" => fetch_github_user(access_token).await.map_err(|e| {
             tracing::warn!("GitHub user fetch failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to fetch user info"})))
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.oauth_userinfo_failed")
         }),
         "google" => fetch_google_user(access_token).await.map_err(|e| {
             tracing::warn!("Google user fetch failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to fetch user info"})))
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.oauth_userinfo_failed")
         }),
         _ => unreachable!(),
     }
@@ -251,6 +263,7 @@ async fn oauth_exchange_and_fetch_user(
 
 async fn lookup_oauth_user(
     state: &AppState,
+    locale: Language,
     provider: &str,
     provider_user_id: &str,
 ) -> Result<(Uuid, String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)> {
@@ -263,14 +276,11 @@ async fn lookup_oauth_user(
     .await
     .map_err(|e| {
         tracing::warn!("OAuth account lookup failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
     })?;
 
-    let (user_id,) = oauth_row.ok_or_else(|| {
-        (StatusCode::NOT_FOUND, Json(serde_json::json!({
-            "error": "no account linked. Register first, then link OAuth in Settings."
-        })))
-    })?;
+    let (user_id,) =
+        oauth_row.ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "auth.oauth_no_link"))?;
 
     sqlx::query_as::<_, (Uuid, String, Option<String>, bool, Option<i64>)>(
         "SELECT id, username, email, is_admin, storage_quota FROM users WHERE id = $1",
@@ -280,28 +290,27 @@ async fn lookup_oauth_user(
     .await
     .map_err(|e| {
         tracing::warn!("User lookup failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
     })?
-    .ok_or_else(|| {
-        (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "user not found"})))
-    })
+    .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "auth.user_not_found"))
 }
 
 // ── Callback handler ──
 
 async fn oauth_callback(
     state: &AppState,
+    locale: Language,
     query: OAuthCallbackQuery,
     provider: &str,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let user_info = oauth_exchange_and_fetch_user(state, provider, query.code).await?;
+    let user_info = oauth_exchange_and_fetch_user(state, locale, provider, query.code).await?;
     let (user_id, username, email, is_admin, storage_quota) =
-        lookup_oauth_user(state, provider, &user_info.provider_user_id).await?;
+        lookup_oauth_user(state, locale, provider, &user_info.provider_user_id).await?;
 
     let (access_token_str, refresh_token_str, _ac, _rc) =
         generate_tokens(user_id, is_admin, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal error"})))
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
         })?;
 
     Ok(Json(AuthResponse {
@@ -315,11 +324,12 @@ async fn oauth_callback(
 
 pub async fn oauth_link(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Extension(user): Extension<AuthUser>,
-    Json(body): Json<OAuthLinkRequest>,
+    JsonBody(body): JsonBody<OAuthLinkRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let user_info =
-        oauth_exchange_and_fetch_user(&state, &body.provider, body.code).await?;
+        oauth_exchange_and_fetch_user(&state, locale.0, &body.provider, body.code).await?;
 
     sqlx::query(
         r#"INSERT INTO oauth_accounts (user_id, provider, provider_user_id)
@@ -332,10 +342,7 @@ pub async fn oauth_link(
     .await
     .map_err(|e| {
         tracing::warn!("OAuth link insert failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal error"})),
-        )
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
     })?;
 
     tracing::info!(user_id = %user.id, provider = %body.provider, "oauth account linked");
@@ -370,21 +377,23 @@ mod tests {
     async fn test_make_github_client_without_credentials() {
         let state = test_state().await;
         let err = make_github_client(&state).unwrap_err();
-        assert!(err.contains("client_id not configured"));
+        assert!(matches!(err, OAuthClientError::MissingClientId("github")));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_make_google_client_without_credentials() {
         let state = test_state().await;
         let err = make_google_client(&state).unwrap_err();
-        assert!(err.contains("client_id not configured"));
+        assert!(matches!(err, OAuthClientError::MissingClientId("google")));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "requires running PostgreSQL and Redis"]
     async fn test_lookup_oauth_user_not_linked() {
         let state = test_state().await;
-        let err = lookup_oauth_user(&state, "github", "provider-id-1").await.unwrap_err();
+        let err = lookup_oauth_user(&state, Language::En, "github", "provider-id-1")
+            .await
+            .unwrap_err();
         assert_eq!(err.0, StatusCode::NOT_FOUND);
         assert!(err.1 .0["error"].as_str().unwrap().contains("no account linked"));
     }

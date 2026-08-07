@@ -236,3 +236,35 @@ async fn test_login_failure_zh_negotiation() {
     assert_eq!(body["error"], "用户名或密码错误");
     assert_eq!(body["code"], "auth.invalid_credentials");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn test_admin_endpoint_forbidden_code() {
+    let app = test_app().await;
+    let (_, token, _) = create_user(&app, "forbidden").await; // non-admin
+    let (status, body) =
+        send_json(&app, Method::GET, "/api/v1/admin/stats", Some(&token), &Value::Null).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "auth.admin_required");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn test_rate_limit_returns_code() {
+    let app = test_app_with_rate_limits(2).await;
+    let body = serde_json::json!({"username": "x", "password": "y"});
+    for _ in 0..3 {
+        send_json(&app, Method::POST, "/api/v1/auth/login", None, &body).await;
+    }
+    let (status, resp) = send_json(&app, Method::POST, "/api/v1/auth/login", None, &body).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(resp["code"], "rate_limited");
+}
+
+/// Test app with a lowered auth rate limit so the limiter trips quickly.
+async fn test_app_with_rate_limits(auth_max: u32) -> TestApp {
+    let tempdir = tempfile::TempDir::new().expect("tempdir");
+    let mut cfg = common::test_config(&tempdir);
+    cfg.rate_limit.auth_max = auth_max;
+    common::test_app_with_config(cfg).await
+}
