@@ -95,6 +95,7 @@
     "selectAll": "全选",
     "delete": "删除",
     "moveToCategory": "移动到分类",
+    "batchMovePlaceholder": "移动 {{count}} 张图片 — 分类选择器将在未来更新中推出",
     "loading": "加载中…",
     "failedToLoad": "加载图片失败。",
     "noImagesFound": "没有找到图片。",

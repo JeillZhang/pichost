@@ -15,6 +15,12 @@ describe('i18n engine', () => {
     await i18n.changeLanguage('zh')
     expect(getCurrentLocale()).toBe('zh-CN')
   })
+  it('persists the active locale to localStorage', async () => {
+    await i18n.changeLanguage('zh-CN')
+    expect(localStorage.getItem('pichost-locale')).toBe('zh-CN')
+    await i18n.changeLanguage('en')
+    expect(localStorage.getItem('pichost-locale')).toBe('en')
+  })
 })
 
 function flattenKeys(obj: Record<string, unknown>, prefix = ''): string[] {

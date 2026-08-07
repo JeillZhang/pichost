@@ -162,7 +162,7 @@ export default function Gallery() {
   }
 
   const handleBatchMove = async () => {
-    alert(`Move ${selected.size} images — category selector coming in a future update`)
+    alert(t('gallery.batchMovePlaceholder', { count: selected.size }))
   }
 
   return (

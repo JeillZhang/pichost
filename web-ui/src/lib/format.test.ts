@@ -10,6 +10,10 @@ describe('formatBytes', () => {
   it('formats numbers locale-aware', () => {
     expect(formatNumber(1234567, 'en')).toContain(',')
   })
+  it('formats bytes and numbers with zh-CN locale', () => {
+    expect(formatBytes(1536, 'zh-CN')).toBe('1.5 KB')
+    expect(formatNumber(1234567, 'zh-CN')).toBe('1,234,567')
+  })
 })
 describe('formatDate', () => {
   it('renders without throwing for both locales', () => {

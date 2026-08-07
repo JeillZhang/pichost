@@ -22,6 +22,15 @@ interface ErrorWithResponse {
   }
 }
 
+/** `code` attached by client.ts's beforeError hook, if any — avoids re-parsing the body. */
+function attachedCode(err: unknown): string | null {
+  if (typeof err === 'object' && err !== null) {
+    const code = (err as { code?: unknown }).code
+    if (typeof code === 'string' && code.length > 0) return code
+  }
+  return null
+}
+
 function hasResponse(err: unknown): err is ErrorWithResponse {
   return (
     typeof err === 'object' &&
@@ -32,6 +41,8 @@ function hasResponse(err: unknown): err is ErrorWithResponse {
 }
 
 async function parseCode(err: unknown): Promise<string | null> {
+  const attached = attachedCode(err)
+  if (attached !== null) return attached
   if (!hasResponse(err)) return null
   try {
     const body = (await err.response!.json()) as { code?: unknown }
@@ -49,5 +60,5 @@ export async function getErrorCode(err: unknown): Promise<string | null> {
 
 /** True when the error's body carries the given behavior `code`. */
 export async function isErrorCode(err: unknown, code: string): Promise<boolean> {
-  return (await parseCode(err)) === code
+  return (await getErrorCode(err)) === code
 }

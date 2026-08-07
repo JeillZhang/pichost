@@ -45,6 +45,27 @@ async fn login_with_wrong_password_fails() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires running PostgreSQL and Redis"]
+async fn login_rejects_malformed_json_body() {
+    let app = test_app().await;
+    let (status, _, bytes) = send_raw(
+        &app,
+        Method::POST,
+        "/api/v1/auth/login",
+        None,
+        Some("application/json"),
+        b"{\"bad json".to_vec(),
+    )
+    .await;
+    // Malformed JSON syntax is a JsonSyntaxError, whose status() is 400;
+    // JsonBody maps every Json rejection to validation.body_invalid.
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let v: Value = serde_json::from_slice(&bytes).expect("error body is JSON");
+    assert_eq!(v["code"], "validation.body_invalid");
+    assert!(v["error"].is_string());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
 async fn register_rejects_short_password() {
     let app = test_app().await;
     let (status, resp) = register_user(&app, "shortpw", "123").await;

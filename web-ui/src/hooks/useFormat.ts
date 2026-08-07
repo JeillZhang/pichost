@@ -1,8 +1,10 @@
 import { useTranslation } from 'react-i18next'
+import { getCurrentLocale } from '../i18n'
 import { formatBytes, formatDate, formatNumber } from '../lib/format'
 export function useFormat() {
-  const { i18n } = useTranslation()
-  const locale = i18n.language
+  // Subscribes to language changes so formatting re-runs with the new locale.
+  useTranslation()
+  const locale = getCurrentLocale()
   return {
     formatBytes: (b: number) => formatBytes(b, locale),
     formatDate: (t: number) => formatDate(t, locale),

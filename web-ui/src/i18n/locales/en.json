@@ -95,6 +95,7 @@
     "selectAll": "Select All",
     "delete": "Delete",
     "moveToCategory": "Move to category",
+    "batchMovePlaceholder": "Move {{count}} images — category selector coming in a future update",
     "loading": "Loading…",
     "failedToLoad": "Failed to load images.",
     "noImagesFound": "No images found.",
