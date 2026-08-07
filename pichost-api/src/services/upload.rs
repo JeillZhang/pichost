@@ -1311,7 +1311,8 @@ mod tests {
         let (status, json) =
             storage_error_response(Language::En, &StorageError::PayloadTooLarge("big".into()));
         assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(json.0["error"], "big");
+        assert_eq!(json.0["error"], "payload too large: big");
+        assert_eq!(json.0["code"], "storage_payload_too_large");
         let (status, _) = storage_error_response(Language::En, &StorageError::NotFound("x".into()));
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     }
