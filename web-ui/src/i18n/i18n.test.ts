@@ -29,6 +29,10 @@ it('en and zh-CN key sets are identical', async () => {
   const zhKeys = flattenKeys(zh).sort()
   expect(zhKeys).toEqual(enKeys)
 })
+it('typed t() accepts known key and rejects unknown (type-level)', () => {
+  // 该断言在类型层验证: t('common.cancel') 通过编译;t('nope.missing') 编译失败
+  expect(i18n.t('common.cancel')).toBe('Cancel')
+})
 it('common and nav prefixes exist in both locales', async () => {
   const en = (await import('./locales/en.json')).default as Record<string, unknown>
   expect(Object.keys(en)).toEqual(expect.arrayContaining(['common', 'nav']))
