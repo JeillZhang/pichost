@@ -1,1 +1,16 @@
-{}
+{
+  "common": {
+    "cancel": "取消",
+    "save": "保存",
+    "loading": "加载中…",
+    "delete": "删除",
+    "internalError": "出错了"
+  },
+  "nav": {
+    "dashboard": "仪表盘",
+    "gallery": "图库",
+    "admin": "管理",
+    "settings": "设置",
+    "logout": "退出登录"
+  }
+}

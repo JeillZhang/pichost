@@ -16,3 +16,22 @@ describe('i18n engine', () => {
     expect(getCurrentLocale()).toBe('zh-CN')
   })
 })
+
+function flattenKeys(obj: Record<string, unknown>, prefix = ''): string[] {
+  return Object.entries(obj).flatMap(([k, v]) =>
+    v && typeof v === 'object' ? flattenKeys(v as Record<string, unknown>, `${prefix}${k}.`)
+                               : [`${prefix}${k}`])
+}
+it('en and zh-CN key sets are identical', async () => {
+  const en = (await import('./locales/en.json')).default
+  const zh = (await import('./locales/zh-CN.json')).default
+  const enKeys = flattenKeys(en).sort()
+  const zhKeys = flattenKeys(zh).sort()
+  expect(zhKeys).toEqual(enKeys)
+})
+it('common and nav prefixes exist in both locales', async () => {
+  const en = (await import('./locales/en.json')).default as Record<string, unknown>
+  expect(Object.keys(en)).toEqual(expect.arrayContaining(['common', 'nav']))
+  const zh = (await import('./locales/zh-CN.json')).default as Record<string, unknown>
+  expect(Object.keys(zh)).toEqual(expect.arrayContaining(['common', 'nav']))
+})

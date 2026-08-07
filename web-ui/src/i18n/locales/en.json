@@ -1,1 +1,16 @@
-{}
+{
+  "common": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "loading": "Loading…",
+    "delete": "Delete",
+    "internalError": "Something went wrong"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "gallery": "Gallery",
+    "admin": "Admin",
+    "settings": "Settings",
+    "logout": "Logout"
+  }
+}
