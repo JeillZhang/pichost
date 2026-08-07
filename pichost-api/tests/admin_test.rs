@@ -471,6 +471,44 @@ async fn admin_config_backup_list_restore() {
     cleanup_config_files();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+#[serial]
+async fn test_admin_config_roundtrip_i18n_language() {
+    cleanup_config_files();
+    let app = test_app().await;
+    let (admin_token, _) = create_admin(&app, "i18ncfg").await;
+    // PUT /api/v1/admin/config carrying {"i18n": {"language": "zh-CN"}}
+    let (status, resp) = send_json(
+        &app,
+        Method::PUT,
+        "/api/v1/admin/config",
+        Some(&admin_token),
+        &serde_json::json!({"i18n": {"language": "zh-CN"}}),
+    )
+    .await;
+    assert!(status.is_success(), "put config failed: {resp}");
+    // GET returns i18n.language == "zh-CN"
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/admin/config",
+        Some(&admin_token),
+        &Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "get config failed: {resp}");
+    assert_eq!(resp["i18n"]["language"], "zh-CN");
+    // reload triggered: global language immediately ZhCN
+    assert_eq!(
+        pichost_core::i18n::I18n::global().language(),
+        pichost_core::i18n::Language::ZhCN
+    );
+    // restore global state so later tests in this binary are unaffected
+    pichost_core::i18n::I18n::init_global(pichost_core::i18n::Language::En, None);
+    cleanup_config_files();
+}
+
 // ── OAuth error paths (no OAuth credentials in test config) ───────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

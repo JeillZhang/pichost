@@ -9,7 +9,7 @@ use axum::{
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
-use pichost_core::i18n::Language;
+use pichost_core::i18n::{I18n, Language};
 use pichost_core::StorageRouter;
 
 fn deserialize_optional_jsonb<'de, D>(
@@ -87,6 +87,13 @@ pub struct UpdateConfigBody {
     pub public_url: Option<String>,
     pub default_backend: Option<String>,
     pub local_base_path: Option<String>,
+    pub i18n: Option<UpdateConfigI18n>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateConfigI18n {
+    pub language: Option<String>,
+    pub locales_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,6 +117,13 @@ pub struct ConfigResponse {
     pub default_backend: String,
     pub local_base_path: String,
     pub config_path: String,
+    pub i18n: ConfigResponseI18n,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConfigResponseI18n {
+    pub language: String,
+    pub locales_dir: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -845,6 +859,10 @@ pub async fn get_admin_config(locale: Locale) -> Result<Json<ConfigResponse>, Ad
             .local_base_path
             .unwrap_or_else(|| "./storage-local".into()),
         config_path: path.display().to_string(),
+        i18n: ConfigResponseI18n {
+            language: cfg.i18n_language.unwrap_or_else(|| "en".into()),
+            locales_dir: cfg.i18n_locales_dir.unwrap_or_else(|| "not set".into()),
+        },
     }))
 }
 
@@ -868,6 +886,16 @@ pub async fn update_admin_config(
         public_url: body.public_url.or(existing.public_url),
         default_backend: body.default_backend.or(existing.default_backend),
         local_base_path: body.local_base_path.or(existing.local_base_path),
+        i18n_language: body
+            .i18n
+            .as_ref()
+            .and_then(|i| i.language.clone())
+            .or(existing.i18n_language),
+        i18n_locales_dir: body
+            .i18n
+            .as_ref()
+            .and_then(|i| i.locales_dir.clone())
+            .or(existing.i18n_locales_dir),
     };
     config::write_config_toml(&path, &cfg).map_err(|e| {
         error_json_args(
@@ -877,6 +905,12 @@ pub async fn update_admin_config(
             &[e.to_string()],
         )
     })?;
+
+    // 语言/消息目录变更即时生效: 重新装载全局 i18n,无需重启
+    I18n::reload_global(
+        Language::from_str_opt(cfg.i18n_language.as_deref().unwrap_or("en")),
+        cfg.i18n_locales_dir.as_ref().map(std::path::PathBuf::from),
+    );
 
     get_admin_config(locale).await
 }
