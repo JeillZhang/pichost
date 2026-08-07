@@ -330,5 +330,43 @@
     "compressLabel": "压缩：Q{{quality}}",
     "rotateLabel": "旋转：{{degrees}}°",
     "formatLabel": "{{format}}：Q{{quality}}"
+  },
+  "adminStats": {
+    "totalUsers": "用户总数",
+    "totalImages": "图片总数",
+    "totalStorage": "总存储量",
+    "active24h": "活跃用户（24 小时）",
+    "loading": "正在加载统计…",
+    "storageBreakdown": "存储后端分布",
+    "backendImages": "张图片"
+  },
+  "adminUsers": {
+    "username": "用户名",
+    "email": "邮箱",
+    "admin": "管理员",
+    "quota": "配额",
+    "actions": "操作",
+    "adminBadge": "管理员",
+    "unlimited": "无限制",
+    "deleteConfirm": "删除用户「{{name}}」？这将永久删除该用户的所有图片。",
+    "deleted": "用户「{{name}}」已删除",
+    "deleteFailed": "删除失败",
+    "loading": "正在加载用户…",
+    "totalCount_one": "共 {{count}} 个用户",
+    "totalCount_other": "共 {{count}} 个用户"
+  },
+  "editUser": {
+    "title": "编辑用户",
+    "username": "用户名",
+    "email": "邮箱",
+    "newPassword": "新密码（留空则保持不变）",
+    "adminPrivileges": "管理员权限",
+    "storageQuota": "存储配额",
+    "unlimited": "无限制",
+    "cancel": "取消",
+    "saving": "保存中…",
+    "save": "保存",
+    "userUpdated": "用户已更新",
+    "updateFailed": "更新失败"
   }
 }

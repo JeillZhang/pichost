@@ -2,15 +2,10 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Trash2, Pencil } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { useFormat } from '../../hooks/useFormat'
 import api, { type UserInfo } from '../../api/client'
 import EditUserDialog from '../../components/EditUserDialog'
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
-  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
-}
 
 interface ListUsersResponse {
   users: UserInfo[]
@@ -18,6 +13,8 @@ interface ListUsersResponse {
 }
 
 export default function AdminUsers() {
+  const { t } = useTranslation()
+  const { formatBytes } = useFormat()
   const [editingUser, setEditingUser] = useState<UserInfo | null>(null)
   const queryClient = useQueryClient()
 
@@ -27,14 +24,14 @@ export default function AdminUsers() {
   })
 
   async function handleDelete(user: UserInfo) {
-    if (!confirm(`Delete user "${user.username}"? This will permanently delete all their images.`)) return
+    if (!confirm(t('adminUsers.deleteConfirm', { name: user.username }))) return
     try {
       await api.delete(`admin/users/${user.id}`).json()
-      toast.success(`User "${user.username}" deleted`)
+      toast.success(t('adminUsers.deleted', { name: user.username }))
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] })
       queryClient.invalidateQueries({ queryKey: ['admin', 'stats'] })
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Delete failed'
+      const msg = e instanceof Error ? e.message : t('adminUsers.deleteFailed')
       toast.error(msg)
     }
   }
@@ -42,7 +39,7 @@ export default function AdminUsers() {
   if (isLoading || !data) {
     return (
       <div className="flex items-center justify-center py-20" style={{ color: 'var(--color-text-muted)' }}>
-        Loading users…
+        {t('adminUsers.loading')}
       </div>
     )
   }
@@ -51,7 +48,7 @@ export default function AdminUsers() {
     <div>
       <div className="mb-3 flex items-center justify-between">
         <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-          {data.total} user{data.total !== 1 ? 's' : ''} total
+          {t('adminUsers.totalCount', { count: data.total })}
         </p>
       </div>
 
@@ -59,11 +56,11 @@ export default function AdminUsers() {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-              <th className="px-4 py-3 text-left font-medium" style={{ color: 'var(--color-text-muted)' }}>Username</th>
-              <th className="hidden px-4 py-3 text-left font-medium sm:table-cell" style={{ color: 'var(--color-text-muted)' }}>Email</th>
-              <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--color-text-muted)' }}>Admin</th>
-              <th className="hidden px-4 py-3 text-right font-medium sm:table-cell" style={{ color: 'var(--color-text-muted)' }}>Quota</th>
-              <th className="px-4 py-3 text-right font-medium" style={{ color: 'var(--color-text-muted)' }}>Actions</th>
+              <th className="px-4 py-3 text-left font-medium" style={{ color: 'var(--color-text-muted)' }}>{t('adminUsers.username')}</th>
+              <th className="hidden px-4 py-3 text-left font-medium sm:table-cell" style={{ color: 'var(--color-text-muted)' }}>{t('adminUsers.email')}</th>
+              <th className="px-4 py-3 text-center font-medium" style={{ color: 'var(--color-text-muted)' }}>{t('adminUsers.admin')}</th>
+              <th className="hidden px-4 py-3 text-right font-medium sm:table-cell" style={{ color: 'var(--color-text-muted)' }}>{t('adminUsers.quota')}</th>
+              <th className="px-4 py-3 text-right font-medium" style={{ color: 'var(--color-text-muted)' }}>{t('adminUsers.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -84,14 +81,14 @@ export default function AdminUsers() {
                     <span
                       className="badge" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', borderColor: 'var(--color-accent-strong)' }}
                     >
-                      Admin
+                      {t('adminUsers.adminBadge')}
                     </span>
                   ) : (
                     <span style={{ color: 'var(--color-text-muted)' }}>—</span>
                   )}
                 </td>
                 <td className="hidden px-4 py-3 text-right font-mono text-xs sm:table-cell" style={{ color: 'var(--color-text-secondary)' }}>
-                  {user.storage_quota != null ? formatBytes(user.storage_quota) : 'Unlimited'}
+                  {user.storage_quota != null ? formatBytes(user.storage_quota) : t('adminUsers.unlimited')}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-2">

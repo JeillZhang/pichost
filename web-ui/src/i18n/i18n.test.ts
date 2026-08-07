@@ -107,3 +107,11 @@ it('systemConfig and preprocessing plural keys present', async () => {
   expect(en.systemConfig.changedCount_one).toBeTruthy()
   expect(en.systemConfig.changedCount_other).toBeTruthy()
 })
+it('adminStats, adminUsers and editUser prefixes exist in both locales', async () => {
+  const en = (await import('./locales/en.json')).default as Record<string, unknown>
+  const zh = (await import('./locales/zh-CN.json')).default as Record<string, unknown>
+  for (const prefix of ['adminStats', 'adminUsers', 'editUser']) {
+    expect(Object.keys(en)).toContain(prefix)
+    expect(Object.keys(zh)).toContain(prefix)
+  }
+})

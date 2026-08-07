@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import { X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { useFormat } from '../hooks/useFormat'
 import api from '../api/client'
 import type { UserInfo } from '../api/client'
 
@@ -10,14 +12,9 @@ interface EditUserDialogProps {
   onUpdated: () => void
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
-  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
-}
-
 export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDialogProps) {
+  const { t } = useTranslation()
+  const { formatBytes } = useFormat()
   const [username, setUsername] = useState(user.username)
   const [email, setEmail] = useState(user.email ?? '')
   const [isAdmin, setIsAdmin] = useState(user.is_admin)
@@ -36,10 +33,10 @@ export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDia
       body.storage_quota = storageQuota
 
       await api.patch(`admin/users/${user.id}`, { json: body }).json()
-      toast.success('User updated')
+      toast.success(t('editUser.userUpdated'))
       onUpdated()
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Update failed'
+      const msg = e instanceof Error ? e.message : t('editUser.updateFailed')
       toast.error(msg)
     } finally {
       setSaving(false)
@@ -55,7 +52,7 @@ export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDia
             className="text-lg font-semibold"
             style={{ color: 'var(--color-text-primary)', fontFamily: "'Outfit', system-ui, sans-serif" }}
           >
-            Edit User
+            {t('editUser.title')}
           </h2>
           <button
             onClick={onClose}
@@ -72,7 +69,7 @@ export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDia
               className="mb-1.5 block text-xs font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Username
+              {t('editUser.username')}
             </label>
             <input
               type="text"
@@ -88,7 +85,7 @@ export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDia
               className="mb-1.5 block text-xs font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Email
+              {t('editUser.email')}
             </label>
             <input
               type="email"
@@ -103,9 +100,8 @@ export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDia
               className="mb-1.5 block text-xs font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              New Password (leave blank to keep current)
-            </label>
-            <input
+              {t('editUser.newPassword')}
+            </label>            <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -123,7 +119,7 @@ export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDia
               className="h-4 w-4 rounded accent-[var(--color-accent)]"
             />
             <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              Admin privileges
+              {t('editUser.adminPrivileges')}
             </span>
           </label>
 
@@ -132,7 +128,7 @@ export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDia
               className="mb-1.5 block text-xs font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Storage Quota
+              {t('editUser.storageQuota')}
             </label>
             <input
               type="number"
@@ -145,16 +141,16 @@ export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDia
               className="input-field"
             />
             <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              {storageQuota != null && storageQuota > 0 ? formatBytes(storageQuota) : 'Unlimited'}
+              {storageQuota != null && storageQuota > 0 ? formatBytes(storageQuota) : t('editUser.unlimited')}
             </p>
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} className="btn-ghost">
-              Cancel
+              {t('editUser.cancel')}
             </button>
             <button type="submit" disabled={saving} className="btn-accent">
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? t('editUser.saving') : t('editUser.save')}
             </button>
           </div>
         </form>

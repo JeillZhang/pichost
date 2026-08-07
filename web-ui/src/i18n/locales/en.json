@@ -330,5 +330,43 @@
     "compressLabel": "Compress: Q{{quality}}",
     "rotateLabel": "Rotate: {{degrees}}°",
     "formatLabel": "{{format}}: Q{{quality}}"
+  },
+  "adminStats": {
+    "totalUsers": "Total Users",
+    "totalImages": "Total Images",
+    "totalStorage": "Total Storage",
+    "active24h": "Active (24h)",
+    "loading": "Loading stats…",
+    "storageBreakdown": "Storage Backend Breakdown",
+    "backendImages": "images"
+  },
+  "adminUsers": {
+    "username": "Username",
+    "email": "Email",
+    "admin": "Admin",
+    "quota": "Quota",
+    "actions": "Actions",
+    "adminBadge": "Admin",
+    "unlimited": "Unlimited",
+    "deleteConfirm": "Delete user \"{{name}}\"? This will permanently delete all their images.",
+    "deleted": "User \"{{name}}\" deleted",
+    "deleteFailed": "Delete failed",
+    "loading": "Loading users…",
+    "totalCount_one": "{{count}} user total",
+    "totalCount_other": "{{count}} users total"
+  },
+  "editUser": {
+    "title": "Edit User",
+    "username": "Username",
+    "email": "Email",
+    "newPassword": "New Password (leave blank to keep current)",
+    "adminPrivileges": "Admin privileges",
+    "storageQuota": "Storage Quota",
+    "unlimited": "Unlimited",
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "save": "Save",
+    "userUpdated": "User updated",
+    "updateFailed": "Update failed"
   }
 }
