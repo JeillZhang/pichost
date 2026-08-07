@@ -16,7 +16,7 @@ use crate::middleware::auth::AuthUser;
 use crate::services::html_escape;
 use deadpool_redis::redis::AsyncCommands;
 use pichost_core::crypto::decode_key;
-use pichost_core::i18n::Language;
+use pichost_core::i18n::{I18n, Language};
 use pichost_core::models::UserStorageConfig;
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -245,15 +245,20 @@ pub async fn extract_file_from_multipart(
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "file".to_string());
             let data = field.bytes().await.map_err(|e| {
-                let json = serde_json::json!({"error": format!("failed to read file: {e}")});
-                (StatusCode::BAD_REQUEST, Json(json))
+                error_json_args(
+                    I18n::global().language(),
+                    StatusCode::BAD_REQUEST,
+                    "upload.field_read_failed",
+                    &[e.to_string()],
+                )
             })?;
             return Ok((data.to_vec(), file_name));
         }
     }
-    Err((
+    Err(error_json(
+        I18n::global().language(),
         StatusCode::BAD_REQUEST,
-        Json(serde_json::json!({"error": "no file field found in upload"})),
+        "upload.file_missing",
     ))
 }
 
@@ -1087,9 +1092,10 @@ async fn count_user_images(
         .await
         .map_err(|e| {
             tracing::warn!("Image count query failed: {e}");
-            (
+            error_json(
+                I18n::global().language(),
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
+                "common.internal_error",
             )
         })
 }
@@ -1127,9 +1133,10 @@ async fn fetch_user_images(
         .await
         .map_err(|e| {
             tracing::warn!("Image list query failed: {e}");
-            (
+            error_json(
+                I18n::global().language(),
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
+                "common.internal_error",
             )
         })
 }
@@ -1152,9 +1159,10 @@ pub async fn get_user_image(
     .await
     .map_err(|e| {
         tracing::warn!("Get image query failed: {e}");
-        (
+        error_json(
+            I18n::global().language(),
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal error"})),
+            "image.internal_error",
         )
     })
     .map(|opt| opt.map(UploadResult::from_row))
