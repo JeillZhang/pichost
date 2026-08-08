@@ -130,3 +130,31 @@ test.describe.serial('admin', () => {
     expect(user.user.is_admin).toBe(false)
   })
 })
+
+test.describe('admin dialogs on mobile', () => {
+  test.use({ viewport: { width: 375, height: 667 }, hasTouch: true })
+
+  test('edit user dialog renders as bottom sheet on mobile', async ({ page, request }) => {
+    await seedAdminSession(page, request)
+    await page.goto('/admin')
+    await page.getByRole('button', { name: /users|用户/i }).click()
+    // Open edit dialog (first pencil button)
+    await page.locator('button').filter({ has: page.locator('svg.lucide-pencil') }).first().click()
+    const panel = page.locator('.glass-modal')
+    await expect(panel).toBeVisible()
+    // Bottom-sheet: panel bottom-aligned, full width on small screens
+    const box = await panel.boundingBox()
+    const vh = page.viewportSize()!.height
+    expect(box!.y + box!.height).toBeGreaterThan(vh - 100)
+    await page.keyboard.press('Escape')
+    await expect(panel).toBeHidden()
+  })
+
+  test('create invite dialog opens on mobile', async ({ page, request }) => {
+    await seedAdminSession(page, request)
+    await page.goto('/admin')
+    await page.getByRole('button', { name: /invites|邀请/i }).click()
+    await page.getByRole('button', { name: /create code|创建邀请/i }).click()
+    await expect(page.locator('.glass-modal')).toBeVisible()
+  })
+})

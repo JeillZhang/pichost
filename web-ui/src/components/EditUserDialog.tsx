@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
-import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useFormat } from '../hooks/useFormat'
+import Modal from './ui/Modal'
 import api from '../api/client'
 import type { UserInfo } from '../api/client'
 
@@ -44,26 +44,8 @@ export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDia
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="glass-modal relative w-full max-w-md p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h2
-            className="text-lg font-semibold"
-            style={{ color: 'var(--color-text-primary)', fontFamily: "'Outfit', system-ui, sans-serif" }}
-          >
-            {t('editUser.title')}
-          </h2>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1 transition-colors hover:bg-[var(--color-surface-hover)]"
-            style={{ color: 'var(--color-text-muted)' }}
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
+    <Modal open onClose={onClose} title={t('editUser.title')}>
+      <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label
               className="mb-1.5 block text-xs font-medium"
@@ -154,7 +136,6 @@ export default function EditUserDialog({ user, onClose, onUpdated }: EditUserDia
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   )
 }
