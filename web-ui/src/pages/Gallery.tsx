@@ -10,6 +10,8 @@ import SortDropdown from '../components/SortDropdown'
 import CategoryTree from '../components/CategoryTree'
 import GlassSelect from '../components/ui/GlassSelect'
 import Sheet from '../components/ui/Sheet'
+import ConfirmDialog from '../components/ui/ConfirmDialog'
+import { toast } from 'sonner'
 
 const STORAGE_CONFIG_KEY = 'backend'
 
@@ -163,8 +165,8 @@ export default function Gallery() {
     }
   }
 
-  const handleBatchMove = async () => {
-    alert(t('gallery.batchMovePlaceholder', { count: selected.size }))
+  const handleBatchMove = () => {
+    toast.info(t('gallery.batchMovePlaceholder', { count: selected.size }))
   }
 
   return (
@@ -400,37 +402,17 @@ export default function Gallery() {
         </Sheet>
 
         {/* Confirm dialog */}
-        {showConfirm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="glass-modal mx-4 w-full max-w-sm p-6">
-              <h2
-                className="mb-2 text-lg font-semibold"
-                style={{ color: 'var(--color-text-primary)' }}
-              >
-                {t('gallery.deleteConfirm', { count: selected.size })}
-              </h2>
-              <p className="mb-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                This cannot be undone. Images will be permanently deleted from storage.
-              </p>
-              <div className="flex justify-end gap-3">
-                <button onClick={() => setShowConfirm(false)} className="btn-ghost">
-                  {t('gallery.cancel')}
-                </button>
-                <button
-                  onClick={confirmDelete}
-                  disabled={isDeleting}
-                  className="btn-accent"
-                  style={{
-                    background: 'var(--color-danger)',
-                    color: 'white',
-                  }}
-                >
-                  {isDeleting ? t('gallery.deleting') : t('gallery.delete')}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <ConfirmDialog
+          open={showConfirm}
+          onClose={() => setShowConfirm(false)}
+          onConfirm={confirmDelete}
+          title={t('gallery.deleteConfirm', { count: selected.size })}
+          message="This cannot be undone. Images will be permanently deleted from storage."
+          confirmLabel={t('gallery.delete')}
+          cancelLabel={t('gallery.cancel')}
+          danger
+          pending={isDeleting}
+        />
       </div>
     </div>
   )
