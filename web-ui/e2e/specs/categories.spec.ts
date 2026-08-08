@@ -100,3 +100,40 @@ test.describe.serial('categories', () => {
     await expect(page.getByText(cat.name)).toBeVisible()
   })
 })
+
+test.describe('mobile category actions', () => {
+  test.use({ viewport: { width: 375, height: 667 }, hasTouch: true })
+
+  test('⋯ button opens menu; rename via touch path', async ({ page, request }) => {
+    await seedUserSession(page, request)
+    const cat = await createCategory(request, auth.user.access_token, `touch-rename-${Date.now()}`)
+    await page.goto('/gallery')
+
+    // Open drawer (sidebar hidden on mobile)
+    await page.getByRole('button', { name: /categories|分类/i }).click()
+    const drawer = page.getByRole('dialog', { name: /categories|分类/i })
+    const row = drawer.getByText(cat.name).locator('xpath=../..')
+    await row.getByRole('button', { name: /more actions|更多操作/i }).click()
+    await page.getByRole('button', { name: /rename|重命名/i }).click()
+    // Inline rename input appears
+    const input = drawer.getByRole('textbox')
+    await expect(input).toHaveValue(cat.name)
+    await input.fill('renamed-touch')
+    await input.press('Enter')
+    await expect(drawer.getByText('renamed-touch')).toBeVisible()
+  })
+
+  test('delete confirm uses modal; cancel keeps category', async ({ page, request }) => {
+    await seedUserSession(page, request)
+    const cat = await createCategory(request, auth.user.access_token, `touch-del-${Date.now()}`)
+    await page.goto('/gallery')
+    await page.getByRole('button', { name: /categories|分类/i }).click()
+    const drawer = page.getByRole('dialog', { name: /categories|分类/i })
+    const row = drawer.getByText(cat.name).locator('xpath=../..')
+    await row.getByRole('button', { name: /more actions|更多操作/i }).click()
+    await page.getByRole('button', { name: /delete|删除/i }).click()
+    await expect(page.locator('.glass-modal')).toBeVisible()
+    await page.locator('.glass-modal').getByRole('button', { name: /cancel|取消/i }).click()
+    await expect(drawer.getByText(cat.name)).toBeVisible()
+  })
+})
