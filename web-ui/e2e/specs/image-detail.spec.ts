@@ -119,3 +119,18 @@ test.describe.serial('image-detail', () => {
     expect(res.headers()['content-type']).toContain('image/')
   })
 })
+
+test.describe('image detail on mobile', () => {
+  test.use({ viewport: { width: 375, height: 667 }, hasTouch: true })
+
+  test('rename pencil visible without hover on touch', async ({ page, request }) => {
+    await seedUserSession(page, request)
+    const detail = new ImageDetailPage(page)
+    await detail.goto(imageId)
+    const pencil = page.locator('svg.lucide-pencil')
+    await expect(pencil).toBeVisible()
+    // Playwright ignores opacity for visibility — assert the computed value:
+    // below md the pencil must be fully opaque without any hover.
+    await expect(pencil).toHaveCSS('opacity', '1')
+  })
+})

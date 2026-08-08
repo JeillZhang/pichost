@@ -201,7 +201,7 @@ export default function ImageDetail() {
               style={{ color: 'var(--color-text-primary)' }}
             >
               <span>{img.original_name}</span>
-              <Pencil className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+              <Pencil className="h-3 w-3 transition-opacity md:opacity-0 md:group-hover:opacity-100" />
             </button>
           )}
           {renameMutation.isPending && (
