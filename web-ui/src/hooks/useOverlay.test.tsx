@@ -3,17 +3,22 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import useOverlay from './useOverlay'
 
-// Test harness: a tiny component consuming the hook
-function Harness({ onClose }: { onClose: () => void }) {
+// Test harness: a tiny component consuming the hook.
+// Children render INSIDE the overlay so clicks on them bubble to it.
+function Harness({ onClose, children }: { onClose: () => void; children?: React.ReactNode }) {
   const { overlayProps } = useOverlay(onClose)
-  return <div data-testid="overlay" {...overlayProps} />
+  return (
+    <div data-testid="overlay" {...overlayProps}>
+      {children}
+    </div>
+  )
 }
 
-function renderHarness(onClose: () => void): Root {
+function renderHarness(onClose: () => void, children?: React.ReactNode): Root {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
-  act(() => root.render(<Harness onClose={onClose} />))
+  act(() => root.render(<Harness onClose={onClose}>{children}</Harness>))
   return root
 }
 
@@ -52,23 +57,21 @@ describe('useOverlay', () => {
     act(() => root.unmount())
   })
 
-  it('does NOT close when a click inside the panel bubbles to the overlay (stopPropagation respected)', () => {
+  it('does NOT close when a click inside the panel bubbles to the overlay (guard: target !== currentTarget)', () => {
     const onClose = vi.fn()
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-    act(() =>
-      root.render(
-        <div data-testid="panel" onMouseDown={(e) => e.stopPropagation()}>
-          <Harness onClose={onClose} />
-        </div>,
-      ),
+    const root = renderHarness(
+      onClose,
+      <div data-testid="panel">
+        panel content
+      </div>,
     )
     act(() => {
       document.querySelector('[data-testid="panel"]')!.dispatchEvent(
         new MouseEvent('mousedown', { bubbles: true }),
       )
     })
+    // No stopPropagation on the panel: the mousedown reaches the overlay,
+    // whose handler sees e.target (panel) !== e.currentTarget (overlay) → no close.
     expect(onClose).not.toHaveBeenCalled()
     act(() => root.unmount())
   })
