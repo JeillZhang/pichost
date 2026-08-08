@@ -18,6 +18,12 @@ interface GlassSelectProps<T extends string = string> {
   ariaLabel?: string
 }
 
+export function clampLeft(left: number, width: number, viewportWidth: number): number {
+  const margin = 8
+  const maxLeft = viewportWidth - width - margin
+  return Math.max(margin, Math.min(left, maxLeft))
+}
+
 interface PopoverPos {
   top: number
   left: number
@@ -56,7 +62,7 @@ export default function GlassSelect<T extends string = string>({
       top: openAbove
         ? Math.max(8, rect.top - estHeight)
         : rect.bottom + 6,
-      left: rect.left,
+      left: clampLeft(rect.left, rect.width, window.innerWidth),
       width: rect.width,
     })
   }, [options.length])
@@ -170,6 +176,7 @@ export default function GlassSelect<T extends string = string>({
               top: pos.top,
               left: pos.left,
               width: pos.width,
+              maxWidth: 'calc(100vw - 16px)',
               boxShadow: 'var(--glass-shadow)',
             }}
           >
