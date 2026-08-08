@@ -22,11 +22,15 @@ export default function Modal({
   size = 'md',
 }: ModalProps) {
   const { t } = useTranslation()
-  const { overlayProps } = useOverlay(onClose)
+  const { overlayProps } = useOverlay(onClose, open)
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
+    >
       <div
         data-testid="modal-overlay"
         {...overlayProps}
@@ -55,7 +59,7 @@ export default function Modal({
             </button>
           </div>
         )}
-        <div className="overflow-y-auto px-5 py-4">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && (
           <div className="flex justify-end gap-3 border-t px-5 py-3" style={{ borderColor: 'var(--color-border)' }}>
             {footer}
