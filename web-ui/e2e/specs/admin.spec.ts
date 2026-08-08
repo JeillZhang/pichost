@@ -158,3 +158,18 @@ test.describe('admin dialogs on mobile', () => {
     await expect(page.locator('.glass-modal')).toBeVisible()
   })
 })
+
+test.describe('system config confirm on mobile', () => {
+  test.use({ viewport: { width: 375, height: 667 }, hasTouch: true })
+
+  test('restore triggers ConfirmDialog instead of native confirm', async ({ page, request }) => {
+    await seedAdminSession(page, request)
+    await page.goto('/admin')
+    await page.getByRole('button', { name: /config|配置/i }).click()
+    // Ensure a backup exists so a restore button is present
+    await page.getByRole('button', { name: /backup current config/i }).click()
+    await expect(page.getByText(/backed up as|backup/i).first()).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('button', { name: /restore|恢复/i }).first().click()
+    await expect(page.locator('.glass-modal')).toBeVisible()
+  })
+})
