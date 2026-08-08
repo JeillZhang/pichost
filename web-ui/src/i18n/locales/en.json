@@ -12,7 +12,8 @@
     "admin": "Admin",
     "adminBadge": "Admin",
     "settings": "Settings",
-    "logout": "Logout"
+    "logout": "Logout",
+    "menu": "Menu"
   },
   "search": {
     "placeholder": "Search by filename…",
@@ -89,6 +90,7 @@
   "gallery": {
     "title": "Gallery",
     "imagesCount": "{{count}} images",
+    "allCategories": "All Categories",
     "allBackends": "All backends",
     "selected": "{{count}} selected",
     "deselectAll": "Deselect All",
@@ -192,7 +194,8 @@
     "deleteCategory": "Delete Category",
     "deleteConfirm": "This will also delete all sub-categories. Images in these categories will be unassigned.",
     "deleting": "Deleting...",
-    "newCategoryTitle": "New category"
+    "newCategoryTitle": "New category",
+    "moreActions": "More actions"
   },
   "storageConfig": {
     "addTitle": "Add Storage Config",
@@ -350,6 +353,7 @@
     "admin": "Admin",
     "quota": "Quota",
     "actions": "Actions",
+    "deleteTitle": "Delete User",
     "adminBadge": "Admin",
     "unlimited": "Unlimited",
     "deleteConfirm": "Delete user \"{{name}}\"? This will permanently delete all their images.",
@@ -416,5 +420,11 @@
     "users": "Users",
     "invites": "Invites",
     "systemConfig": "System Config"
+  },
+  "modal": {
+    "close": "Close"
+  },
+  "confirmDialog": {
+    "confirm": "Confirm"
   }
 }

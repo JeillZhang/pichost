@@ -133,3 +133,19 @@ it('systemConfig language labels exist', async () => {
   const en = (await import('./locales/en.json')).default as any
   expect(en.systemConfig.language).toBeTruthy()
 })
+it('responsive feature keys exist in both locales', async () => {
+  const en = (await import('./locales/en.json')).default as any
+  const zh = (await import('./locales/zh-CN.json')).default as any
+  expect(en.nav.menu).toBeTruthy()
+  expect(zh.nav.menu).toBeTruthy()
+  expect(en.gallery.allCategories).toBeTruthy()
+  expect(zh.gallery.allCategories).toBeTruthy()
+  expect(en.categoryTree.moreActions).toBeTruthy()
+  expect(zh.categoryTree.moreActions).toBeTruthy()
+  expect(en.modal.close).toBeTruthy()
+  expect(zh.modal.close).toBeTruthy()
+  expect(en.confirmDialog.confirm).toBeTruthy()
+  expect(zh.confirmDialog.confirm).toBeTruthy()
+  expect(en.adminUsers.deleteTitle).toBeTruthy()
+  expect(zh.adminUsers.deleteTitle).toBeTruthy()
+})
