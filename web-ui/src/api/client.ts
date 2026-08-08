@@ -1,5 +1,6 @@
 import ky from 'ky'
-import type { KyInstance } from 'ky'
+import type { HTTPError, KyInstance } from 'ky'
+import { getCurrentLocale } from '../i18n'
 
 export interface UserInfo {
   id: string
@@ -134,6 +135,32 @@ function createApi(): KyInstance {
           if (token) {
             request.headers.set('Authorization', `Bearer ${token}`)
           }
+        },
+        ({ request }) => {
+          request.headers.set('Accept-Language', getCurrentLocale())
+        },
+      ],
+      beforeError: [
+        async (state) => {
+          const error = state.error as HTTPError
+          try {
+            const body = (await error.response.clone().json()) as {
+              error?: unknown
+              code?: unknown
+            }
+            // Existing toast.error(err.message) call sites then show the
+            // backend-localized message without any per-call changes.
+            if (typeof body.error === 'string') {
+              error.message = body.error
+            }
+            // Attach the behavior code for getErrorCode()/isErrorCode() consumers.
+            if (typeof body.code === 'string') {
+              ;(error as HTTPError & { code?: string }).code = body.code
+            }
+          } catch {
+            // Non-JSON body — keep the original message.
+          }
+          return error
         },
       ],
       afterResponse: [
@@ -349,6 +376,32 @@ export interface WatermarkConfig {
   position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center' | 'tile'
   margin_x: number
   margin_y: number
+}
+
+export interface AdminConfigI18n {
+  language?: string
+  locales_dir?: string | null
+}
+
+export interface AdminConfig {
+  database_url: string
+  redis_url: string
+  jwt_secret: string
+  token_encryption_key: string
+  public_url: string
+  default_backend: string
+  local_base_path: string
+  config_path: string
+  i18n?: AdminConfigI18n
+}
+
+export interface AdminConfigUpdate {
+  database_url?: string
+  redis_url?: string
+  public_url?: string
+  default_backend?: string
+  local_base_path?: string
+  i18n?: { language?: string }
 }
 
 export async function batchDeleteImages(ids: string[]): Promise<BatchDeleteResult> {

@@ -21,6 +21,8 @@ pub struct AppConfig {
     /// 每用户最多可创建的存储配置数。（None = 默认 5）
     #[serde(default)]
     pub storage_max_user_configs: Option<u32>,
+    #[serde(default)]
+    pub i18n: I18nConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -119,6 +121,27 @@ pub struct WorkerConfig {
     pub recovery_scan_interval: u64,
     #[serde(default)]
     pub processing: WorkerProcessingConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct I18nConfig {
+    #[serde(default = "default_i18n_language")]
+    pub language: String,
+    #[serde(default)]
+    pub locales_dir: Option<PathBuf>,
+}
+
+fn default_i18n_language() -> String {
+    "en".into()
+}
+
+impl Default for I18nConfig {
+    fn default() -> Self {
+        Self {
+            language: default_i18n_language(),
+            locales_dir: None,
+        }
+    }
 }
 
 /// Per-policy rate limits (requests per 60s window).
@@ -229,6 +252,7 @@ impl Default for AppConfig {
             rate_limit: RateLimitConfig::default(),
             token_encryption_key: None,
             storage_max_user_configs: None,
+            i18n: I18nConfig::default(),
         }
     }
 }
@@ -301,6 +325,13 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_defaults_i18n_config() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.i18n.language, "en");
+        assert!(cfg.i18n.locales_dir.is_none());
     }
 
     #[test]

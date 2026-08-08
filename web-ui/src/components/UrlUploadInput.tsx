@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { Link } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 interface UrlUploadInputProps {
   onUpload: (url: string) => Promise<void>
 }
 
 export default function UrlUploadInput({ onUpload }: UrlUploadInputProps) {
+  const { t } = useTranslation()
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -40,7 +42,7 @@ export default function UrlUploadInput({ onUpload }: UrlUploadInputProps) {
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Paste image URL..."
+          placeholder={t('urlUpload.placeholder')}
           disabled={loading}
           className="input-field pl-9 text-sm"
           style={{ paddingTop: '0.375rem', paddingBottom: '0.375rem' }}
@@ -51,7 +53,7 @@ export default function UrlUploadInput({ onUpload }: UrlUploadInputProps) {
         disabled={!url.trim() || loading}
         className="btn-accent shrink-0 px-3 py-1.5 text-sm"
       >
-        {loading ? '...' : 'Upload'}
+        {loading ? '...' : t('urlUpload.uploadButton')}
       </button>
     </div>
   )

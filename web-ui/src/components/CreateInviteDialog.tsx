@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { X, Copy, Check } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { createInviteCode } from '../api/client'
 
 interface CreateInviteDialogProps {
@@ -9,6 +10,7 @@ interface CreateInviteDialogProps {
 }
 
 export default function CreateInviteDialog({ onClose, onCreated }: CreateInviteDialogProps) {
+  const { t } = useTranslation()
   const [ttlDays, setTtlDays] = useState(7)
   const [creating, setCreating] = useState(false)
   const [code, setCode] = useState<string | null>(null)
@@ -20,7 +22,7 @@ export default function CreateInviteDialog({ onClose, onCreated }: CreateInviteD
       const res = await createInviteCode(ttlDays)
       setCode(res.code)
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to create invite code'
+      const msg = e instanceof Error ? e.message : t('createInvite.createFailed')
       toast.error(msg)
     } finally {
       setCreating(false)
@@ -34,7 +36,7 @@ export default function CreateInviteDialog({ onClose, onCreated }: CreateInviteD
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      toast.error('Failed to copy')
+      toast.error(t('createInvite.copyFailed'))
     }
   }
 
@@ -53,7 +55,7 @@ export default function CreateInviteDialog({ onClose, onCreated }: CreateInviteD
               className="text-lg font-semibold"
               style={{ color: 'var(--color-text-primary)', fontFamily: "'Outfit', system-ui, sans-serif" }}
             >
-              Invite Code Created
+              {t('createInvite.created')}
             </h2>
             <button
               onClick={handleDone}
@@ -66,9 +68,10 @@ export default function CreateInviteDialog({ onClose, onCreated }: CreateInviteD
 
           <div className="space-y-4">
             <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-              Share this code with the person you want to invite. It expires in{' '}
-              <strong style={{ color: 'var(--color-text-primary)' }}>{ttlDays}</strong>{' '}
-              day{ttlDays !== 1 ? 's' : ''}.
+              {t('createInvite.shareHint', {
+                count: ttlDays,
+                days: t('createInvite.dayLabel', { count: ttlDays }),
+              })}
             </p>
 
             <div
@@ -86,19 +89,19 @@ export default function CreateInviteDialog({ onClose, onCreated }: CreateInviteD
               {copied ? (
                 <>
                   <Check className="h-4 w-4" />
-                  Copied
+                  {t('createInvite.copied')}
                 </>
               ) : (
                 <>
                   <Copy className="h-4 w-4" />
-                  Copy Code
+                  {t('createInvite.copyCode')}
                 </>
               )}
             </button>
 
             <div className="flex justify-end pt-2">
               <button onClick={handleDone} className="btn-ghost">
-                Done
+                {t('createInvite.done')}
               </button>
             </div>
           </div>
@@ -116,16 +119,16 @@ export default function CreateInviteDialog({ onClose, onCreated }: CreateInviteD
           <h2
             className="text-lg font-semibold"
             style={{ color: 'var(--color-text-primary)', fontFamily: "'Outfit', system-ui, sans-serif" }}
-          >
-            Create Invite Code
-          </h2>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1 transition-colors hover:bg-[var(--color-surface-hover)]"
-            style={{ color: 'var(--color-text-muted)' }}
-          >
-            <X className="h-5 w-5" />
-          </button>
+            >
+              {t('createInvite.title')}
+            </h2>
+            <button
+              onClick={onClose}
+              className="rounded-lg p-1 transition-colors hover:bg-[var(--color-surface-hover)]"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              <X className="h-5 w-5" />
+            </button>
         </div>
 
         <div className="space-y-4">
@@ -134,7 +137,7 @@ export default function CreateInviteDialog({ onClose, onCreated }: CreateInviteD
               className="mb-1.5 block text-xs font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Expires in (days)
+              {t('createInvite.expiresIn')}
             </label>
             <input
               type="number"
@@ -149,7 +152,7 @@ export default function CreateInviteDialog({ onClose, onCreated }: CreateInviteD
 
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} className="btn-ghost">
-              Cancel
+              {t('createInvite.cancel')}
             </button>
             <button
               type="button"
@@ -157,7 +160,7 @@ export default function CreateInviteDialog({ onClose, onCreated }: CreateInviteD
               disabled={creating}
               className="btn-accent"
             >
-              {creating ? 'Creating…' : 'Create'}
+              {creating ? t('createInvite.creating') : t('createInvite.create')}
             </button>
           </div>
         </div>

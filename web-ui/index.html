@@ -17,6 +17,13 @@
         }
       })();
     </script>
+    <script>
+      (function() {
+        var stored = localStorage.getItem('pichost-locale');
+        var locale = stored || (navigator.language && navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en');
+        document.documentElement.lang = locale;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

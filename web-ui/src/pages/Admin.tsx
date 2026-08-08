@@ -1,19 +1,22 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import AdminStats from './admin/AdminStats'
 import AdminUsers from './admin/AdminUsers'
 import AdminInvites from './admin/AdminInvites'
 import SystemConfig from '../components/SystemConfig'
 
 type Tab = 'overview' | 'users' | 'invites' | 'config'
+type TabLabelKey = 'adminTabs.overview' | 'adminTabs.users' | 'adminTabs.invites' | 'adminTabs.systemConfig'
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'users', label: 'Users' },
-  { key: 'invites', label: 'Invites' },
-  { key: 'config', label: 'System Config' },
+const TABS: { key: Tab; labelKey: TabLabelKey }[] = [
+  { key: 'overview', labelKey: 'adminTabs.overview' },
+  { key: 'users', labelKey: 'adminTabs.users' },
+  { key: 'invites', labelKey: 'adminTabs.invites' },
+  { key: 'config', labelKey: 'adminTabs.systemConfig' },
 ]
 
 export default function Admin() {
+  const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
 
   return (
@@ -22,7 +25,7 @@ export default function Admin() {
         className="mb-4 text-lg font-bold"
         style={{ color: 'var(--color-text-primary)', fontFamily: "'Outfit', system-ui, sans-serif" }}
       >
-        Admin Panel
+        {t('adminTabs.title')}
       </h1>
 
       {/* Tab bar */}
@@ -39,7 +42,7 @@ export default function Admin() {
                   : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
               }`}
             >
-              {tab.label}
+              {t(tab.labelKey)}
             </button>
           )
         })}

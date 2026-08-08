@@ -17,7 +17,9 @@ use uuid::Uuid;
 
 use crate::app::AppState;
 use crate::cache::{self, Cache};
+use crate::i18n_ext::{error_json, JsonBody, Locale};
 use pichost_core::config::AppConfig;
+use pichost_core::i18n::Language;
 
 // ---- Request / Response types ----
 
@@ -127,55 +129,46 @@ pub(crate) fn generate_tokens(
     Ok((access_token, refresh_token, access_claims, refresh_claims))
 }
 
-fn error_response(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
-    (status, Json(serde_json::json!({"error": message})))
-}
-
 async fn check_invite_code(
     state: &AppState,
     invite_code: Option<&str>,
     is_first_user: bool,
+    locale: Language,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     if !is_first_user {
         let code = invite_code
-            .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "invite code is required"))?;
+            .ok_or_else(|| error_json(locale, StatusCode::BAD_REQUEST, "invite.required"))?;
 
         match state.cache.verify_invite_code(code).await.map_err(|e| {
             tracing::warn!("Invite code verification failed: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })? {
             cache::InviteVerifyResult::Valid => {}
             cache::InviteVerifyResult::Used => {
-                return Err(error_response(
-                    StatusCode::BAD_REQUEST,
-                    "invite code has already been used",
-                ));
+                return Err(error_json(locale, StatusCode::BAD_REQUEST, "invite.used"));
             }
             cache::InviteVerifyResult::Expired => {
-                return Err(error_response(
-                    StatusCode::BAD_REQUEST,
-                    "invite code has expired",
-                ));
+                return Err(error_json(locale, StatusCode::BAD_REQUEST, "invite.expired"));
             }
             cache::InviteVerifyResult::NotFound => {
-                return Err(error_response(
-                    StatusCode::BAD_REQUEST,
-                    "invalid invite code",
-                ));
+                return Err(error_json(locale, StatusCode::BAD_REQUEST, "invite.invalid"));
             }
         }
     }
     Ok(())
 }
 
-fn hash_password(password: &str) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+fn hash_password(
+    password: &str,
+    locale: Language,
+) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
         .hash_password(password.as_bytes(), &salt)
         .map(|h| h.to_string())
         .map_err(|e| {
             tracing::warn!("Password hashing failed: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })
 }
 
@@ -201,13 +194,14 @@ async fn revoke_old_tokens(cache: &Cache, claims: &RefreshTokenClaims, now: usiz
 
 async fn count_existing_users(
     pool: &sqlx::PgPool,
+    locale: Language,
 ) -> Result<i64, (StatusCode, Json<serde_json::Value>)> {
     sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(pool)
         .await
         .map_err(|e| {
             tracing::warn!("User count query failed: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })
 }
 
@@ -218,6 +212,7 @@ async fn insert_user(
     hash: &str,
     is_admin: bool,
     storage_quota: Option<i64>,
+    locale: Language,
 ) -> Result<Uuid, (StatusCode, Json<serde_json::Value>)> {
     sqlx::query_scalar(
         "INSERT INTO users (username, email, password_hash, is_admin, storage_quota) \
@@ -234,28 +229,30 @@ async fn insert_user(
         if let sqlx::Error::Database(ref db_err) = e {
             if let Some(code) = db_err.code() {
                 if code == "23505" {
-                    return error_response(
+                    return error_json(
+                        locale,
                         StatusCode::CONFLICT,
-                        "username or email already exists",
+                        "auth.username_exists",
                     );
                 }
             }
         }
         tracing::warn!("User registration db error: {e}");
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })
 }
 
 pub async fn register(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<RegisterRequest>,
+    locale: Locale,
+    JsonBody(payload): JsonBody<RegisterRequest>,
 ) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
-    validate_register_payload(&payload)?;
-    let user_count = count_existing_users(&state.pool).await?;
+    validate_register_payload(&payload, locale.0)?;
+    let user_count = count_existing_users(&state.pool, locale.0).await?;
     let is_first_user = user_count == 0;
-    check_invite_code(&state, payload.invite_code.as_deref(), is_first_user).await?;
+    check_invite_code(&state, payload.invite_code.as_deref(), is_first_user, locale.0).await?;
     let (user_id, access_token, refresh_token, storage_quota) =
-        create_user_and_tokens(&state, &payload, is_first_user).await?;
+        create_user_and_tokens(&state, &payload, is_first_user, locale.0).await?;
     Ok((
         StatusCode::CREATED,
         Json(AuthResponse {
@@ -274,11 +271,13 @@ pub async fn register(
 
 fn validate_register_payload(
     payload: &RegisterRequest,
+    locale: Language,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     if payload.password.len() < 6 {
-        return Err(error_response(
+        return Err(error_json(
+            locale,
             StatusCode::BAD_REQUEST,
-            "password must be at least 6 characters",
+            "validation.password_min_length",
         ));
     }
     Ok(())
@@ -288,8 +287,9 @@ async fn create_user_and_tokens(
     state: &AppState,
     payload: &RegisterRequest,
     is_first_user: bool,
+    locale: Language,
 ) -> Result<(Uuid, String, String, Option<i64>), (StatusCode, Json<serde_json::Value>)> {
-    let hash = hash_password(&payload.password)?;
+    let hash = hash_password(&payload.password, locale)?;
     let storage_quota = if state.config.upload.storage_quota_default > 0 {
         Some(state.config.upload.storage_quota_default as i64)
     } else {
@@ -302,6 +302,7 @@ async fn create_user_and_tokens(
         &hash,
         is_first_user,
         storage_quota,
+        locale,
     )
     .await?;
     if !is_first_user {
@@ -318,14 +319,15 @@ async fn create_user_and_tokens(
     let (access_token, refresh_token, _ac, _rc) =
         generate_tokens(user_id, is_first_user, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })?;
     Ok((user_id, access_token, refresh_token, storage_quota))
 }
 
 pub async fn login(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<LoginRequest>,
+    locale: Locale,
+    JsonBody(payload): JsonBody<LoginRequest>,
 ) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
     // Query user
     let row = sqlx::query_as::<_, (Uuid, String, Option<String>, String, bool, Option<i64>)>(
@@ -336,26 +338,26 @@ pub async fn login(
     .await
     .map_err(|e| {
         tracing::warn!("Login db query failed: {e}");
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?
-    .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "invalid username or password"))?;
+    .ok_or_else(|| error_json(locale.0, StatusCode::UNAUTHORIZED, "auth.invalid_credentials"))?;
 
     let (user_id, username, email, password_hash, is_admin, storage_quota) = row;
 
     // Verify password
     let parsed_hash = PasswordHash::new(&password_hash).map_err(|e| {
         tracing::warn!("Stored password hash parse failed: {e}");
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?;
 
     Argon2::default()
         .verify_password(payload.password.as_bytes(), &parsed_hash)
-        .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid username or password"))?;
+        .map_err(|_| error_json(locale.0, StatusCode::UNAUTHORIZED, "auth.invalid_credentials"))?;
 
     let (access_token, refresh_token, _access_claims, _refresh_claims) =
         generate_tokens(user_id, is_admin, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+            error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })?;
 
     let response = AuthResponse {
@@ -376,11 +378,12 @@ pub async fn login(
 async fn lookup_user_for_refresh(
     pool: &sqlx::PgPool,
     sub: &str,
+    locale: Language,
 ) -> Result<(Uuid, String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)>
 {
     let user_id: Uuid = sub
         .parse()
-        .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid token subject"))?;
+        .map_err(|_| error_json(locale, StatusCode::UNAUTHORIZED, "auth.invalid_subject"))?;
     let row = sqlx::query_as::<_, (String, Option<String>, bool, Option<i64>)>(
         "SELECT username, email, is_admin, storage_quota FROM users WHERE id = $1",
     )
@@ -389,39 +392,47 @@ async fn lookup_user_for_refresh(
     .await
     .map_err(|e| {
         tracing::warn!("User lookup failed: {e}");
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
     })?
-    .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "user not found"))?;
+    .ok_or_else(|| error_json(locale, StatusCode::UNAUTHORIZED, "auth.user_not_found"))?;
     Ok((user_id, row.0, row.1, row.2, row.3))
 }
 
 pub async fn refresh(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<RefreshRequest>,
+    locale: Locale,
+    JsonBody(payload): JsonBody<RefreshRequest>,
 ) -> Result<(StatusCode, Json<RefreshResponse>), (StatusCode, Json<serde_json::Value>)> {
     let config = &state.config;
     let key = DecodingKey::from_secret(config.auth.jwt_secret.as_bytes());
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
     let token_data = decode::<RefreshTokenClaims>(&payload.refresh_token, &key, &validation)
-        .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid or expired refresh token"))?;
+        .map_err(|_| {
+            error_json(locale.0, StatusCode::UNAUTHORIZED, "auth.invalid_refresh_token")
+        })?;
     let claims = token_data.claims;
     if claims.typ != "refresh" {
-        return Err(error_response(StatusCode::UNAUTHORIZED, "invalid token type"));
+        return Err(error_json(locale.0, StatusCode::UNAUTHORIZED, "auth.invalid_token_type"));
     }
     let bl_refresh_key = format!("bl:{}", claims.jti);
     if state.cache.exists(&bl_refresh_key).await.unwrap_or(true) {
-        return Err(error_response(
+        return Err(error_json(
+            locale.0,
             StatusCode::UNAUTHORIZED,
-            "refresh token has been revoked",
+            "auth.refresh_token_revoked",
         ));
     }
     let (user_id, username, email, is_admin, storage_quota) =
-        lookup_user_for_refresh(&state.pool, &claims.sub).await?;
+        lookup_user_for_refresh(&state.pool, &claims.sub, locale.0).await?;
     let (new_access, new_refresh, _ac, _rc) = generate_tokens(user_id, is_admin, config)
         .map_err(|e| {
             tracing::warn!("Refresh token generation failed: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "token generation failed")
+            error_json(
+                locale.0,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "auth.token_generation_failed",
+            )
         })?;
     let now = Utc::now().timestamp() as usize;
     revoke_old_tokens(&state.cache, &claims, now).await;
@@ -435,26 +446,28 @@ pub async fn refresh(
 
 pub async fn logout(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     headers: HeaderMap,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     let token = headers
         .get("Authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "missing authorization header"))?;
+        .ok_or_else(|| error_json(locale.0, StatusCode::UNAUTHORIZED, "auth.missing_header"))?;
 
     let key = DecodingKey::from_secret(state.config.auth.jwt_secret.as_bytes());
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = false;
 
     let token_data = decode::<AccessTokenClaims>(token, &key, &validation)
-        .map_err(|_| error_response(StatusCode::UNAUTHORIZED, "invalid token"))?;
+        .map_err(|_| error_json(locale.0, StatusCode::UNAUTHORIZED, "auth.invalid_token"))?;
     let claims = token_data.claims;
 
     if claims.typ != "access" {
-        return Err(error_response(
+        return Err(error_json(
+            locale.0,
             StatusCode::BAD_REQUEST,
-            "only access tokens can be logged out via this endpoint",
+            "auth.logout_access_only",
         ));
     }
 
@@ -515,7 +528,7 @@ mod tests {
             email: None,
             invite_code: None,
         };
-        let err = validate_register_payload(&payload).unwrap_err();
+        let err = validate_register_payload(&payload, Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
     }
 
@@ -527,19 +540,12 @@ mod tests {
             email: None,
             invite_code: None,
         };
-        assert!(validate_register_payload(&payload).is_ok());
-    }
-
-    #[test]
-    fn test_error_response() {
-        let (status, json) = error_response(StatusCode::BAD_REQUEST, "oops");
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(json.0["error"], "oops");
+        assert!(validate_register_payload(&payload, Language::En).is_ok());
     }
 
     #[test]
     fn test_hash_password() {
-        let hash = hash_password("password123").unwrap();
+        let hash = hash_password("password123", Language::En).unwrap();
         assert!(hash.starts_with("$argon2"));
     }
 

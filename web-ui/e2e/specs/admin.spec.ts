@@ -41,8 +41,9 @@ test.describe.serial('admin', () => {
     const admin = new AdminPage(page)
     await admin.goto()
     await admin.openTab('Users')
-    await expect(page.getByText(TEST_ADMIN.username)).toBeVisible()
-    await expect(page.getByText(TEST_USER.username)).toBeVisible()
+    // NavBar 用户区也显示当前用户名 — 精确断言表格 cell,避免 strict mode 冲突
+    await expect(page.getByRole('cell', { name: TEST_ADMIN.username })).toBeVisible()
+    await expect(page.getByRole('cell', { name: TEST_USER.username })).toBeVisible()
   })
 
   test('edit user dialog opens and closes', async ({ page, request }) => {

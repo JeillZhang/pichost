@@ -417,6 +417,25 @@ async fn storage_configs_delete_not_found() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires running PostgreSQL and Redis"]
+async fn test_username_taken_returns_code() {
+    let app = test_app().await;
+    let (_, token_a, _) = create_user(&app, "code_taken_a").await;
+    let (user_b, _, _) = create_user(&app, "code_taken_b").await;
+
+    let (status, resp) = send_json(
+        &app,
+        Method::PATCH,
+        "/api/v1/users/me",
+        Some(&token_a),
+        &serde_json::json!({"username": user_b}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
+    assert_eq!(resp["code"], "user.username_taken");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
 async fn storage_configs_set_default_not_found() {
     let app = test_app().await;
     let (_, token, _) = create_user(&app, "sc_def404").await;

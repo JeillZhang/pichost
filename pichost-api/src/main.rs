@@ -3,6 +3,7 @@ use std::sync::Arc;
 use pichost_api::app::{configure_app, init_storage_backends};
 use pichost_api::{app::AppState, cache, db};
 use pichost_core::config::load_config;
+use pichost_core::i18n::{I18n, Language};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,6 +16,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let config = load_config()?;
+    I18n::init_global(
+        Language::from_str_opt(&config.i18n.language),
+        config.i18n.locales_dir.clone(),
+    );
     let pool = db::create_pool(&config.database.url, config.database.max_connections).await?;
     db::run_migrations(&pool).await?;
     let cache_pool = cache::create_pool(&config.redis.url, config.redis.pool_size as usize);

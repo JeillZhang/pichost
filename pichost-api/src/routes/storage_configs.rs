@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Json, Path, State},
+    extract::{Path, State},
     http::StatusCode,
-    Extension,
+    Extension, Json,
 };
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -12,10 +12,17 @@ use uuid::Uuid;
 use pichost_core::{
     crypto::{decode_key, encrypt_token, mask_token},
     error::AppError,
+    i18n::Language,
     models::{UserStorageConfig, UserStorageConfigResponse},
 };
 
-use crate::{app::AppState, middleware::auth::AuthUser};
+use crate::{
+    app::AppState,
+    i18n_ext::{error_json, error_json_args, JsonBody, Locale},
+    middleware::auth::AuthUser,
+};
+
+type ApiError = (StatusCode, Json<serde_json::Value>);
 
 // ── Request types ───────────────────────────────────────────────────────
 
@@ -67,18 +74,26 @@ async fn check_config_limit(
     max_configs: Option<u32>,
     pool: &PgPool,
     user_id: Uuid,
-) -> Result<(), AppError> {
+    locale: Language,
+) -> Result<(), ApiError> {
     let max = max_configs.unwrap_or(5) as i64;
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM user_storage_configs WHERE user_id = $1",
     )
     .bind(user_id)
     .fetch_one(pool)
-    .await?;
+    .await
+    .map_err(|e| {
+        tracing::warn!("storage config count query failed: {e}");
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })?;
 
     if count >= max {
-        return Err(AppError::bad_request(
-            format!("最多只能创建{}个存储配置", max),
+        return Err(error_json_args(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "storage_config.limit",
+            &[max.to_string()],
         ));
     }
     Ok(())
@@ -88,7 +103,8 @@ async fn check_name_unique(
     pool: &PgPool,
     user_id: Uuid,
     name: &str,
-) -> Result<(), AppError> {
+    locale: Language,
+) -> Result<(), ApiError> {
     let exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM user_storage_configs \
          WHERE user_id = $1 AND name = $2)",
@@ -96,19 +112,35 @@ async fn check_name_unique(
     .bind(user_id)
     .bind(name)
     .fetch_one(pool)
-    .await?;
+    .await
+    .map_err(|e| {
+        tracing::warn!("storage config name check failed: {e}");
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })?;
 
     if exists {
-        return Err(AppError::bad_request("配置名称已存在"));
+        return Err(error_json(
+            locale,
+            StatusCode::CONFLICT,
+            "storage_config.name_exists",
+        ));
     }
     Ok(())
 }
 
-async fn unset_other_defaults(pool: &PgPool, user_id: Uuid) -> Result<(), AppError> {
+async fn unset_other_defaults(
+    pool: &PgPool,
+    user_id: Uuid,
+    locale: Language,
+) -> Result<(), ApiError> {
     sqlx::query("UPDATE user_storage_configs SET is_default = false WHERE user_id = $1")
         .bind(user_id)
         .execute(pool)
-        .await?;
+        .await
+        .map_err(|e| {
+            tracing::warn!("unset storage config defaults failed: {e}");
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        })?;
     Ok(())
 }
 
@@ -116,7 +148,8 @@ async fn fetch_user_config(
     pool: &PgPool,
     config_id: Uuid,
     user_id: Uuid,
-) -> Result<UserStorageConfig, AppError> {
+    locale: Language,
+) -> Result<UserStorageConfig, ApiError> {
     sqlx::query_as::<_, UserStorageConfig>(
         "SELECT id, user_id, name, provider, is_default, \
          config, created_at, updated_at \
@@ -125,8 +158,12 @@ async fn fetch_user_config(
     .bind(config_id)
     .bind(user_id)
     .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| AppError::not_found("存储配置不存在"))
+    .await
+    .map_err(|e| {
+        tracing::warn!("storage config fetch failed: {e}");
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })?
+    .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "storage_config.not_found"))
 }
 
 fn encrypt_token_from_config(
@@ -179,9 +216,10 @@ async fn verify_repo_access(
     provider: &str,
     token: &str,
     repo: &str,
-) -> Result<(), AppError> {
+    locale: Language,
+) -> Result<(), ApiError> {
     let api_base = api_base_for_provider(provider)
-        .ok_or_else(|| AppError::bad_request("不支持的存储类型"))?;
+        .ok_or_else(|| error_json(locale, StatusCode::BAD_REQUEST, "storage_config.unsupported_type"))?;
     let url = format!("{}/repos/{}", api_base, repo);
     let client = reqwest::Client::new();
     let resp = client
@@ -190,21 +228,35 @@ async fn verify_repo_access(
         .header("User-Agent", "pichost/0.15.0")
         .send()
         .await
-        .map_err(|e| AppError::bad_request(format!("无法连接仓库: {}", e)))?;
+        .map_err(|e| {
+            error_json_args(
+                locale,
+                StatusCode::BAD_REQUEST,
+                "storage_config.repo_unreachable",
+                &[e.to_string()],
+            )
+        })?;
 
     match resp.status().as_u16() {
         200 | 302 => Ok(()),
-        401 | 403 => Err(AppError::bad_request(
-            "Token 无效或无权限访问此仓库",
+        401 | 403 => Err(error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "storage_config.token_invalid",
         )),
-        404 => Err(AppError::bad_request("仓库不存在，请检查 owner/repo")),
+        404 => Err(error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "storage_config.repo_not_found",
+        )),
         code => {
             let body = resp.text().await.unwrap_or_default();
-            Err(AppError::bad_request(format!(
-                "仓库验证失败 ({}): {}",
-                code,
-                body,
-            )))
+            Err(error_json_args(
+                locale,
+                StatusCode::BAD_REQUEST,
+                "storage_config.repo_verify_failed",
+                &[code.to_string(), body],
+            ))
         }
     }
 }
@@ -214,8 +266,9 @@ async fn verify_repo_access(
 /// GET /api/v1/users/me/storage-configs
 pub async fn list_configs(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Extension(user): Extension<AuthUser>,
-) -> Result<Json<Vec<UserStorageConfigResponse>>, AppError> {
+) -> Result<Json<Vec<UserStorageConfigResponse>>, ApiError> {
     let configs = sqlx::query_as::<_, UserStorageConfig>(
         "SELECT id, user_id, name, provider, is_default, \
          config, created_at, updated_at \
@@ -223,7 +276,11 @@ pub async fn list_configs(
     )
     .bind(user.id)
     .fetch_all(&state.pool)
-    .await?;
+    .await
+    .map_err(|e| {
+        tracing::warn!("storage config list failed: {e}");
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })?;
 
     let responses: Vec<UserStorageConfigResponse> =
         configs.iter().map(build_response).collect();
@@ -234,32 +291,50 @@ pub async fn list_configs(
 /// POST /api/v1/users/me/storage-configs
 pub async fn create_config(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Extension(user): Extension<AuthUser>,
-    Json(req): Json<CreateConfigRequest>,
-) -> Result<(StatusCode, Json<UserStorageConfigResponse>), AppError> {
+    JsonBody(req): JsonBody<CreateConfigRequest>,
+) -> Result<(StatusCode, Json<UserStorageConfigResponse>), ApiError> {
     if !["github", "gitcode"].contains(&req.provider.as_str()) {
-        return Err(AppError::bad_request(
-            "不支持的存储类型，仅支持 github 和 gitcode",
+        return Err(error_json(
+            locale.0,
+            StatusCode::BAD_REQUEST,
+            "storage_config.unsupported_provider",
         ));
     }
 
-    check_config_limit(state.config.storage_max_user_configs, &state.pool, user.id).await?;
-    check_name_unique(&state.pool, user.id, &req.name).await?;
+    check_config_limit(
+        state.config.storage_max_user_configs,
+        &state.pool,
+        user.id,
+        locale.0,
+    )
+    .await?;
+    check_name_unique(&state.pool, user.id, &req.name, locale.0).await?;
 
-    verify_repo_access(&req.provider, &req.token, &req.repo).await?;
+    verify_repo_access(&req.provider, &req.token, &req.repo, locale.0).await?;
 
     let encryption_key = state
         .config
         .token_encryption_key
         .as_ref()
-        .ok_or_else(|| AppError::internal("系统未配置加密密钥"))?;
+        .ok_or_else(|| {
+            error_json(
+                locale.0,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "storage_config.encryption_key_missing",
+            )
+        })?;
 
-    let encrypted = encrypt_token_from_config(&req.token, encryption_key)?;
+    let encrypted = encrypt_token_from_config(&req.token, encryption_key).map_err(|e| {
+        tracing::warn!("storage config token encryption failed: {e}");
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })?;
     let config_json = build_config_json(&req, encrypted);
     let is_default = req.is_default.unwrap_or(false);
 
     if is_default {
-        unset_other_defaults(&state.pool, user.id).await?;
+        unset_other_defaults(&state.pool, user.id, locale.0).await?;
     }
 
     let config = sqlx::query_as::<_, UserStorageConfig>(
@@ -275,7 +350,11 @@ pub async fn create_config(
     .bind(is_default)
     .bind(&config_json)
     .fetch_one(&state.pool)
-    .await?;
+    .await
+    .map_err(|e| {
+        tracing::warn!("storage config insert failed: {e}");
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })?;
 
     Ok((StatusCode::CREATED, Json(build_response(&config))))
 }
@@ -283,26 +362,28 @@ pub async fn create_config(
 /// GET /api/v1/users/me/storage-configs/{id}
 pub async fn get_config(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
-) -> Result<Json<UserStorageConfigResponse>, AppError> {
-    let config = fetch_user_config(&state.pool, id, user.id).await?;
+) -> Result<Json<UserStorageConfigResponse>, ApiError> {
+    let config = fetch_user_config(&state.pool, id, user.id, locale.0).await?;
     Ok(Json(build_response(&config)))
 }
 
 /// PATCH /api/v1/users/me/storage-configs/{id}
 pub async fn update_config(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
-    Json(req): Json<UpdateConfigRequest>,
-) -> Result<Json<UserStorageConfigResponse>, AppError> {
-    let existing = fetch_user_config(&state.pool, id, user.id).await?;
+    JsonBody(req): JsonBody<UpdateConfigRequest>,
+) -> Result<Json<UserStorageConfigResponse>, ApiError> {
+    let existing = fetch_user_config(&state.pool, id, user.id, locale.0).await?;
 
     let new_name = req.name.as_ref().cloned()
         .unwrap_or_else(|| existing.name.clone());
     if new_name != existing.name {
-        check_name_unique(&state.pool, user.id, &new_name).await?;
+        check_name_unique(&state.pool, user.id, &new_name, locale.0).await?;
     }
 
     let encrypted_token = if let Some(token) = &req.token {
@@ -310,8 +391,17 @@ pub async fn update_config(
             .config
             .token_encryption_key
             .as_ref()
-            .ok_or_else(|| AppError::internal("系统未配置加密密钥"))?;
-        Some(encrypt_token_from_config(token, encryption_key)?)
+            .ok_or_else(|| {
+                error_json(
+                    locale.0,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "storage_config.encryption_key_missing",
+                )
+            })?;
+        Some(encrypt_token_from_config(token, encryption_key).map_err(|e| {
+            tracing::warn!("storage config token encryption failed: {e}");
+            error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        })?)
     } else {
         None
     };
@@ -330,7 +420,11 @@ pub async fn update_config(
     .bind(id)
     .bind(user.id)
     .fetch_one(&state.pool)
-    .await?;
+    .await
+    .map_err(|e| {
+        tracing::warn!("storage config update failed: {e}");
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })?;
 
     Ok(Json(build_response(&updated)))
 }
@@ -338,10 +432,11 @@ pub async fn update_config(
 /// DELETE /api/v1/users/me/storage-configs/{id}
 pub async fn delete_config(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
-) -> Result<StatusCode, AppError> {
-    let _existing = fetch_user_config(&state.pool, id, user.id).await?;
+) -> Result<StatusCode, ApiError> {
+    let _existing = fetch_user_config(&state.pool, id, user.id, locale.0).await?;
 
     let ref_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM images \
@@ -350,17 +445,25 @@ pub async fn delete_config(
     .bind(id)
     .bind(user.id)
     .fetch_one(&state.pool)
-    .await?;
+    .await
+    .map_err(|e| {
+        tracing::warn!("storage config reference count failed: {e}");
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })?;
 
     if ref_count > 0 {
-        return Err(AppError::bad_request("该存储配置下还有图片，请先删除相关图片"));
+        return Err(error_json(locale.0, StatusCode::CONFLICT, "storage_config.in_use"));
     }
 
     sqlx::query("DELETE FROM user_storage_configs WHERE id = $1 AND user_id = $2")
         .bind(id)
         .bind(user.id)
         .execute(&state.pool)
-        .await?;
+        .await
+        .map_err(|e| {
+            tracing::warn!("storage config delete failed: {e}");
+            error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        })?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -368,12 +471,13 @@ pub async fn delete_config(
 /// POST /api/v1/users/me/storage-configs/{id}/default
 pub async fn set_default(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
-) -> Result<Json<UserStorageConfigResponse>, AppError> {
-    let _existing = fetch_user_config(&state.pool, id, user.id).await?;
+) -> Result<Json<UserStorageConfigResponse>, ApiError> {
+    let _existing = fetch_user_config(&state.pool, id, user.id, locale.0).await?;
 
-    unset_other_defaults(&state.pool, user.id).await?;
+    unset_other_defaults(&state.pool, user.id, locale.0).await?;
 
     let config = sqlx::query_as::<_, UserStorageConfig>(
         "UPDATE user_storage_configs SET is_default = true, updated_at = now() \
@@ -384,7 +488,11 @@ pub async fn set_default(
     .bind(id)
     .bind(user.id)
     .fetch_one(&state.pool)
-    .await?;
+    .await
+    .map_err(|e| {
+        tracing::warn!("storage config set default failed: {e}");
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })?;
 
     Ok(Json(build_response(&config)))
 }

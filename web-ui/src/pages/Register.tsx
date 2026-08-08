@@ -2,12 +2,15 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { UserPlus, Loader2, KeyRound } from 'lucide-react'
 import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/auth'
+import LanguageSwitcher from '../components/LanguageSwitcher'
 
 export default function Register() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [inviteCode, setInviteCode] = useState('')
+  const { t } = useTranslation()
   const { register, isLoading, error } = useAuthStore()
   const navigate = useNavigate()
 
@@ -17,9 +20,9 @@ export default function Register() {
     const state = useAuthStore.getState()
     if (state.isAuthenticated) {
       if (state.user?.is_admin) {
-        toast.success('Admin account created! You are now the administrator.', { duration: 6000 })
+        toast.success(t('register.adminCreated'), { duration: 6000 })
       } else {
-        toast.success('Registered!')
+        toast.success(t('register.registered'))
       }
       navigate('/dashboard', { replace: true })
     }
@@ -27,9 +30,12 @@ export default function Register() {
 
   return (
     <div
-      className="flex min-h-screen items-center justify-center p-4"
+      className="relative flex min-h-screen items-center justify-center p-4"
       style={{ backgroundColor: 'var(--color-bg)' }}
     >
+      <div className="absolute right-4 top-4">
+        <LanguageSwitcher />
+      </div>
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="mb-8 text-center">
@@ -45,7 +51,7 @@ export default function Register() {
             PicHost
           </h1>
           <p className="mt-1.5 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            Create your account
+            {t('register.createAccount')}
           </p>
         </div>
 
@@ -70,7 +76,7 @@ export default function Register() {
               className="mb-1.5 block text-xs font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Username
+              {t('register.username')}
             </label>
             <input
               id="username"
@@ -80,7 +86,7 @@ export default function Register() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="input-field"
-              placeholder="your username"
+              placeholder={t('register.usernamePlaceholder')}
             />
           </div>
 
@@ -90,7 +96,7 @@ export default function Register() {
               className="mb-1.5 block text-xs font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Password
+              {t('register.password')}
             </label>
             <input
               id="password"
@@ -110,7 +116,7 @@ export default function Register() {
               className="mb-1.5 block text-xs font-medium"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Invite Code
+              {t('register.inviteCode')}
             </label>
             <div className="relative">
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
@@ -122,7 +128,7 @@ export default function Register() {
                 value={inviteCode}
                 onChange={(e) => setInviteCode(e.target.value)}
                 className="input-field pl-10"
-                placeholder="optional invite code"
+                placeholder={t('register.invitePlaceholder')}
               />
             </div>
           </div>
@@ -133,17 +139,17 @@ export default function Register() {
             ) : (
               <UserPlus className="h-4 w-4" />
             )}
-            Register
+            {t('register.submit')}
           </button>
 
           <p className="text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            Already have an account?{' '}
+            {t('register.alreadyHaveAccount')}{' '}
             <Link
               to="/login"
               style={{ color: 'var(--color-accent)' }}
               className="font-medium hover:underline"
             >
-              Sign in
+              {t('register.signIn')}
             </Link>
           </p>
         </form>

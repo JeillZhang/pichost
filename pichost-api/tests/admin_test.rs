@@ -471,6 +471,44 @@ async fn admin_config_backup_list_restore() {
     cleanup_config_files();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+#[serial]
+async fn test_admin_config_roundtrip_i18n_language() {
+    cleanup_config_files();
+    let app = test_app().await;
+    let (admin_token, _) = create_admin(&app, "i18ncfg").await;
+    // PUT /api/v1/admin/config carrying {"i18n": {"language": "zh-CN"}}
+    let (status, resp) = send_json(
+        &app,
+        Method::PUT,
+        "/api/v1/admin/config",
+        Some(&admin_token),
+        &serde_json::json!({"i18n": {"language": "zh-CN"}}),
+    )
+    .await;
+    assert!(status.is_success(), "put config failed: {resp}");
+    // GET returns i18n.language == "zh-CN"
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/admin/config",
+        Some(&admin_token),
+        &Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "get config failed: {resp}");
+    assert_eq!(resp["i18n"]["language"], "zh-CN");
+    // reload triggered: global language immediately ZhCN
+    assert_eq!(
+        pichost_core::i18n::I18n::global().language(),
+        pichost_core::i18n::Language::ZhCN
+    );
+    // restore global state so later tests in this binary are unaffected
+    pichost_core::i18n::I18n::init_global(pichost_core::i18n::Language::En, None);
+    cleanup_config_files();
+}
+
 // ── OAuth error paths (no OAuth credentials in test config) ───────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -524,6 +562,43 @@ async fn oauth_link_unconfigured() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(resp["error"].as_str().unwrap().contains("client_id not configured"));
+}
+
+// ── Storage config error codes ────────────────────────────────────────
+
+async fn insert_storage_config(app: &TestApp, user_id: Uuid, name: &str) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO user_storage_configs (user_id, name, provider, config) \
+         VALUES ($1, $2, 'github', $3) RETURNING id",
+    )
+    .bind(user_id)
+    .bind(name)
+    .bind(serde_json::json!({
+        "token_encrypted": "enc",
+        "repo": "owner/repo",
+        "branch": "main",
+    }))
+    .fetch_one(app.pool())
+    .await
+    .expect("insert storage config")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn test_duplicate_storage_config_name_returns_code() {
+    let app = test_app().await;
+    let (_, token, user_id) = create_user(&app, "sc_dup_code").await;
+    let _ = insert_storage_config(&app, user_id, "repo").await;
+    let (status, resp) = send_json(
+        &app,
+        Method::POST,
+        "/api/v1/users/me/storage-configs",
+        Some(&token),
+        &serde_json::json!({"name": "repo", "provider": "github", "token": "x", "repo": "owner/repo"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
+    assert_eq!(resp["code"], "storage_config.name_exists");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

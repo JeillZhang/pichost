@@ -974,3 +974,47 @@ async fn public_thumb_alias_not_generated() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+// ── Localized error codes ───────────────────────────────────────────────────
+
+async fn send_json_auth(
+    app: &TestApp,
+    method: Method,
+    uri: &str,
+    user: &(String, String, Uuid),
+) -> (StatusCode, Value) {
+    send_json(app, method, uri, Some(&user.1), &Value::Null).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn test_get_missing_image_returns_code() {
+    let app = test_app().await;
+    let user = create_user(&app, "code404").await;
+    let resp = send_json_auth(
+        &app,
+        Method::GET,
+        "/api/v1/images/00000000-0000-0000-0000-000000000000",
+        &user,
+    )
+    .await;
+    assert_eq!(resp.0, StatusCode::NOT_FOUND);
+    assert_eq!(resp.1["code"], "image.not_found");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn test_quota_exceeded_keeps_extra_fields_and_code() {
+    let app = test_app().await;
+    let user = create_user(&app, "qcode").await;
+    sqlx::query("UPDATE users SET storage_quota = 1 WHERE id = $1")
+        .bind(user.2)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let (ct, body) = multipart_image("tiny.png", &tiny_png(), &[]);
+    let (status, body) = upload_expect_error(&app, Some(&user.1), &ct, body).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(body["code"], "upload.quota_exceeded");
+    assert!(body.get("quota_bytes").is_some());
+}

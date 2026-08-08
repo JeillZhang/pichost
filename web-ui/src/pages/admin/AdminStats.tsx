@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Users, Image as ImageIcon, HardDrive, Activity } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { useFormat } from '../../hooks/useFormat'
 import api from '../../api/client'
 
 interface BackendStats {
@@ -16,32 +18,30 @@ interface AdminStatsResponse {
   storage_backends: Record<string, BackendStats>
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
-}
-
 type StatKey = 'total_users' | 'total_images' | 'total_size' | 'active_users_24h'
+type StatsLabelKey =
+  | 'adminStats.totalUsers'
+  | 'adminStats.totalImages'
+  | 'adminStats.totalStorage'
+  | 'adminStats.active24h'
 
 interface StatCard {
   key: StatKey
-  label: string
+  labelKey: StatsLabelKey
   icon: typeof Users
   color: string
-  format?: (v: number) => string
 }
 
 const statCards: StatCard[] = [
-  { key: 'total_users', label: 'Total Users', icon: Users, color: 'var(--color-accent)' },
-  { key: 'total_images', label: 'Total Images', icon: ImageIcon, color: 'var(--color-accent)' },
-  { key: 'total_size', label: 'Total Storage', icon: HardDrive, color: 'var(--color-success)', format: (v: number) => formatBytes(v) },
-  { key: 'active_users_24h', label: 'Active (24h)', icon: Activity, color: 'var(--color-warning)' },
+  { key: 'total_users', labelKey: 'adminStats.totalUsers', icon: Users, color: 'var(--color-accent)' },
+  { key: 'total_images', labelKey: 'adminStats.totalImages', icon: ImageIcon, color: 'var(--color-accent)' },
+  { key: 'total_size', labelKey: 'adminStats.totalStorage', icon: HardDrive, color: 'var(--color-success)' },
+  { key: 'active_users_24h', labelKey: 'adminStats.active24h', icon: Activity, color: 'var(--color-warning)' },
 ]
 
 export default function AdminStats() {
+  const { t } = useTranslation()
+  const { formatBytes, formatNumber } = useFormat()
   const { data, isLoading } = useQuery({
     queryKey: ['admin', 'stats'],
     queryFn: () => api.get('admin/stats').json<AdminStatsResponse>(),
@@ -51,7 +51,7 @@ export default function AdminStats() {
   if (isLoading || !data) {
     return (
       <div className="flex items-center justify-center py-20" style={{ color: 'var(--color-text-muted)' }}>
-        Loading stats…
+        {t('adminStats.loading')}
       </div>
     )
   }
@@ -59,18 +59,18 @@ export default function AdminStats() {
   return (
     <div>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {statCards.map(({ key, label, icon: Icon, color, format }) => {
+        {statCards.map(({ key, labelKey, icon: Icon, color }) => {
           const value = data[key]
           return (
             <div key={key} className="glass rounded-xl p-4">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>
-                  {label}
+                  {t(labelKey)}
                 </span>
                 <Icon className="h-4 w-4" style={{ color }} />
               </div>
               <p className="mt-2 text-2xl font-bold" style={{ color: 'var(--color-text-primary)' }}>
-                {format ? format(value) : value.toLocaleString()}
+                {key === 'total_size' ? formatBytes(value) : formatNumber(value)}
               </p>
             </div>
           )
@@ -80,7 +80,7 @@ export default function AdminStats() {
       {/* Backend breakdown */}
       <div className="glass mt-6 rounded-xl p-4">
         <h3 className="mb-3 text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-          Storage Backend Breakdown
+          {t('adminStats.storageBreakdown')}
         </h3>
         <div className="space-y-3">
           {Object.entries(data.storage_backends).map(([name, stats]) => (
@@ -88,7 +88,7 @@ export default function AdminStats() {
               <div className="mb-1 flex justify-between text-sm">
                 <span style={{ color: 'var(--color-text-primary)' }}>{name}</span>
                 <span style={{ color: 'var(--color-text-muted)' }}>
-                  {stats.total_images.toLocaleString()} images / {formatBytes(stats.total_size)}
+                  {formatNumber(stats.total_images)} {t('adminStats.backendImages')} / {formatBytes(stats.total_size)}
                   {data.total_quota ? ` / ${formatBytes(data.total_quota)}` : ''}
                 </span>
               </div>

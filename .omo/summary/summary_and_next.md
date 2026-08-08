@@ -391,9 +391,47 @@
 
 ### 版本: 0.17.4 → **0.17.5**
 
+## i18n 国际化 ✅ (本次完成)
+
+**目标**: 为 PicHost 增加中英双语支持 —— 后端 API 错误本地化 + 错误码信封，前端全量文案提取（~350 字符串），支持部署语言配置热加载。
+
+### 后端 i18n 模块 (pichost-core)
+- **`pichost-core/src/i18n.rs`**: `Language` 枚举 (En/ZhCN)，`I18n` 结构体 `t(locale, key)` / `t_args(locale, key, args)`，回退链 locale → en → key
+- **全局单例**: `RwLock<Option<Arc<I18n>>>`，`I18n::global()` 带 5s mtime 懒检查热更新，`init_global`/`reload_global`/`maybe_reload`
+- **消息目录**: `pichost-core/src/i18n/locales/{en,zh-CN}/messages.toml`（110 键），`include_str!` 内嵌；可选外部覆盖目录 `PICHOST_I18N_LOCALES_DIR`（按语言子目录 merge-override）
+- **新配置**: `i18n.language`（env `PICHOST_I18N_LANGUAGE`，默认 "en"）+ `i18n.locales_dir`（env `PICHOST_I18N_LOCALES_DIR`，可选）
+
+### 错误信封变更 (breaking)
+- 所有 API 错误统一为 `{"error": <本地化消息>, "code": <错误键>}`
+- 路由级键为点分式（`auth.invalid_credentials`、`image.not_found`、`validation.body_invalid`）；内部路径经 `AppError::code()` 输出下划线粗粒度码（`auth_failed`、`validation_error` 等），双约定为有意设计
+- **Accept-Language 协商**: 请求头 → 部署 `i18n.language` → en；前端每个请求都携带 `Accept-Language: <UI语言>`（ky beforeRequest hook）
+- **`JsonBody<T>` extractor**（`pichost-api/src/i18n_ext.rs`）替代 `Json<T>`：畸形 JSON / 错误 content-type → 422/415 + 本地化 `validation.body_invalid`，取代 axum 纯文本；另有 `Locale` extractor + `error_json`/`error_json_args`/`error_json_extra` 辅助
+
+### 系统配置集成 (热加载)
+- Config 服务读写 `[i18n] language` / `[i18n] locales_dir`；PUT `/admin/config` 与 POST `/admin/config/restore` 触发 `I18n::reload_global`，语言变更无需重启即生效
+- Admin SystemConfig UI 新增 Localization 分区（语言选择器）
+
+### 前端 (web-ui)
+- **i18next 栈**: i18next ^26 + react-i18next ^17 + i18next-browser-languagedetector ^8
+- **`src/i18n/`**: 初始化、`getCurrentLocale`、`applyLang`（同步 `<html lang>`），`{en,zh-CN}.json` 目录（364 键，键集相等性已测试），`types/i18next.d.ts` 类型化 t() 键，index.html FOUC 内联脚本，main.tsx 包 `I18nextProvider`
+- **LanguageSwitcher**: NavBar + Login/Register 页面，localStorage 键 `pichost-locale`
+- **格式模块**: `src/lib/format.ts` + `src/hooks/useFormat.ts` — 语言感知 formatBytes/formatDate/formatNumber（替代 5 处重复实现 + 硬编码 'en-US' 日期）
+- **API 错误解析**: `src/api/errors.ts`（getErrorCode/isErrorCode），client.ts beforeError hook 从后端本地化 body 设置 error.message 并附加 code
+
+### 验证
+- `cargo test --workspace`（无 infra）✅ (324 pass, 0 fail)
+- `cargo test --workspace -- --include-ignored`（Docker infra）✅ (575 pass, 0 fail；较 555 新增 20：i18n 模块单测、错误码断言、zh 协商、热加载、JsonBody 拒绝、config i18n 往返)
+- 前端 vitest ✅ (42 pass)
+- Playwright E2E ✅ (73 pass；新增 3 个 i18n spec：NavBar 切换持久化、登录页切换、SystemConfig 语言字段 → API 错误本地化 + 恢复)
+- `cargo clippy --workspace -D warnings` ✅
+- `npm run build` ✅
+
+### 版本: 0.17.5 → **0.18.0**（Cargo.toml + web-ui/package.json 对齐 0.18.0）
+
 ## 待实施
 
 | 阶段 | 主题 | 依赖 |
 |------|------|------|
+| i18n 扩展 | 新增语言 (ja/ko/...) — 后端 `locales/{lang}/messages.toml` + `Language` 枚举扩展，前端 `src/i18n/locales/{lang}.json` + LanguageSwitcher 枚举，键集相等性测试 | i18n 已落地 |
 
-当前计划内阶段（P0–P4-I）已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划）。
+当前计划内阶段（P0–P4-I）+ i18n 已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划）。

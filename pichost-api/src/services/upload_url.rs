@@ -3,8 +3,10 @@ use std::time::Duration;
 
 use axum::http::StatusCode;
 use axum::Json;
+use pichost_core::i18n::Language;
 use reqwest::redirect::Policy;
-use serde_json::json;
+
+use crate::i18n_ext::{error_json, error_json_args};
 
 type ApiError = (StatusCode, Json<serde_json::Value>);
 
@@ -12,8 +14,12 @@ const MAX_REDIRECTS: usize = 5;
 const DOWNLOAD_TIMEOUT_SECS: u64 = 30;
 const MAX_BODY_SIZE: u64 = 52_428_800; // 50 MB
 
-fn err(msg: impl Into<String>) -> ApiError {
-    (StatusCode::BAD_REQUEST, Json(json!({"error": msg.into()})))
+fn err(locale: Language, key: &str, args: &[String]) -> ApiError {
+    if args.is_empty() {
+        error_json(locale, StatusCode::BAD_REQUEST, key)
+    } else {
+        error_json_args(locale, StatusCode::BAD_REQUEST, key, args)
+    }
 }
 
 /// Check whether an IPv4 address belongs to a private or reserved range.
@@ -39,14 +45,12 @@ pub fn is_private_ip(octets: &[u8; 4]) -> bool {
 }
 
 /// Validate that the URL uses an allowed scheme (http or https only).
-pub fn validate_url_scheme(url_str: &str) -> Result<url::Url, ApiError> {
-    let parsed = url::Url::parse(url_str).map_err(|e| err(format!("invalid URL: {}", e)))?;
+pub fn validate_url_scheme(url_str: &str, locale: Language) -> Result<url::Url, ApiError> {
+    let parsed = url::Url::parse(url_str)
+        .map_err(|e| err(locale, "url.invalid", &[e.to_string()]))?;
     match parsed.scheme() {
         "http" | "https" => Ok(parsed),
-        other => Err(err(format!(
-            "unsupported URL scheme: {} (only http/https allowed)",
-            other
-        ))),
+        other => Err(err(locale, "url.unsupported_scheme", &[other.to_string()])),
     }
 }
 
@@ -60,16 +64,16 @@ fn extract_filename_from_url_str(url: &url::Url) -> String {
 }
 
 /// Resolve host to IP addresses and check that NONE are private/internal.
-async fn resolve_and_check_host(host: &str) -> Result<(), ApiError> {
+async fn resolve_and_check_host(host: &str, locale: Language) -> Result<(), ApiError> {
     use std::net::ToSocketAddrs;
 
     let addrs: Vec<_> = format!("{}:0", host)
         .to_socket_addrs()
-        .map_err(|e| err(format!("failed to resolve host: {}", e)))?
+        .map_err(|e| err(locale, "url.resolve_failed", &[e.to_string()]))?
         .collect();
 
     if addrs.is_empty() {
-        return Err(err("URL host resolved to zero addresses"));
+        return Err(err(locale, "url.no_addresses", &[]));
     }
 
     for addr in &addrs {
@@ -85,66 +89,69 @@ async fn resolve_and_check_host(host: &str) -> Result<(), ApiError> {
             }
         };
         if is_private {
-            return Err(err(
-                "URL resolves to a private/internal address — SSRF blocked",
-            ));
+            return Err(err(locale, "url.ssrf_blocked", &[]));
         }
     }
     Ok(())
 }
 
-fn build_download_client() -> Result<reqwest::Client, ApiError> {
+fn build_download_client(locale: Language) -> Result<reqwest::Client, ApiError> {
     reqwest::Client::builder()
         .redirect(Policy::limited(MAX_REDIRECTS))
         .timeout(Duration::from_secs(DOWNLOAD_TIMEOUT_SECS))
         .build()
-        .map_err(|e| err(format!("failed to build HTTP client: {}", e)))
+        .map_err(|e| err(locale, "url.client_failed", &[e.to_string()]))
 }
 
-async fn fetch_remote_body(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, ApiError> {
+async fn fetch_remote_body(
+    client: &reqwest::Client,
+    url: &str,
+    locale: Language,
+) -> Result<Vec<u8>, ApiError> {
     let response = client.get(url).send().await.map_err(|e| {
         if e.is_timeout() {
-            err("download timed out (30s)")
+            err(locale, "url.timed_out", &[])
         } else if e.is_connect() {
-            err(format!("failed to connect: {}", e))
+            err(locale, "url.connect_failed", &[e.to_string()])
         } else if e.is_redirect() {
-            err("too many redirects (max 5)")
+            err(locale, "url.too_many_redirects", &[])
         } else {
-            err(format!("download failed: {}", e))
+            err(locale, "url.download_failed", &[e.to_string()])
         }
     })?;
 
     let status = response.status();
     if !status.is_success() {
-        return Err(err(format!(
-            "remote server returned {} {}",
-            status.as_u16(),
-            status.canonical_reason().unwrap_or("unknown")
-        )));
+        return Err(err(
+            locale,
+            "url.server_error",
+            &[
+                status.as_u16().to_string(),
+                status.canonical_reason().unwrap_or("unknown").to_string(),
+            ],
+        ));
     }
 
     let content_length = response.content_length().unwrap_or(0);
     if content_length > MAX_BODY_SIZE {
-        return Err(err(format!(
-            "response exceeds maximum size (50 MB), got {} bytes",
-            content_length
-        )));
+        return Err(err(
+            locale,
+            "url.too_large",
+            &[content_length.to_string()],
+        ));
     }
 
     let bytes = response
         .bytes()
         .await
-        .map_err(|e| err(format!("failed to read body: {}", e)))?;
+        .map_err(|e| err(locale, "url.body_failed", &[e.to_string()]))?;
 
     if bytes.len() as u64 > MAX_BODY_SIZE {
-        return Err(err(format!(
-            "response exceeds maximum size (50 MB), got {} bytes",
-            bytes.len()
-        )));
+        return Err(err(locale, "url.too_large", &[bytes.len().to_string()]));
     }
 
     if !infer::is_image(&bytes) {
-        return Err(err("downloaded content is not a valid image"));
+        return Err(err(locale, "url.not_an_image", &[]));
     }
 
     Ok(bytes.to_vec())
@@ -153,13 +160,16 @@ async fn fetch_remote_body(client: &reqwest::Client, url: &str) -> Result<Vec<u8
 /// Download an image from a URL with full SSRF protection.
 ///
 /// Returns `(bytes, filename)` on success.
-pub async fn fetch_image_from_url(url: &str) -> Result<(Vec<u8>, String), ApiError> {
-    let parsed = validate_url_scheme(url)?;
-    let host = parsed.host_str().ok_or_else(|| err("URL has no host"))?;
-    resolve_and_check_host(host).await?;
+pub async fn fetch_image_from_url(
+    url: &str,
+    locale: Language,
+) -> Result<(Vec<u8>, String), ApiError> {
+    let parsed = validate_url_scheme(url, locale)?;
+    let host = parsed.host_str().ok_or_else(|| err(locale, "url.no_host", &[]))?;
+    resolve_and_check_host(host, locale).await?;
 
-    let client = build_download_client()?;
-    let bytes = fetch_remote_body(&client, parsed.as_str()).await?;
+    let client = build_download_client(locale)?;
+    let bytes = fetch_remote_body(&client, parsed.as_str(), locale).await?;
     let filename = extract_filename_from_url_str(&parsed);
     Ok((bytes, filename))
 }
@@ -206,22 +216,22 @@ mod tests {
 
     #[test]
     fn test_validate_url_scheme_https() {
-        assert!(validate_url_scheme("https://example.com/photo.jpg").is_ok());
+        assert!(validate_url_scheme("https://example.com/photo.jpg", Language::En).is_ok());
     }
 
     #[test]
     fn test_validate_url_scheme_http() {
-        assert!(validate_url_scheme("http://example.com/photo.jpg").is_ok());
+        assert!(validate_url_scheme("http://example.com/photo.jpg", Language::En).is_ok());
     }
 
     #[test]
     fn test_validate_url_scheme_ftp_rejected() {
-        assert!(validate_url_scheme("ftp://example.com/photo.jpg").is_err());
+        assert!(validate_url_scheme("ftp://example.com/photo.jpg", Language::En).is_err());
     }
 
     #[test]
     fn test_validate_url_scheme_file_rejected() {
-        assert!(validate_url_scheme("file:///etc/passwd").is_err());
+        assert!(validate_url_scheme("file:///etc/passwd", Language::En).is_err());
     }
 
     #[test]
@@ -254,14 +264,15 @@ mod tests {
 
     #[test]
     fn test_validate_url_scheme_no_scheme() {
-        assert!(validate_url_scheme("example.com/photo.jpg").is_err());
+        assert!(validate_url_scheme("example.com/photo.jpg", Language::En).is_err());
     }
 
     #[test]
     fn test_err_helper_returns_400() {
-        let (status, json) = err("boom");
+        let (status, json) = err(Language::En, "url.no_host", &[]);
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(json.0["error"], "boom");
+        assert_eq!(json.0["code"], "url.no_host");
+        assert_eq!(json.0["error"], "URL has no host");
     }
 
     #[test]
@@ -295,7 +306,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_resolve_and_check_host_localhost_blocked() {
-        let result = resolve_and_check_host("localhost").await;
+        let result = resolve_and_check_host("localhost", Language::En).await;
         let (status, json) = result.unwrap_err();
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(json.0["error"].as_str().unwrap().contains("SSRF"));
@@ -303,22 +314,22 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_download_client_ok() {
-        assert!(build_download_client().is_ok());
+        assert!(build_download_client(Language::En).is_ok());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_fetch_remote_body_happy_path() {
         let url = spawn_server("200 OK", None, PNG).await;
-        let client = build_download_client().unwrap();
-        let bytes = fetch_remote_body(&client, &url).await.unwrap();
+        let client = build_download_client(Language::En).unwrap();
+        let bytes = fetch_remote_body(&client, &url, Language::En).await.unwrap();
         assert_eq!(bytes, PNG);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_fetch_remote_body_garbage() {
         let url = spawn_server("200 OK", None, b"not an image").await;
-        let client = build_download_client().unwrap();
-        let (status, json) = fetch_remote_body(&client, &url).await.unwrap_err();
+        let client = build_download_client(Language::En).unwrap();
+        let (status, json) = fetch_remote_body(&client, &url, Language::En).await.unwrap_err();
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(json.0["error"].as_str().unwrap().contains("not a valid image"));
     }
@@ -326,22 +337,22 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_fetch_remote_body_404() {
         let url = spawn_server("404 Not Found", None, b"nope").await;
-        let client = build_download_client().unwrap();
-        let (_, json) = fetch_remote_body(&client, &url).await.unwrap_err();
+        let client = build_download_client(Language::En).unwrap();
+        let (_, json) = fetch_remote_body(&client, &url, Language::En).await.unwrap_err();
         assert!(json.0["error"].as_str().unwrap().contains("404"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_fetch_remote_body_oversized() {
         let url = spawn_server("200 OK", Some(MAX_BODY_SIZE + 1), b"x").await;
-        let client = build_download_client().unwrap();
-        let (_, json) = fetch_remote_body(&client, &url).await.unwrap_err();
+        let client = build_download_client(Language::En).unwrap();
+        let (_, json) = fetch_remote_body(&client, &url, Language::En).await.unwrap_err();
         assert!(json.0["error"].as_str().unwrap().contains("maximum size"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_fetch_image_from_url_rejects_private_ip() {
-        let result = fetch_image_from_url("http://127.0.0.1:1/x.png").await;
+        let result = fetch_image_from_url("http://127.0.0.1:1/x.png", Language::En).await;
         let (status, json) = result.unwrap_err();
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(json.0["error"].as_str().unwrap().contains("SSRF"));
@@ -349,6 +360,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_fetch_image_from_url_rejects_ftp() {
-        assert!(fetch_image_from_url("ftp://example.com/x.png").await.is_err());
+        assert!(fetch_image_from_url("ftp://example.com/x.png", Language::En).await.is_err());
     }
 }

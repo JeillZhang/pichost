@@ -2,16 +2,19 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Request, State},
+    http::header::ACCEPT_LANGUAGE,
     http::StatusCode,
     middleware::Next,
     response::Response,
     Json,
 };
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use pichost_core::i18n::{I18n, Language};
 use serde::Serialize;
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::i18n_ext::{error_json, locale_from_header};
 use crate::routes::auth::AccessTokenClaims;
 
 #[derive(Debug, Clone, Serialize)]
@@ -27,9 +30,10 @@ pub async fn require_auth(
     mut req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let locale = locale_from_header(req.headers().get(ACCEPT_LANGUAGE), I18n::global().language());
     let token = extract_bearer_token(&req)?;
-    let claims = decode_and_validate_jwt(token, state.config.auth.jwt_secret.as_bytes())?;
-    let auth_user = check_blacklist_and_quota(&state, &claims).await?;
+    let claims = decode_and_validate_jwt(token, state.config.auth.jwt_secret.as_bytes(), locale)?;
+    let auth_user = check_blacklist_and_quota(&state, &claims, locale).await?;
 
     req.extensions_mut().insert(auth_user);
     req.extensions_mut().insert(state);
@@ -40,56 +44,45 @@ pub async fn require_auth(
 fn extract_bearer_token(
     req: &Request,
 ) -> Result<&str, (StatusCode, Json<serde_json::Value>)> {
+    let locale = locale_from_header(req.headers().get(ACCEPT_LANGUAGE), I18n::global().language());
     let auth_header = req
         .headers()
         .get("Authorization")
         .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "missing authorization header"})),
-            )
-        })?;
+        .ok_or_else(|| error_json(locale, StatusCode::UNAUTHORIZED, "auth.missing_header"))?;
 
-    auth_header.strip_prefix("Bearer ").ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "invalid authorization format"})),
-        )
-    })
+    auth_header
+        .strip_prefix("Bearer ")
+        .ok_or_else(|| error_json(locale, StatusCode::UNAUTHORIZED, "auth.invalid_header_format"))
 }
 
 fn decode_and_validate_jwt(
     token: &str,
     secret: &[u8],
+    locale: Language,
 ) -> Result<AccessTokenClaims, (StatusCode, Json<serde_json::Value>)> {
     let key = DecodingKey::from_secret(secret);
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
-    let token_data =
-        decode::<AccessTokenClaims>(token, &key, &validation).map_err(|e| {
-            tracing::warn!("JWT decode failed: {e}");
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "invalid or expired token"})),
-            )
-        })?;
+    let token_data = decode::<AccessTokenClaims>(token, &key, &validation).map_err(|e| {
+        tracing::warn!("JWT decode failed: {e}");
+        error_json(locale, StatusCode::UNAUTHORIZED, "auth.invalid_or_expired_token")
+    })?;
     Ok(token_data.claims)
 }
 
 async fn check_blacklist_and_quota(
     state: &AppState,
     claims: &AccessTokenClaims,
+    locale: Language,
 ) -> Result<AuthUser, (StatusCode, Json<serde_json::Value>)> {
     if state.cache.exists(&format!("bl:{}", claims.jti)).await.unwrap_or(true) {
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "token has been revoked"})),
-        ));
+        return Err(error_json(locale, StatusCode::UNAUTHORIZED, "auth.token_revoked"));
     }
-    let user_id: Uuid = claims.sub.parse().map_err(|_| {
-        (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "invalid token subject"})))
-    })?;
+    let user_id: Uuid = claims
+        .sub
+        .parse()
+        .map_err(|_| error_json(locale, StatusCode::UNAUTHORIZED, "auth.invalid_subject"))?;
     let row = sqlx::query_as::<_, (Option<i64>, Option<serde_json::Value>)>(
         "SELECT storage_quota, watermark_config FROM users WHERE id = $1",
     )
@@ -98,7 +91,7 @@ async fn check_blacklist_and_quota(
     .await
     .map_err(|e| {
         tracing::warn!("Auth user lookup failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "internal server error"})))
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?;
 
     let (quota, wm_raw) = row.unwrap_or((None, None));
@@ -114,19 +107,14 @@ pub async fn require_admin(
     req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let locale = locale_from_header(req.headers().get(ACCEPT_LANGUAGE), I18n::global().language());
     let auth_user = req.extensions().get::<AuthUser>().ok_or_else(|| {
         tracing::warn!("require_admin called without AuthUser in extensions");
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "authentication required"})),
-        )
+        error_json(locale, StatusCode::UNAUTHORIZED, "auth.authentication_required")
     })?;
 
     if !auth_user.is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "admin access required"})),
-        ));
+        return Err(error_json(locale, StatusCode::FORBIDDEN, "auth.admin_required"));
     }
 
     Ok(next.run(req).await)
@@ -186,7 +174,7 @@ mod tests {
     #[test]
     fn test_decode_valid_token() {
         let token = mint_access("user-1", true, 900);
-        let claims = decode_and_validate_jwt(&token, SECRET.as_bytes()).unwrap();
+        let claims = decode_and_validate_jwt(&token, SECRET.as_bytes(), Language::En).unwrap();
         assert_eq!(claims.sub, "user-1");
         assert!(claims.is_admin);
         assert_eq!(claims.typ, "access");
@@ -194,14 +182,16 @@ mod tests {
 
     #[test]
     fn test_decode_garbage() {
-        let err = decode_and_validate_jwt("garbage.token.value", SECRET.as_bytes()).unwrap_err();
+        let err =
+            decode_and_validate_jwt("garbage.token.value", SECRET.as_bytes(), Language::En)
+                .unwrap_err();
         assert_eq!(err.0, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
     fn test_decode_expired() {
         let token = mint_access("user-1", false, -100);
-        let err = decode_and_validate_jwt(&token, SECRET.as_bytes()).unwrap_err();
+        let err = decode_and_validate_jwt(&token, SECRET.as_bytes(), Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::UNAUTHORIZED);
     }
 

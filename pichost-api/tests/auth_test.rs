@@ -5,9 +5,11 @@
 
 mod common;
 
-use axum::http::{Method, StatusCode};
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode};
 use common::*;
 use serde_json::Value;
+use tower::ServiceExt;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires running PostgreSQL and Redis"]
@@ -39,6 +41,27 @@ async fn login_with_wrong_password_fails() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert!(resp["error"].is_string());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn login_rejects_malformed_json_body() {
+    let app = test_app().await;
+    let (status, _, bytes) = send_raw(
+        &app,
+        Method::POST,
+        "/api/v1/auth/login",
+        None,
+        Some("application/json"),
+        b"{\"bad json".to_vec(),
+    )
+    .await;
+    // Malformed JSON syntax is a JsonSyntaxError, whose status() is 400;
+    // JsonBody maps every Json rejection to validation.body_invalid.
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let v: Value = serde_json::from_slice(&bytes).expect("error body is JSON");
+    assert_eq!(v["code"], "validation.body_invalid");
+    assert!(v["error"].is_string());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -193,4 +216,76 @@ async fn security_headers_present() {
     );
     assert_eq!(headers.get("x-frame-options").unwrap(), "DENY");
     assert_eq!(headers.get("referrer-policy").unwrap(), "strict-origin-when-cross-origin");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn test_login_failure_returns_code_and_localized_message() {
+    let app = test_app().await;
+    let (status, body) = send_json(
+        &app,
+        Method::POST,
+        "/api/v1/auth/login",
+        None,
+        &serde_json::json!({"username": "nobody", "password": "x"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["code"], "auth.invalid_credentials");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn test_login_failure_zh_negotiation() {
+    let app = test_app().await;
+    let resp = app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/login")
+                .header("content-type", "application/json")
+                .header("accept-language", "zh-CN")
+                .body(Body::from(r#"{"username":"nobody","password":"x"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["error"], "用户名或密码错误");
+    assert_eq!(body["code"], "auth.invalid_credentials");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn test_admin_endpoint_forbidden_code() {
+    let app = test_app().await;
+    let (_, token, _) = create_user(&app, "forbidden").await; // non-admin
+    let (status, body) =
+        send_json(&app, Method::GET, "/api/v1/admin/stats", Some(&token), &Value::Null).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "auth.admin_required");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL and Redis"]
+async fn test_rate_limit_returns_code() {
+    let app = test_app_with_rate_limits(2).await;
+    let body = serde_json::json!({"username": "x", "password": "y"});
+    for _ in 0..3 {
+        send_json(&app, Method::POST, "/api/v1/auth/login", None, &body).await;
+    }
+    let (status, resp) = send_json(&app, Method::POST, "/api/v1/auth/login", None, &body).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(resp["code"], "rate_limited");
+}
+
+/// Test app with a lowered auth rate limit so the limiter trips quickly.
+async fn test_app_with_rate_limits(auth_max: u32) -> TestApp {
+    let tempdir = tempfile::TempDir::new().expect("tempdir");
+    let mut cfg = common::test_config(&tempdir);
+    cfg.rate_limit.auth_max = auth_max;
+    common::test_app_with_config(cfg).await
 }

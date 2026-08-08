@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Copy, Check } from 'lucide-react'
 import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next'
 
 interface LinkCardProps {
   label: string
@@ -8,16 +9,17 @@ interface LinkCardProps {
 }
 
 export default function LinkCard({ label, value }: LinkCardProps) {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
 
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(value)
       setCopied(true)
-      toast.success(`${label} copied`)
+      toast.success(t('linkCard.copied', { label }))
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      toast.error('Failed to copy')
+      toast.error(t('linkCard.copyFailed'))
     }
   }
 
@@ -44,7 +46,7 @@ export default function LinkCard({ label, value }: LinkCardProps) {
           onClick={handleCopy}
           className="shrink-0 rounded-lg p-1.5 transition-all duration-200 hover:bg-[var(--color-surface-hover)]"
           style={{ color: 'var(--color-text-muted)' }}
-          title={`Copy ${label}`}
+          title={t('linkCard.copyTitle', { label })}
         >
           {copied ? (
             <Check className="h-4 w-4" style={{ color: 'var(--color-success)' }} />

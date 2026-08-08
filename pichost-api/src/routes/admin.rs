@@ -9,6 +9,7 @@ use axum::{
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
+use pichost_core::i18n::{I18n, Language};
 use pichost_core::StorageRouter;
 
 fn deserialize_optional_jsonb<'de, D>(
@@ -23,6 +24,7 @@ where
 use crate::app::AppState;
 use crate::cache::{Cache, InviteCodeInfo};
 use crate::db::DbPool;
+use crate::i18n_ext::{error_json, error_json_args, JsonBody, Locale};
 use crate::metrics::{TOTAL_IMAGES, TOTAL_STORAGE_BYTES, TOTAL_USERS};
 use crate::middleware::auth::AuthUser;
 use crate::routes::auth::UserInfo;
@@ -31,6 +33,10 @@ use crate::services::config::{self, SystemConfig};
 // ── Error shorthand ──
 
 type AdminError = (StatusCode, Json<serde_json::Value>);
+
+fn internal_error(locale: Language) -> AdminError {
+    error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+}
 
 // ── Invite Code types ──
 
@@ -81,6 +87,13 @@ pub struct UpdateConfigBody {
     pub public_url: Option<String>,
     pub default_backend: Option<String>,
     pub local_base_path: Option<String>,
+    pub i18n: Option<UpdateConfigI18n>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateConfigI18n {
+    pub language: Option<String>,
+    pub locales_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -104,6 +117,13 @@ pub struct ConfigResponse {
     pub default_backend: String,
     pub local_base_path: String,
     pub config_path: String,
+    pub i18n: ConfigResponseI18n,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConfigResponseI18n {
+    pub language: String,
+    pub locales_dir: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -160,14 +180,16 @@ fn map_user_rows(rows: Vec<UserRow>) -> Vec<UserInfo> {
 
 async fn hash_password_if_provided(
     password: &Option<String>,
+    locale: Language,
 ) -> Result<Option<String>, AdminError> {
     let Some(password) = password else {
         return Ok(None);
     };
     if password.len() < 8 {
-        return Err((
+        return Err(error_json(
+            locale,
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "password must be at least 8 characters"})),
+            "admin.password_too_weak",
         ));
     }
     use argon2::password_hash::SaltString;
@@ -178,16 +200,16 @@ async fn hash_password_if_provided(
         .hash_password(password.as_bytes(), &salt)
         .map_err(|e| {
             tracing::warn!("Password hashing failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
+            internal_error(locale)
         })?
         .to_string();
     Ok(Some(hash))
 }
 
-async fn execute_user_update(params: UserUpdateParams<'_>) -> Result<(), AdminError> {
+async fn execute_user_update(
+    params: UserUpdateParams<'_>,
+    locale: Language,
+) -> Result<(), AdminError> {
     if let Some(ph) = params.password_hash {
         sqlx::query(
             r#"UPDATE users SET username = $1, email = $2, is_admin = $3,
@@ -206,10 +228,7 @@ async fn execute_user_update(params: UserUpdateParams<'_>) -> Result<(), AdminEr
         .await
         .map_err(|e| {
             tracing::warn!("Admin update user (with pw) failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
+            internal_error(locale)
         })?;
     } else {
         sqlx::query(
@@ -228,10 +247,7 @@ async fn execute_user_update(params: UserUpdateParams<'_>) -> Result<(), AdminEr
         .await
         .map_err(|e| {
             tracing::warn!("Admin update user failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
+            internal_error(locale)
         })?;
     }
     Ok(())
@@ -249,6 +265,7 @@ type UserFields = (
 async fn fetch_user_fields(
     pool: &DbPool,
     user_id: Uuid,
+    locale: Language,
 ) -> Result<UserFields, AdminError> {
     sqlx::query_as::<_, UserFields>(
         "SELECT username, email, is_admin, storage_backend, storage_quota, watermark_config \
@@ -259,17 +276,9 @@ async fn fetch_user_fields(
     .await
     .map_err(|e| {
         tracing::warn!("Admin update user query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal error"})),
-        )
+        internal_error(locale)
     })?
-    .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "user not found"})),
-        )
-    })
+    .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "user.not_found"))
 }
 
 fn merge_user_fields(body: &UpdateUserBody, existing: UserFields) -> UserFields {
@@ -302,8 +311,9 @@ async fn fetch_and_merge_user_fields(
     pool: &DbPool,
     user_id: Uuid,
     body: &UpdateUserBody,
+    locale: Language,
 ) -> Result<UserFields, AdminError> {
-    let existing = fetch_user_fields(pool, user_id).await?;
+    let existing = fetch_user_fields(pool, user_id, locale).await?;
     Ok(merge_user_fields(body, existing))
 }
 
@@ -313,6 +323,7 @@ async fn collect_and_cleanup_storage_files(
     router: &StorageRouter,
     pool: &DbPool,
     user_id: Uuid,
+    locale: Language,
 ) -> Result<usize, AdminError> {
     let image_keys: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
         r#"SELECT storage_key, thumbnail_key, webp_key FROM images WHERE user_id = $1"#,
@@ -322,10 +333,7 @@ async fn collect_and_cleanup_storage_files(
     .await
     .map_err(|e| {
         tracing::warn!("Admin delete user image keys query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal error"})),
-        )
+        internal_error(locale)
     })?;
 
     let count = image_keys.len();
@@ -343,17 +351,14 @@ async fn collect_and_cleanup_storage_files(
     Ok(count)
 }
 
-async fn delete_user_from_db(pool: &DbPool, user_id: Uuid) -> Result<(), AdminError> {
+async fn delete_user_from_db(pool: &DbPool, user_id: Uuid, locale: Language) -> Result<(), AdminError> {
     sqlx::query("DELETE FROM images WHERE user_id = $1")
         .bind(user_id)
         .execute(pool)
         .await
         .map_err(|e| {
             tracing::warn!("Admin delete user images failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
+            internal_error(locale)
         })?;
 
     sqlx::query("DELETE FROM users WHERE id = $1")
@@ -362,16 +367,13 @@ async fn delete_user_from_db(pool: &DbPool, user_id: Uuid) -> Result<(), AdminEr
         .await
         .map_err(|e| {
             tracing::warn!("Admin delete user failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
+            internal_error(locale)
         })?;
 
     Ok(())
 }
 
-async fn verify_user_exists(pool: &DbPool, user_id: Uuid) -> Result<(), AdminError> {
+async fn verify_user_exists(pool: &DbPool, user_id: Uuid, locale: Language) -> Result<(), AdminError> {
     let exists: bool =
         sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
             .bind(user_id)
@@ -379,16 +381,10 @@ async fn verify_user_exists(pool: &DbPool, user_id: Uuid) -> Result<(), AdminErr
             .await
             .map_err(|e| {
                 tracing::warn!("Admin delete user check failed: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "internal error"})),
-                )
+                internal_error(locale)
             })?;
     if !exists {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "user not found"})),
-        ));
+        return Err(error_json(locale, StatusCode::NOT_FOUND, "user.not_found"));
     }
     Ok(())
 }
@@ -444,20 +440,17 @@ fn try_parse_cached_stats(stats_map: &HashMap<String, String>) -> Option<AdminSt
     })
 }
 
-async fn query_total_users(pool: &DbPool) -> Result<i64, AdminError> {
+async fn query_total_users(pool: &DbPool, locale: Language) -> Result<i64, AdminError> {
     sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(pool)
         .await
         .map_err(|e| {
             tracing::warn!("Admin stats user count failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
+            internal_error(locale)
         })
 }
 
-async fn query_total_quota(pool: &DbPool) -> Result<Option<i64>, AdminError> {
+async fn query_total_quota(pool: &DbPool, locale: Language) -> Result<Option<i64>, AdminError> {
     sqlx::query_scalar(
         "SELECT SUM(storage_quota)::BIGINT FROM users WHERE storage_quota IS NOT NULL",
     )
@@ -465,14 +458,11 @@ async fn query_total_quota(pool: &DbPool) -> Result<Option<i64>, AdminError> {
     .await
     .map_err(|e| {
         tracing::warn!("Admin stats quota query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal error"})),
-        )
+        internal_error(locale)
     })
 }
 
-async fn query_image_stats(pool: &DbPool) -> Result<(i64, i64), AdminError> {
+async fn query_image_stats(pool: &DbPool, locale: Language) -> Result<(i64, i64), AdminError> {
     sqlx::query_as::<_, (i64, i64)>(
         r#"SELECT COUNT(*)::BIGINT as total_images, COALESCE(SUM(file_size), 0)::BIGINT as total_size
            FROM images"#,
@@ -481,10 +471,7 @@ async fn query_image_stats(pool: &DbPool) -> Result<(i64, i64), AdminError> {
     .await
     .map_err(|e| {
         tracing::warn!("Admin stats image query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal error"})),
-        )
+        internal_error(locale)
     })
 }
 
@@ -501,6 +488,7 @@ async fn query_active_users_24h(pool: &DbPool) -> i64 {
 async fn query_backend_stats(
     pool: &DbPool,
     backend_name: &str,
+    locale: Language,
 ) -> Result<BackendStats, AdminError> {
     sqlx::query_as::<_, (i64, i64)>(
         "SELECT COUNT(*)::BIGINT, COALESCE(SUM(file_size), 0)::BIGINT FROM images WHERE storage_backend = $1",
@@ -514,10 +502,7 @@ async fn query_backend_stats(
     })
     .map_err(|e| {
         tracing::warn!("Admin stats backend query ({backend_name}) failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal error"})),
-        )
+        internal_error(locale)
     })
 }
 
@@ -586,20 +571,14 @@ fn config_file_path() -> std::path::PathBuf {
         .join("config.toml")
 }
 
-fn internal_error(msg: String) -> AdminError {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(serde_json::json!({"error": msg})),
-    )
-}
-
 // ── Handlers ───────────────────────────────────────────────────────────
 
 /// GET /api/v1/admin/users — paginated user list (admin only)
 pub async fn list_users(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Query(pagination): Query<PaginationQuery>,
-) -> Result<Json<ListUsersResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<ListUsersResponse>, AdminError> {
     let offset = pagination.offset.unwrap_or(0).max(0);
     let limit = pagination.limit.unwrap_or(50).clamp(1, 200);
 
@@ -608,10 +587,7 @@ pub async fn list_users(
         .await
         .map_err(|e| {
             tracing::warn!("Admin user count query failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
+            internal_error(locale.0)
         })?;
 
     let rows = sqlx::query_as::<_, UserRow>(
@@ -624,10 +600,7 @@ pub async fn list_users(
     .await
     .map_err(|e| {
         tracing::warn!("Admin user list query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal error"})),
-        )
+        internal_error(locale.0)
     })?;
 
     Ok(Json(ListUsersResponse {
@@ -655,15 +628,17 @@ pub struct UpdateUserBody {
 /// PATCH /api/v1/admin/users/{id} — update user fields (admin only)
 pub async fn update_user(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Extension(current_user): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
-    Json(body): Json<UpdateUserBody>,
-) -> Result<Json<UserInfo>, (StatusCode, Json<serde_json::Value>)> {
+    JsonBody(body): JsonBody<UpdateUserBody>,
+) -> Result<Json<UserInfo>, AdminError> {
     // Prevent self-demotion
     if body.is_admin == Some(false) && current_user.id == user_id {
-        return Err((
+        return Err(error_json(
+            locale.0,
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "cannot demote yourself"})),
+            "admin.cannot_demote_self",
         ));
     }
 
@@ -674,21 +649,24 @@ pub async fn update_user(
         new_storage_backend,
         new_storage_quota,
         new_watermark_config,
-    ) = fetch_and_merge_user_fields(&state.pool, user_id, &body).await?;
+    ) = fetch_and_merge_user_fields(&state.pool, user_id, &body, locale.0).await?;
 
-    let password_hash = hash_password_if_provided(&body.password).await?;
+    let password_hash = hash_password_if_provided(&body.password, locale.0).await?;
 
-    execute_user_update(UserUpdateParams {
-        pool: &state.pool,
-        user_id,
-        username: &new_username,
-        email: &new_email,
-        is_admin: new_is_admin,
-        storage_backend: &new_storage_backend,
-        storage_quota: new_storage_quota,
-        watermark_config: new_watermark_config,
-        password_hash: password_hash.as_deref(),
-    })
+    execute_user_update(
+        UserUpdateParams {
+            pool: &state.pool,
+            user_id,
+            username: &new_username,
+            email: &new_email,
+            is_admin: new_is_admin,
+            storage_backend: &new_storage_backend,
+            storage_quota: new_storage_quota,
+            watermark_config: new_watermark_config,
+            password_hash: password_hash.as_deref(),
+        },
+        locale.0,
+    )
     .await?;
 
     tracing::info!(admin_id = %current_user.id, target_user = %user_id, "user updated");
@@ -705,24 +683,26 @@ pub async fn update_user(
 /// DELETE /api/v1/admin/users/{id} — delete user and all images (admin only)
 pub async fn delete_user(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Extension(current_user): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
-) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<serde_json::Value>), AdminError> {
     // Prevent self-deletion
     if current_user.id == user_id {
-        return Err((
+        return Err(error_json(
+            locale.0,
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "cannot delete yourself"})),
+            "admin.cannot_delete_self",
         ));
     }
 
-    verify_user_exists(&state.pool, user_id).await?;
+    verify_user_exists(&state.pool, user_id, locale.0).await?;
 
     let images_deleted =
-        collect_and_cleanup_storage_files(&state.router, &state.pool, user_id).await?;
+        collect_and_cleanup_storage_files(&state.router, &state.pool, user_id, locale.0).await?;
 
     // Delete from DB (cascade handles images)
-    delete_user_from_db(&state.pool, user_id).await?;
+    delete_user_from_db(&state.pool, user_id, locale.0).await?;
 
     tracing::info!(
         admin_id = %current_user.id,
@@ -758,7 +738,8 @@ pub struct AdminStats {
 /// GET /api/v1/admin/stats — system-wide statistics (admin only, cached 5 min)
 pub async fn get_admin_stats(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<AdminStats>, (StatusCode, Json<serde_json::Value>)> {
+    locale: Locale,
+) -> Result<Json<AdminStats>, AdminError> {
     // Try cache first using nil UUID as admin stats key
     if let Ok(Some(stats_map)) = state.cache.get_user_stats(&uuid::Uuid::nil()).await {
         if let Some(stats) = try_parse_cached_stats(&stats_map) {
@@ -767,13 +748,13 @@ pub async fn get_admin_stats(
     }
 
     // Cache miss — query DB
-    let total_users = query_total_users(&state.pool).await?;
-    let (total_images, total_size) = query_image_stats(&state.pool).await?;
+    let total_users = query_total_users(&state.pool, locale.0).await?;
+    let (total_images, total_size) = query_image_stats(&state.pool, locale.0).await?;
     let active_users_24h = query_active_users_24h(&state.pool).await;
-    let total_quota = query_total_quota(&state.pool).await?;
+    let total_quota = query_total_quota(&state.pool, locale.0).await?;
 
-    let local_stats = query_backend_stats(&state.pool, "local").await?;
-    let rustfs_stats = query_backend_stats(&state.pool, "rustfs").await?;
+    let local_stats = query_backend_stats(&state.pool, "local", locale.0).await?;
+    let rustfs_stats = query_backend_stats(&state.pool, "rustfs", locale.0).await?;
 
     let stats = AdminStats {
         total_users,
@@ -812,9 +793,10 @@ pub async fn get_admin_stats(
 /// POST /api/v1/admin/invites — create an invite code (admin only)
 pub async fn create_invite(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Extension(admin): Extension<AuthUser>,
-    Json(body): Json<CreateInviteBody>,
-) -> Result<Json<CreateInviteResponse>, (StatusCode, Json<serde_json::Value>)> {
+    JsonBody(body): JsonBody<CreateInviteBody>,
+) -> Result<Json<CreateInviteResponse>, AdminError> {
     let ttl_days = body.ttl_days.unwrap_or(7).clamp(1, 90);
     let ttl_secs = ttl_days * 86400;
     let now = chrono::Utc::now().timestamp();
@@ -826,10 +808,7 @@ pub async fn create_invite(
         .await
         .map_err(|e| {
             tracing::warn!("Failed to create invite code: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal error"})),
-            )
+            internal_error(locale.0)
         })?;
 
     Ok(Json(CreateInviteResponse { code, expires_at }))
@@ -838,13 +817,11 @@ pub async fn create_invite(
 /// GET /api/v1/admin/invites — list all invite codes (admin only)
 pub async fn list_invites(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<InviteCodeInfo>>, (StatusCode, Json<serde_json::Value>)> {
+    locale: Locale,
+) -> Result<Json<Vec<InviteCodeInfo>>, AdminError> {
     let codes = state.cache.list_invite_codes().await.map_err(|e| {
         tracing::warn!("Failed to list invite codes: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal error"})),
-        )
+        internal_error(locale.0)
     })?;
     Ok(Json(codes))
 }
@@ -852,9 +829,12 @@ pub async fn list_invites(
 // ── Config management handlers (P4-I) ─────────────────────────────────
 
 /// GET /api/v1/admin/config — current config with sensitive fields masked
-pub async fn get_admin_config() -> Result<Json<ConfigResponse>, AdminError> {
+pub async fn get_admin_config(locale: Locale) -> Result<Json<ConfigResponse>, AdminError> {
     let path = config_file_path();
-    let cfg = config::read_config_toml(&path).map_err(|e| internal_error(e.to_string()))?;
+    let cfg = config::read_config_toml(&path).map_err(|e| {
+        tracing::warn!("read config.toml failed: {e}");
+        internal_error(locale.0)
+    })?;
 
     Ok(Json(ConfigResponse {
         database_url: cfg
@@ -879,6 +859,10 @@ pub async fn get_admin_config() -> Result<Json<ConfigResponse>, AdminError> {
             .local_base_path
             .unwrap_or_else(|| "./storage-local".into()),
         config_path: path.display().to_string(),
+        i18n: ConfigResponseI18n {
+            language: cfg.i18n_language.unwrap_or_else(|| "en".into()),
+            locales_dir: cfg.i18n_locales_dir.unwrap_or_else(|| "not set".into()),
+        },
     }))
 }
 
@@ -886,13 +870,23 @@ pub async fn get_admin_config() -> Result<Json<ConfigResponse>, AdminError> {
 /// Merge semantics: fields omitted from the body (None) keep their
 /// current on-disk value, so a partial update never wipes other keys.
 pub async fn update_admin_config(
-    Json(body): Json<UpdateConfigBody>,
+    state: State<Arc<AppState>>,
+    locale: Locale,
+    JsonBody(body): JsonBody<UpdateConfigBody>,
 ) -> Result<Json<ConfigResponse>, AdminError> {
     let path = config_file_path();
     // Best-effort backup — first save may have no existing config.toml
     let _ = config::backup_config(&path);
 
     let existing = config::read_config_toml(&path).unwrap_or_default();
+    // i18n 键回退链: body → config.toml → 运行时生效配置(env),避免覆盖 env 部署的默认值
+    let effective_language = state.config.i18n.language.clone();
+    let effective_locales_dir = state
+        .config
+        .i18n
+        .locales_dir
+        .as_ref()
+        .map(|p| p.display().to_string());
     let cfg = SystemConfig {
         database_url: body.database_url.or(existing.database_url),
         redis_url: body.redis_url.or(existing.redis_url),
@@ -901,16 +895,40 @@ pub async fn update_admin_config(
         public_url: body.public_url.or(existing.public_url),
         default_backend: body.default_backend.or(existing.default_backend),
         local_base_path: body.local_base_path.or(existing.local_base_path),
+        i18n_language: body
+            .i18n
+            .as_ref()
+            .and_then(|i| i.language.clone())
+            .or(existing.i18n_language)
+            .or(Some(effective_language)),
+        i18n_locales_dir: body
+            .i18n
+            .as_ref()
+            .and_then(|i| i.locales_dir.clone())
+            .or(existing.i18n_locales_dir)
+            .or(effective_locales_dir),
     };
-    config::write_config_toml(&path, &cfg)
-        .map_err(|e| internal_error(format!("write failed: {e}")))?;
+    config::write_config_toml(&path, &cfg).map_err(|e| {
+        error_json_args(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "config.write_failed",
+            &[e.to_string()],
+        )
+    })?;
 
-    get_admin_config().await
+    // 语言/消息目录变更即时生效: 重新装载全局 i18n,无需重启
+    I18n::reload_global(
+        Language::from_str_opt(cfg.i18n_language.as_deref().unwrap_or("en")),
+        cfg.i18n_locales_dir.as_ref().map(std::path::PathBuf::from),
+    );
+
+    get_admin_config(locale).await
 }
 
 /// POST /api/v1/admin/config/test — test DB/Redis connections
 pub async fn test_admin_config(
-    Json(body): Json<TestConfigBody>,
+    JsonBody(body): JsonBody<TestConfigBody>,
 ) -> Result<Json<TestResult>, AdminError> {
     let mut result = TestResult {
         database: None,
@@ -934,22 +952,35 @@ pub async fn test_admin_config(
 /// POST /api/v1/admin/config/backup — materializes config.toml if missing, then backs it up
 pub async fn backup_admin_config(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
 ) -> Result<Json<BackupInfo>, AdminError> {
     let path = config_file_path();
     if !path.exists() {
         let cfg = SystemConfig::from_effective(&state.config);
-        config::write_config_toml(&path, &cfg)
-            .map_err(|e| internal_error(format!("materialize config failed: {e}")))?;
+        config::write_config_toml(&path, &cfg).map_err(|e| {
+            error_json_args(
+                locale.0,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "config.materialize_failed",
+                &[e.to_string()],
+            )
+        })?;
     }
-    let filename = config::backup_config(&path).map_err(|e| internal_error(e.to_string()))?;
+    let filename = config::backup_config(&path).map_err(|e| {
+        tracing::warn!("backup config failed: {e}");
+        internal_error(locale.0)
+    })?;
     Ok(Json(BackupInfo { filename }))
 }
 
 /// GET /api/v1/admin/config/backups — list backup files, newest first
-pub async fn list_config_backups() -> Result<Json<Vec<BackupInfo>>, AdminError> {
+pub async fn list_config_backups(locale: Locale) -> Result<Json<Vec<BackupInfo>>, AdminError> {
     let dir = std::env::current_dir().unwrap_or_default();
     let backups = config::list_backups(&dir)
-        .map_err(|e| internal_error(e.to_string()))?
+        .map_err(|e| {
+            tracing::warn!("list config backups failed: {e}");
+            internal_error(locale.0)
+        })?
         .into_iter()
         .map(|filename| BackupInfo { filename })
         .collect();
@@ -958,10 +989,33 @@ pub async fn list_config_backups() -> Result<Json<Vec<BackupInfo>>, AdminError> 
 
 /// POST /api/v1/admin/config/restore — restore config.toml from a backup
 pub async fn restore_admin_config(
-    Json(body): Json<RestoreBackupBody>,
+    locale: Locale,
+    JsonBody(body): JsonBody<RestoreBackupBody>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
     let path = config_file_path();
-    config::restore_config(&path, &body.backup_file).map_err(|e| internal_error(e.to_string()))?;
+    config::restore_config(&path, &body.backup_file).map_err(|e| match e {
+        config::ConfigError::Io(m) if m.starts_with("Backup not found") => {
+            error_json_args(
+                locale.0,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "config.backup_not_found",
+                &[m],
+            )
+        }
+        e => {
+            tracing::warn!("restore config failed: {e}");
+            internal_error(locale.0)
+        }
+    })?;
+    // 恢复的 config.toml 可能携带不同 i18n 配置 — 立即重载,与 PUT 路径一致
+    let restored = config::read_config_toml(&path).unwrap_or_default();
+    I18n::reload_global(
+        Language::from_str_opt(restored.i18n_language.as_deref().unwrap_or("en")),
+        restored
+            .i18n_locales_dir
+            .as_ref()
+            .map(std::path::PathBuf::from),
+    );
     Ok(Json(serde_json::json!({
         "status": "restored",
         "from": body.backup_file,
@@ -1122,10 +1176,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_hash_password_if_provided() {
-        assert_eq!(hash_password_if_provided(&None).await.unwrap(), None);
-        let err = hash_password_if_provided(&Some("short".into())).await.unwrap_err();
+        assert_eq!(hash_password_if_provided(&None, Language::En).await.unwrap(), None);
+        let err = hash_password_if_provided(&Some("short".into()), Language::En).await.unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        let hash = hash_password_if_provided(&Some("long-enough-pass".into())).await.unwrap().unwrap();
+        let hash = hash_password_if_provided(&Some("long-enough-pass".into()), Language::En)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(hash.starts_with("$argon2"));
     }
 

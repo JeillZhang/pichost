@@ -9,10 +9,12 @@ use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
+use pichost_core::i18n::Language;
 use pichost_core::models::{ChangePasswordRequest, UpdateProfileRequest, UserProfile};
 
 use crate::app::AppState;
 use crate::cache::Cache;
+use crate::i18n_ext::{error_json, error_json_args, JsonBody, Locale};
 use crate::middleware::auth::AuthUser;
 
 #[derive(Debug, Serialize)]
@@ -27,8 +29,9 @@ pub struct UserStats {
 pub async fn get_my_stats(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
+    Locale(locale): Locale,
 ) -> Result<Json<UserStats>, (StatusCode, Json<serde_json::Value>)> {
-    let quota = fetch_user_quota(&state.pool, user.id).await?;
+    let quota = fetch_user_quota(&state.pool, user.id, locale).await?;
 
     let cache_stats = state.cache.get_user_stats(&user.id).await.ok().flatten();
     let default_backend = state.router.default_name();
@@ -36,7 +39,7 @@ pub async fn get_my_stats(
         return Ok(Json(stats));
     }
 
-    let (total_images, total_size) = query_user_stats(&state.pool, user.id).await?;
+    let (total_images, total_size) = query_user_stats(&state.pool, user.id, locale).await?;
 
     let stats = UserStats {
         total_images,
@@ -53,6 +56,7 @@ pub async fn get_my_stats(
 async fn fetch_user_quota(
     pool: &PgPool,
     user_id: Uuid,
+    locale: Language,
 ) -> Result<Option<i64>, (StatusCode, Json<serde_json::Value>)> {
     sqlx::query_scalar("SELECT storage_quota FROM users WHERE id = $1")
         .bind(user_id)
@@ -60,10 +64,7 @@ async fn fetch_user_quota(
         .await
         .map_err(|e| {
             tracing::warn!("Quota query failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
-            )
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })
         .map(|r| r.flatten())
 }
@@ -90,6 +91,7 @@ fn try_cached_stats(
 async fn query_user_stats(
     pool: &PgPool,
     user_id: Uuid,
+    locale: Language,
 ) -> Result<(i64, i64), (StatusCode, Json<serde_json::Value>)> {
     let row = sqlx::query_as::<_, (i64, Option<i64>)>(
         r#"SELECT COUNT(*)::BIGINT as total_images,
@@ -101,10 +103,7 @@ async fn query_user_stats(
     .await
     .map_err(|e| {
         tracing::warn!("Stats query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?;
 
     Ok((row.0, row.1.unwrap_or(0)))
@@ -166,6 +165,7 @@ async fn fetch_profile_row(
     pool: &PgPool,
     user_id: Uuid,
     log_msg: &str,
+    locale: Language,
 ) -> Result<Option<ProfileRow>, (StatusCode, Json<serde_json::Value>)> {
     sqlx::query_as::<_, ProfileRow>(PROFILE_SELECT)
         .bind(user_id)
@@ -173,10 +173,7 @@ async fn fetch_profile_row(
         .await
         .map_err(|e| {
             tracing::warn!("{log_msg}: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
-            )
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })
 }
 
@@ -184,27 +181,26 @@ async fn fetch_profile_row(
 pub async fn get_my_profile(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
+    Locale(locale): Locale,
 ) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)> {
-    let row = fetch_profile_row(&state.pool, user.id, "User profile query failed")
+    let row = fetch_profile_row(&state.pool, user.id, "User profile query failed", locale)
         .await?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "user not found"})),
-            )
-        })?;
+        .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "user.not_found"))?;
     Ok(Json(build_user_profile(row)))
 }
 
 fn ensure_backend_exists(
     state: &AppState,
     payload: &UpdateProfileRequest,
+    locale: Language,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     if let Some(ref backend) = payload.storage_backend {
         if state.router.get(backend).is_none() {
-            return Err((
+            return Err(error_json_args(
+                locale,
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": format!("unknown backend: {}", backend)})),
+                "user.unknown_backend",
+                std::slice::from_ref(backend),
             ));
         }
     }
@@ -215,6 +211,7 @@ async fn ensure_username_available(
     pool: &PgPool,
     user_id: Uuid,
     username: Option<&str>,
+    locale: Language,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     let Some(username) = username else {
         return Ok(());
@@ -228,15 +225,13 @@ async fn ensure_username_available(
     .await
     .map_err(|e| {
         tracing::warn!("Username uniqueness check failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?;
     if conflict {
-        return Err((
+        return Err(error_json(
+            locale,
             StatusCode::CONFLICT,
-            Json(serde_json::json!({"error": "username already taken"})),
+            "user.username_taken",
         ));
     }
     Ok(())
@@ -246,6 +241,7 @@ async fn ensure_email_available(
     pool: &PgPool,
     user_id: Uuid,
     email: Option<&str>,
+    locale: Language,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     let Some(email) = email else {
         return Ok(());
@@ -258,16 +254,10 @@ async fn ensure_email_available(
             .await
             .map_err(|e| {
                 tracing::warn!("Email uniqueness check failed: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "internal server error"})),
-                )
+                error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
             })?;
     if conflict {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({"error": "email already taken"})),
-        ));
+        return Err(error_json(locale, StatusCode::CONFLICT, "user.email_taken"));
     }
     Ok(())
 }
@@ -275,15 +265,13 @@ async fn ensure_email_available(
 /// Serialize watermark_config into JSONB with absent/null/value semantics.
 fn serialize_watermark_config(
     payload: &UpdateProfileRequest,
+    locale: Language,
 ) -> Result<(bool, Option<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     match &payload.watermark_config {
         Some(Some(cfg)) => {
             let json = serde_json::to_value(cfg).map_err(|e| {
                 tracing::warn!("Watermark config serialization failed: {e}");
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"error": "invalid watermark config"})),
-                )
+                error_json(locale, StatusCode::BAD_REQUEST, "user.watermark_invalid")
             })?;
             Ok((true, Some(json)))
         }
@@ -298,6 +286,7 @@ async fn apply_profile_update(
     payload: &UpdateProfileRequest,
     wm_provided: bool,
     wm_value: &Option<serde_json::Value>,
+    locale: Language,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     sqlx::query(
         "UPDATE users SET \
@@ -321,18 +310,16 @@ async fn apply_profile_update(
         if let sqlx::Error::Database(ref db_err) = e {
             if let Some(code) = db_err.code() {
                 if code == "23505" {
-                    return (
+                    return error_json(
+                        locale,
                         StatusCode::CONFLICT,
-                        Json(serde_json::json!({"error": "username or email already exists"})),
+                        "user.username_email_taken",
                     );
                 }
             }
         }
         tracing::warn!("Profile update failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?;
     Ok(())
 }
@@ -341,20 +328,18 @@ async fn apply_profile_update(
 pub async fn update_my_profile(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
-    Json(payload): Json<UpdateProfileRequest>,
+    Locale(locale): Locale,
+    JsonBody(payload): JsonBody<UpdateProfileRequest>,
 ) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)> {
-    ensure_backend_exists(&state, &payload)?;
-    ensure_username_available(&state.pool, user.id, payload.username.as_deref()).await?;
-    ensure_email_available(&state.pool, user.id, payload.email.as_deref()).await?;
-    let (wm_provided, wm_value) = serialize_watermark_config(&payload)?;
-    apply_profile_update(&state.pool, user.id, &payload, wm_provided, &wm_value).await?;
-    let row = fetch_profile_row(&state.pool, user.id, "Profile re-fetch after update failed")
+    ensure_backend_exists(&state, &payload, locale)?;
+    ensure_username_available(&state.pool, user.id, payload.username.as_deref(), locale).await?;
+    ensure_email_available(&state.pool, user.id, payload.email.as_deref(), locale).await?;
+    let (wm_provided, wm_value) = serialize_watermark_config(&payload, locale)?;
+    apply_profile_update(&state.pool, user.id, &payload, wm_provided, &wm_value, locale).await?;
+    let row = fetch_profile_row(&state.pool, user.id, "Profile re-fetch after update failed", locale)
         .await?
         .ok_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
-            )
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })?;
     Ok(Json(build_user_profile(row)))
 }
@@ -362,6 +347,7 @@ pub async fn update_my_profile(
 async fn fetch_password_hash(
     pool: &PgPool,
     user_id: Uuid,
+    locale: Language,
 ) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
     let current_hash: Option<String> =
         sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
@@ -370,42 +356,34 @@ async fn fetch_password_hash(
             .await
             .map_err(|e| {
                 tracing::warn!("Password hash fetch failed: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "internal server error"})),
-                )
+                error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
             })?;
-    current_hash.ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "user not found"})),
-        )
-    })
+    current_hash.ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "user.not_found"))
 }
 
 fn verify_current_password(
     current_password: &str,
     stored_hash: &str,
+    locale: Language,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     let parsed_hash = PasswordHash::new(stored_hash).map_err(|e| {
         tracing::warn!("Invalid stored password hash: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "internal server error"})),
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?;
     Argon2::default()
         .verify_password(current_password.as_bytes(), &parsed_hash)
         .map_err(|_| {
-            (
+            error_json(
+                locale,
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "current password incorrect"})),
+                "user.current_password_incorrect",
             )
         })
 }
 
 fn hash_new_password(
     new_password: &str,
+    locale: Language,
 ) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
@@ -413,10 +391,7 @@ fn hash_new_password(
         .map(|h| h.to_string())
         .map_err(|e| {
             tracing::warn!("Password hashing failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
-            )
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })
 }
 
@@ -424,6 +399,7 @@ async fn update_password_hash(
     pool: &PgPool,
     user_id: Uuid,
     new_hash: &str,
+    locale: Language,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     sqlx::query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2")
         .bind(new_hash)
@@ -432,10 +408,7 @@ async fn update_password_hash(
         .await
         .map_err(|e| {
             tracing::warn!("Password update failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal server error"})),
-            )
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })?;
     Ok(())
 }
@@ -444,18 +417,20 @@ async fn update_password_hash(
 pub async fn change_my_password(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
-    Json(payload): Json<ChangePasswordRequest>,
+    Locale(locale): Locale,
+    JsonBody(payload): JsonBody<ChangePasswordRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     if payload.new_password.len() < 8 {
-        return Err((
+        return Err(error_json(
+            locale,
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "new password must be at least 8 characters"})),
+            "user.password_too_weak",
         ));
     }
-    let current_hash = fetch_password_hash(&state.pool, user.id).await?;
-    verify_current_password(&payload.current_password, &current_hash)?;
-    let new_hash = hash_new_password(&payload.new_password)?;
-    update_password_hash(&state.pool, user.id, &new_hash).await?;
+    let current_hash = fetch_password_hash(&state.pool, user.id, locale).await?;
+    verify_current_password(&payload.current_password, &current_hash, locale)?;
+    let new_hash = hash_new_password(&payload.new_password, locale)?;
+    update_password_hash(&state.pool, user.id, &new_hash, locale).await?;
     Ok(Json(serde_json::json!({"message": "password updated"})))
 }
 
@@ -549,38 +524,40 @@ mod tests {
             margin_x: 20,
             margin_y: 20,
         };
-        let (provided, value) = serialize_watermark_config(&wm_payload(Some(Some(cfg)))).unwrap();
+        let (provided, value) =
+            serialize_watermark_config(&wm_payload(Some(Some(cfg))), Language::En).unwrap();
         assert!(provided);
         assert!(value.is_some());
     }
 
     #[test]
     fn test_serialize_watermark_config_clear() {
-        let (provided, value) = serialize_watermark_config(&wm_payload(Some(None))).unwrap();
+        let (provided, value) =
+            serialize_watermark_config(&wm_payload(Some(None)), Language::En).unwrap();
         assert!(provided);
         assert!(value.is_none());
     }
 
     #[test]
     fn test_serialize_watermark_config_absent() {
-        let (provided, value) = serialize_watermark_config(&wm_payload(None)).unwrap();
+        let (provided, value) = serialize_watermark_config(&wm_payload(None), Language::En).unwrap();
         assert!(!provided);
         assert!(value.is_none());
     }
 
     #[test]
     fn test_verify_current_password() {
-        let hash = hash_new_password("correct-horse").unwrap();
-        assert!(verify_current_password("correct-horse", &hash).is_ok());
-        let err = verify_current_password("wrong-password", &hash).unwrap_err();
+        let hash = hash_new_password("correct-horse", Language::En).unwrap();
+        assert!(verify_current_password("correct-horse", &hash, Language::En).is_ok());
+        let err = verify_current_password("wrong-password", &hash, Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::UNAUTHORIZED);
-        let err = verify_current_password("x", "not-a-hash").unwrap_err();
+        let err = verify_current_password("x", "not-a-hash", Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[test]
     fn test_hash_new_password() {
-        let hash = hash_new_password("new-password-123").unwrap();
+        let hash = hash_new_password("new-password-123", Language::En).unwrap();
         assert!(hash.starts_with("$argon2"));
     }
 }

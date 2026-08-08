@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, Folder, FolderOpen, Plus, Pencil, Trash2 } from 'lucide-react'
 import {
@@ -128,6 +129,7 @@ export default function CategoryTree({
   selectedId,
   onSelect,
 }: CategoryTreeProps) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const contextMenuRef = useRef<HTMLDivElement>(null)
 
@@ -220,7 +222,7 @@ export default function CategoryTree({
     <div className="flex flex-col">
       <div className="flex items-center justify-between px-2 py-2">
         <span className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-          Categories
+          {t('categoryTree.categories')}
         </span>
         <button
           onClick={() => {
@@ -229,7 +231,7 @@ export default function CategoryTree({
             setCreateName('')
           }}
           className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)]"
-          title="New category"
+          title={t('categoryTree.newCategoryTitle')}
         >
           <Plus size={16} />
         </button>
@@ -245,12 +247,12 @@ export default function CategoryTree({
         style={{ paddingLeft: '8px' }}
         onClick={() => onSelect(null)}
       >
-        All Images
+        {t('categoryTree.allImages')}
       </div>
 
       {isLoading ? (
         <div className="px-4 py-2 text-xs text-[var(--color-text-muted)]">
-          Loading...
+          {t('categoryTree.loading')}
         </div>
       ) : categories && categories.length > 0 ? (
         <div className="mt-1">
@@ -272,7 +274,7 @@ export default function CategoryTree({
         </div>
       ) : (
         <div className="px-4 py-4 text-center text-xs text-[var(--color-text-muted)]">
-          No categories yet
+          {t('categoryTree.noCategories')}
           <br />
           <button
             onClick={() => {
@@ -282,7 +284,7 @@ export default function CategoryTree({
             }}
             className="mt-1 text-[var(--color-accent)] hover:underline"
           >
-            Create one
+            {t('categoryTree.createOne')}
           </button>
         </div>
       )}
@@ -302,7 +304,7 @@ export default function CategoryTree({
               style={{ color: 'var(--color-text-secondary)' }}
             >
               <Pencil size={14} />
-              Rename
+              {t('categoryTree.rename')}
             </button>
             <button
               onClick={handleContextDelete}
@@ -310,7 +312,7 @@ export default function CategoryTree({
               style={{ color: 'var(--color-danger)' }}
             >
               <Trash2 size={14} />
-              Delete
+              {t('categoryTree.delete')}
             </button>
           </div>,
           document.body,
@@ -331,13 +333,13 @@ export default function CategoryTree({
                 className="mb-3 text-sm font-semibold"
                 style={{ color: 'var(--color-text-primary)', fontFamily: "'Outfit', system-ui, sans-serif" }}
               >
-                New Category
+                {t('categoryTree.newCategory')}
               </h3>
               <input
                 type="text"
                 value={createName}
                 onChange={(e) => setCreateName(e.target.value)}
-                placeholder="Category name"
+                placeholder={t('categoryTree.categoryName')}
                 className="input-field mb-3"
                 autoFocus
                 onKeyDown={(e) => {
@@ -352,12 +354,12 @@ export default function CategoryTree({
               />
               {createParentId && (
                 <p className="mb-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                  Created as a sub-category. Leave parent empty for a top-level category.
+                  {t('categoryTree.subCategoryNote')}
                 </p>
               )}
               <div className="flex justify-end gap-2">
                 <button onClick={() => setShowCreate(false)} className="btn-ghost text-xs">
-                  Cancel
+                  {t('categoryTree.cancel')}
                 </button>
                 <button
                   onClick={() => {
@@ -371,7 +373,7 @@ export default function CategoryTree({
                   disabled={!createName.trim() || createMutation.isPending}
                   className="btn-accent text-xs"
                 >
-                  {createMutation.isPending ? 'Creating...' : 'Create'}
+                  {createMutation.isPending ? t('categoryTree.creating') : t('categoryTree.create')}
                 </button>
               </div>
             </div>
@@ -394,18 +396,17 @@ export default function CategoryTree({
                 className="mb-2 text-sm font-semibold"
                 style={{ color: 'var(--color-text-primary)', fontFamily: "'Outfit', system-ui, sans-serif" }}
               >
-                Delete Category
+                {t('categoryTree.deleteCategory')}
               </h3>
               <p className="mb-4 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                This will also delete all sub-categories. Images in these
-                categories will be unassigned.
+                {t('categoryTree.deleteConfirm')}
               </p>
               <div className="flex justify-end gap-2">
                 <button
                   onClick={() => setDeleteConfirmId(null)}
                   className="btn-ghost text-xs"
                 >
-                  Cancel
+                  {t('categoryTree.cancel')}
                 </button>
                 <button
                   onClick={() => deleteMutation.mutate(deleteConfirmId)}
@@ -413,7 +414,7 @@ export default function CategoryTree({
                   className="btn-accent text-xs"
                   style={{ background: 'var(--color-danger)' }}
                 >
-                  {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+                  {deleteMutation.isPending ? t('categoryTree.deleting') : t('categoryTree.delete')}
                 </button>
               </div>
             </div>

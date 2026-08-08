@@ -312,7 +312,7 @@ async fn storage_configs_limit_reached() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
-    assert!(resp["error"].as_str().unwrap().contains("最多只能创建"));
+    assert_eq!(resp["code"], "storage_config.limit");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -329,8 +329,8 @@ async fn storage_configs_name_duplicate() {
         &serde_json::json!({"name": "dup", "provider": "github", "token": "t", "repo": "o/r"}),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
-    assert!(resp["error"].as_str().unwrap().contains("配置名称已存在"));
+    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
+    assert_eq!(resp["code"], "storage_config.name_exists");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -437,8 +437,8 @@ async fn storage_configs_delete_referenced_image_rejected() {
     .expect("insert referencing image");
     let uri = format!("/api/v1/users/me/storage-configs/{id}");
     let (status, resp) = send_json(&app, Method::DELETE, &uri, Some(&token), &Value::Null).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
-    assert!(resp["error"].as_str().unwrap().contains("还有图片"));
+    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
+    assert_eq!(resp["code"], "storage_config.in_use");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -1,5 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next'
 import {
   Loader2,
   Save,
@@ -17,6 +18,7 @@ import type { UserProfile, UserStats } from '../api/client'
 import StorageConfigSection from '../components/StorageConfigSection'
 import WatermarkSettings from '../components/WatermarkSettings'
 import { PreprocessingSettings } from '../components/PreprocessingSettings'
+import { useFormat } from '../hooks/useFormat'
 
 type SettingsSection =
   | 'profile'
@@ -27,14 +29,17 @@ type SettingsSection =
   | 'preprocessing'
   | 'oauth'
 
-const SECTION_META: Record<SettingsSection, { title: string; icon: LucideIcon }> = {
-  profile: { title: 'Profile', icon: User },
-  password: { title: 'Password', icon: Lock },
-  'storage-usage': { title: 'Storage Usage', icon: HardDrive },
-  'storage-configs': { title: 'Storage Backends', icon: Database },
-  watermark: { title: 'Watermark', icon: Droplets },
-  preprocessing: { title: 'Preprocessing', icon: Image },
-  oauth: { title: 'OAuth', icon: Shield },
+const SECTION_META: Record<
+  SettingsSection,
+  { titleKey: 'settings.profile' | 'settings.password' | 'settings.storageUsage' | 'settings.storageBackends' | 'settings.watermark' | 'settings.preprocessing' | 'settings.oauth'; icon: LucideIcon }
+> = {
+  profile: { titleKey: 'settings.profile', icon: User },
+  password: { titleKey: 'settings.password', icon: Lock },
+  'storage-usage': { titleKey: 'settings.storageUsage', icon: HardDrive },
+  'storage-configs': { titleKey: 'settings.storageBackends', icon: Database },
+  watermark: { titleKey: 'settings.watermark', icon: Droplets },
+  preprocessing: { titleKey: 'settings.preprocessing', icon: Image },
+  oauth: { titleKey: 'settings.oauth', icon: Shield },
 }
 
 const SECTION_ORDER: SettingsSection[] = [
@@ -55,6 +60,8 @@ function parseSectionFromHash(hash: string): SettingsSection | null {
 }
 
 export default function Settings() {
+  const { t } = useTranslation()
+  const { formatBytes } = useFormat()
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [stats, setStats] = useState<UserStats | null>(null)
   const [loading, setLoading] = useState(true)
@@ -80,7 +87,7 @@ export default function Settings() {
         setUsername(p.username)
         setEmail(p.email ?? '')
       })
-      .catch(() => toast.error('Failed to load profile'))
+      .catch(() => toast.error(t('settings.failedToLoad')))
       .finally(() => setLoading(false))
   }, [])
 
@@ -98,9 +105,9 @@ export default function Settings() {
         email: email || undefined,
       })
       setProfile(updated)
-      toast.success('Profile updated')
+      toast.success(t('settings.profileUpdated'))
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to save')
+      toast.error(e instanceof Error ? e.message : t('settings.failedToSave'))
     } finally {
       setSaving(false)
     }
@@ -109,17 +116,17 @@ export default function Settings() {
   async function handleChangePassword(e: FormEvent) {
     e.preventDefault()
     if (newPassword.length < 8) {
-      toast.error('Password must be at least 8 characters')
+      toast.error(t('settings.passwordTooShort'))
       return
     }
     setChangingPw(true)
     try {
       await changePassword({ current_password: currentPassword, new_password: newPassword })
-      toast.success('Password changed')
+      toast.success(t('settings.passwordChanged'))
       setCurrentPassword('')
       setNewPassword('')
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to change password')
+      toast.error(e instanceof Error ? e.message : t('settings.failedToChangePassword'))
     } finally {
       setChangingPw(false)
     }
@@ -149,7 +156,7 @@ export default function Settings() {
         className="mb-4 text-lg font-semibold"
         style={{ color: 'var(--color-text-primary)', fontFamily: "'Outfit', system-ui, sans-serif" }}
       >
-        Settings
+        {t('settings.title')}
       </h2>
 
       <div className="flex flex-col gap-4 md:flex-row">
@@ -157,7 +164,7 @@ export default function Settings() {
         <nav className="md:w-52 md:shrink-0">
           <div className="glass flex gap-0.5 overflow-x-auto rounded-lg p-1 md:sticky md:top-4 md:flex-col">
             {SECTION_ORDER.map((id) => {
-              const { title, icon: Icon } = SECTION_META[id]
+              const { titleKey, icon: Icon } = SECTION_META[id]
               const active = activeSection === id
               return (
                 <button
@@ -171,7 +178,7 @@ export default function Settings() {
                   }`}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
-                  {title}
+                  {t(titleKey)}
                 </button>
               )
             })}
@@ -197,7 +204,7 @@ export default function Settings() {
                       className="mb-1 block text-xs font-medium"
                       style={{ color: 'var(--color-text-secondary)' }}
                     >
-                      Username
+                      {t('settings.username')}
                     </label>
                     <input
                       type="text"
@@ -211,7 +218,7 @@ export default function Settings() {
                       className="mb-1 block text-xs font-medium"
                       style={{ color: 'var(--color-text-secondary)' }}
                     >
-                      Email
+                      {t('settings.email')}
                     </label>
                     <input
                       type="email"
@@ -223,7 +230,7 @@ export default function Settings() {
                 </div>
                 <button type="submit" disabled={saving} className="btn-accent">
                   {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                  Save Profile
+                  {t('settings.saveProfile')}
                 </button>
               </form>
             )}
@@ -236,7 +243,7 @@ export default function Settings() {
                       className="mb-1 block text-xs font-medium"
                       style={{ color: 'var(--color-text-secondary)' }}
                     >
-                      Current Password
+                      {t('settings.currentPassword')}
                     </label>
                     <input
                       type="password"
@@ -251,7 +258,7 @@ export default function Settings() {
                       className="mb-1 block text-xs font-medium"
                       style={{ color: 'var(--color-text-secondary)' }}
                     >
-                      New Password (min 8 chars)
+                      {t('settings.newPassword')}
                     </label>
                     <input
                       type="password"
@@ -269,7 +276,7 @@ export default function Settings() {
                   ) : (
                     <Lock className="h-3.5 w-3.5" />
                   )}
-                  Change Password
+                  {t('settings.changePassword')}
                 </button>
               </form>
             )}
@@ -280,7 +287,7 @@ export default function Settings() {
                   className="text-sm font-medium"
                   style={{ color: 'var(--color-text-primary)' }}
                 >
-                  Storage Usage
+                  {t('settings.storageUsage')}
                 </h3>
                 {quota && quota > 0 ? (
                   <div>
@@ -305,7 +312,7 @@ export default function Settings() {
                   </div>
                 ) : (
                   <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                    {formatBytes(used)} used (unlimited)
+                    {formatBytes(used)} {t('settings.usedUnlimited')}
                   </p>
                 )}
               </div>
@@ -319,17 +326,17 @@ export default function Settings() {
                   className="mb-2 text-sm font-medium"
                   style={{ color: 'var(--color-text-primary)' }}
                 >
-                  OAuth Accounts
+                  {t('settings.oauthAccounts')}
                 </h3>
                 <p className="mb-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                  Link your GitHub or Google account for one-click login.
+                  {t('settings.oauthHint')}
                 </p>
                 <div className="flex gap-2">
                   <a href="/api/v1/auth/oauth/github" className="btn-ghost text-xs">
-                    Link GitHub
+                    {t('settings.linkGitHub')}
                   </a>
                   <a href="/api/v1/auth/oauth/google" className="btn-ghost text-xs">
-                    Link Google
+                    {t('settings.linkGoogle')}
                   </a>
                 </div>
               </div>
@@ -340,11 +347,4 @@ export default function Settings() {
       </div>
     </div>
   )
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`
-  return `${(bytes / 1073741824).toFixed(2)} GB`
 }

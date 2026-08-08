@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next'
 import {
   getImage,
   deleteImage,
@@ -13,6 +14,7 @@ import {
 } from '../api/client'
 import LinkCard from '../components/LinkCard'
 import GlassSelect from '../components/ui/GlassSelect'
+import { useFormat } from '../hooks/useFormat'
 
 function flattenCategories(
   nodes: CategoryTreeNode[] | undefined,
@@ -41,10 +43,10 @@ const STATUS_STYLES: Record<string, string> = {
 }
 
 const LINK_OPTIONS = [
-  { value: 'url', label: 'URL' },
-  { value: 'markdown', label: 'Markdown' },
-  { value: 'html', label: 'HTML' },
-  { value: 'bbcode', label: 'BBCode' },
+  { value: 'url', labelKey: 'imageDetail.url' },
+  { value: 'markdown', labelKey: 'imageDetail.markdown' },
+  { value: 'html', labelKey: 'imageDetail.html' },
+  { value: 'bbcode', labelKey: 'imageDetail.bbcode' },
 ] as const
 
 type LinkFormat = (typeof LINK_OPTIONS)[number]['value']
@@ -53,6 +55,8 @@ export default function ImageDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { t } = useTranslation()
+  const { formatBytes, formatDate } = useFormat()
   const [deleting, setDeleting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [isRenaming, setIsRenaming] = useState(false)
@@ -88,7 +92,7 @@ export default function ImageDetail() {
       setIsRenaming(false)
     },
     onError: (e: unknown) => {
-      const msg = e instanceof Error ? e.message : 'Rename failed'
+      const msg = e instanceof Error ? e.message : t('imageDetail.renameFailed')
       toast.error(msg)
       setIsRenaming(false)
     },
@@ -103,11 +107,11 @@ export default function ImageDetail() {
     setDeleting(true)
     try {
       await deleteImage(id)
-      toast.success('Image deleted')
+      toast.success(t('imageDetail.imageDeleted'))
       queryClient.invalidateQueries({ queryKey: ['images'] })
       navigate('/dashboard', { replace: true })
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Delete failed'
+      const msg = e instanceof Error ? e.message : t('imageDetail.deleteFailed')
       toast.error(msg)
       setDeleting(false)
       setConfirmDelete(false)
@@ -120,7 +124,7 @@ export default function ImageDetail() {
         className="flex min-h-screen items-center justify-center"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Loading…
+        {t('imageDetail.loading')}
       </div>
     )
   }
@@ -131,7 +135,7 @@ export default function ImageDetail() {
         className="flex min-h-screen items-center justify-center"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Image not found.
+        {t('imageDetail.notFound')}
       </div>
     )
   }
@@ -142,7 +146,8 @@ export default function ImageDetail() {
     html: img.html,
     bbcode: img.bbcode,
   }
-  const selectedLinkLabel = LINK_OPTIONS.find((o) => o.value === linkFormat)!.label
+  const selectedLinkLabel = t(LINK_OPTIONS.find((o) => o.value === linkFormat)!.labelKey)
+  const linkOptions = LINK_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))
 
   return (
     <div className="mx-auto max-w-4xl p-4">
@@ -152,7 +157,7 @@ export default function ImageDetail() {
         className="btn-ghost mb-4 px-3 py-1.5 text-sm"
       >
         <ArrowLeft className="h-4 w-4" />
-        Back
+        {t('imageDetail.back')}
       </button>
 
       {/* Image preview */}
@@ -168,7 +173,7 @@ export default function ImageDetail() {
       <div className="glass-elevated rounded-xl p-5">
         {/* ── Metadata ── */}
         <div className="flex items-center gap-2">
-          <span style={{ color: 'var(--color-text-secondary)' }}>Name:</span>
+          <span style={{ color: 'var(--color-text-secondary)' }}>{t('imageDetail.name')}</span>
           {isRenaming ? (
             <input
               autoFocus
@@ -201,14 +206,14 @@ export default function ImageDetail() {
           )}
           {renameMutation.isPending && (
             <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              Saving...
+              {t('imageDetail.saving')}
             </span>
           )}
         </div>
 
         <div className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
           <p className="flex items-center gap-2">
-            <span style={{ color: 'var(--color-text-secondary)' }}>Status:</span>
+            <span style={{ color: 'var(--color-text-secondary)' }}>{t('imageDetail.status')}</span>
             <span
               className={`badge ${STATUS_STYLES[img.status] || 'bg-[var(--color-surface)] text-[var(--color-text-secondary)]'}`}
             >
@@ -217,26 +222,24 @@ export default function ImageDetail() {
           </p>
           {img.width && img.height && (
             <p>
-              <span style={{ color: 'var(--color-text-secondary)' }}>Dimensions:</span>{' '}
+              <span style={{ color: 'var(--color-text-secondary)' }}>{t('imageDetail.dimensions')}</span>{' '}
               <span style={{ color: 'var(--color-text-primary)' }}>
                 {img.width} × {img.height}px
               </span>
             </p>
           )}
           <p>
-            <span style={{ color: 'var(--color-text-secondary)' }}>Type:</span>{' '}
+            <span style={{ color: 'var(--color-text-secondary)' }}>{t('imageDetail.type')}</span>{' '}
             <span style={{ color: 'var(--color-text-primary)' }}>{img.mime_type}</span>
           </p>
           <p>
-            <span style={{ color: 'var(--color-text-secondary)' }}>Size:</span>{' '}
-            <span style={{ color: 'var(--color-text-primary)' }}>
-              {(img.file_size / 1024).toFixed(1)} KB
-            </span>
+            <span style={{ color: 'var(--color-text-secondary)' }}>{t('imageDetail.size')}</span>{' '}
+            <span style={{ color: 'var(--color-text-primary)' }}>{formatBytes(img.file_size)}</span>
           </p>
           <p className="sm:col-span-2">
-            <span style={{ color: 'var(--color-text-secondary)' }}>Uploaded:</span>{' '}
+            <span style={{ color: 'var(--color-text-secondary)' }}>{t('imageDetail.uploaded')}</span>{' '}
             <span style={{ color: 'var(--color-text-primary)' }}>
-              {new Date(img.created_at).toLocaleString()}
+              {formatDate(Date.parse(img.created_at))}
             </span>
           </p>
         </div>
@@ -246,7 +249,7 @@ export default function ImageDetail() {
             className="mb-1.5 block text-xs font-semibold uppercase tracking-wider"
             style={{ color: 'var(--color-text-muted)' }}
           >
-            Category
+            {t('imageDetail.category')}
           </label>
           <GlassSelect
             value={img.category_id ?? ''}
@@ -255,9 +258,9 @@ export default function ImageDetail() {
               moveMutation.mutate({ imageId: id!, categoryId: v || null })
             }}
             disabled={moveMutation.isPending}
-            ariaLabel="Category"
+            ariaLabel={t('imageDetail.category')}
             options={[
-              { value: '', label: 'None' },
+              { value: '', label: t('imageDetail.none') },
               ...flattenCategories(categories).map((c) => ({
                 value: c.id,
                 label: `${'  '.repeat(c.depth)}${c.name}`,
@@ -266,7 +269,7 @@ export default function ImageDetail() {
           />
           {moveMutation.isPending && (
             <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              Updating...
+              {t('imageDetail.updating')}
             </p>
           )}
         </div>
@@ -279,13 +282,13 @@ export default function ImageDetail() {
               className="mb-2 text-xs font-semibold uppercase tracking-wider"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              Generated Assets
+              {t('imageDetail.generatedAssets')}
             </p>
             <div className="space-y-2">
               {img.thumbnail_url && (
-                <LinkCard label="Thumbnail URL" value={img.thumbnail_url} />
+                <LinkCard label={t('imageDetail.thumbnailUrl')} value={img.thumbnail_url} />
               )}
-              {img.webp_url && <LinkCard label="WebP URL" value={img.webp_url} />}
+              {img.webp_url && <LinkCard label={t('imageDetail.webpUrl')} value={img.webp_url} />}
             </div>
           </>
         )}
@@ -296,13 +299,13 @@ export default function ImageDetail() {
           className="mb-1.5 block text-xs font-semibold uppercase tracking-wider"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          Links
+          {t('imageDetail.links')}
         </label>
         <GlassSelect
           value={linkFormat}
           onChange={(v) => setLinkFormat(v as LinkFormat)}
-          options={LINK_OPTIONS}
-          ariaLabel="Link format"
+          options={linkOptions}
+          ariaLabel={t('imageDetail.linkFormat')}
           className="mb-2"
         />
         <LinkCard label={selectedLinkLabel} value={linkValues[linkFormat]} />
@@ -319,13 +322,13 @@ export default function ImageDetail() {
               style={{ background: 'var(--color-danger)' }}
             >
               <Trash2 className="h-4 w-4" />
-              {deleting ? 'Deleting…' : 'Confirm Delete'}
+              {deleting ? t('imageDetail.deleting') : t('imageDetail.confirmDelete')}
             </button>
             <button
               onClick={() => setConfirmDelete(false)}
               className="btn-ghost"
             >
-              Cancel
+              {t('imageDetail.cancel')}
             </button>
           </div>
         ) : (
@@ -335,7 +338,7 @@ export default function ImageDetail() {
             style={{ color: 'var(--color-danger)', borderColor: 'var(--color-danger-border)' }}
           >
             <Trash2 className="h-4 w-4" />
-            Delete Image
+            {t('imageDetail.deleteImage')}
           </button>
         )}
       </div>

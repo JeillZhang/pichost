@@ -6,12 +6,14 @@ use axum::{
     response::Response,
     Json,
 };
+use pichost_core::i18n::Language;
 use pichost_core::StorageRouter;
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::app::AppState;
 use crate::db::DbPool;
+use crate::i18n_ext::{error_json, error_json_args, JsonBody, Locale};
 use crate::middleware::auth::AuthUser;
 use crate::services::upload::{self, ImageListQuery, ImageListResponse, ImageRow, UploadResult};
 use crate::services::upload_url;
@@ -24,18 +26,15 @@ fn check_image_status(status: &str) -> bool {
     status == "active" || status == "ready"
 }
 
-fn validate_batch_ids(ids: &[Uuid]) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+fn validate_batch_ids(
+    ids: &[Uuid],
+    locale: Language,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     if ids.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "no image ids provided"})),
-        ));
+        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.batch_empty"));
     }
     if ids.len() > 100 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "batch limit is 100 images"})),
-        ));
+        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.batch_limit"));
     }
     Ok(())
 }
@@ -66,24 +65,15 @@ pub struct UpdateImageRequest {
 }
 
 /// Validate original_name: non-empty, ≤255 chars, no path separators or null bytes.
-fn validate_original_name(name: &str) -> Result<(), RouteError> {
+fn validate_original_name(name: &str, locale: Language) -> Result<(), RouteError> {
     if name.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "original_name cannot be empty"})),
-        ));
+        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.rename_empty"));
     }
     if name.len() > 255 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "original_name too long (max 255)"})),
-        ));
+        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.rename_too_long"));
     }
     if name.contains('/') || name.contains('\\') || name.contains('\0') {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "original_name contains invalid characters"})),
-        ));
+        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.rename_invalid"));
     }
     Ok(())
 }
@@ -121,6 +111,7 @@ async fn count_user_images(
     search_term: &str,
     config_id: Option<Uuid>,
     category_id: Option<Uuid>,
+    locale: Language,
 ) -> Result<i64, RouteError> {
     let mut builder = sqlx::QueryBuilder::new("SELECT COUNT(*) FROM images WHERE user_id = ");
     builder.push_bind(user_id);
@@ -131,10 +122,7 @@ async fn count_user_images(
         .await
         .map_err(|e| {
             tracing::warn!("Image count query failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "internal server error"})),
-            )
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })
 }
 
@@ -149,6 +137,7 @@ async fn fetch_user_images(
     offset: i64,
     config_id: Option<Uuid>,
     category_id: Option<Uuid>,
+    locale: Language,
 ) -> Result<Vec<ImageRow>, RouteError> {
     let mut builder = sqlx::QueryBuilder::new(
         "SELECT i.id,i.public_key,i.original_name,i.url,i.mime_type,i.file_size,\
@@ -173,10 +162,7 @@ async fn fetch_user_images(
         .await
         .map_err(|e| {
             tracing::warn!("Image list query failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "internal server error"})),
-            )
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
         })
 }
 
@@ -192,11 +178,15 @@ fn map_rows_to_results(rows: Vec<ImageRow>) -> Vec<UploadResult> {
 pub async fn upload_handler(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
+    locale: Locale,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Vec<UploadResult>>), (StatusCode, Json<serde_json::Value>)> {
-    let (bytes, file_name, storage_config_ids) = extract_upload_parts(&mut multipart).await?;
+    let (bytes, file_name, storage_config_ids) =
+        extract_upload_parts(&mut multipart, locale.0).await?;
 
-    match upload::process_upload(&state, &user, bytes, file_name, storage_config_ids).await {
+    match upload::process_upload(&state, &user, bytes, file_name, storage_config_ids, locale.0)
+        .await
+    {
         Ok(results) => {
             crate::metrics::UPLOADS_TOTAL.inc();
             Ok((StatusCode::CREATED, Json(results)))
@@ -220,12 +210,9 @@ pub struct UrlUploadRequest {
     pub storage_config_ids: Option<Vec<Uuid>>,
 }
 
-fn validate_url_not_empty(url: &str) -> Result<(), RouteError> {
+fn validate_url_not_empty(url: &str, locale: Language) -> Result<(), RouteError> {
     if url.trim().is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "url field is required"})),
-        ));
+        return Err(error_json(locale, StatusCode::BAD_REQUEST, "url.field_required"));
     }
     Ok(())
 }
@@ -234,13 +221,15 @@ fn validate_url_not_empty(url: &str) -> Result<(), RouteError> {
 pub async fn url_upload_handler(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
-    Json(payload): Json<UrlUploadRequest>,
+    locale: Locale,
+    JsonBody(payload): JsonBody<UrlUploadRequest>,
 ) -> Result<(StatusCode, Json<Vec<UploadResult>>), RouteError> {
-    validate_url_not_empty(&payload.url)?;
+    validate_url_not_empty(&payload.url, locale.0)?;
 
-    let (bytes, file_name) = upload_url::fetch_image_from_url(&payload.url).await?;
+    let (bytes, file_name) = upload_url::fetch_image_from_url(&payload.url, locale.0).await?;
 
-    match upload::process_upload(&state, &user, bytes, file_name, payload.storage_config_ids).await
+    match upload::process_upload(&state, &user, bytes, file_name, payload.storage_config_ids, locale.0)
+        .await
     {
         Ok(results) => {
             crate::metrics::UPLOADS_TOTAL.inc();
@@ -258,6 +247,7 @@ async fn parse_upload_field(
     file_data: &mut Option<Vec<u8>>,
     file_name: &mut String,
     storage_config_ids: &mut Option<Vec<Uuid>>,
+    locale: Language,
 ) -> Result<(), RouteError> {
     match field.name() {
         Some("file") => {
@@ -266,26 +256,31 @@ async fn parse_upload_field(
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "file".to_string());
             let data = field.bytes().await.map_err(|e| {
-                (
+                error_json_args(
+                    locale,
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("failed to read file: {e}")})),
+                    "upload.field_read_failed",
+                    &[e.to_string()],
                 )
             })?;
             *file_data = Some(data.to_vec());
         }
         Some("storage_config_ids") => {
             let text = field.text().await.map_err(|e| {
-                (
+                error_json_args(
+                    locale,
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("failed to read config ids: {e}")})),
+                    "upload.config_ids_read_failed",
+                    &[e.to_string()],
                 )
             })?;
             let ids: Result<Vec<Uuid>, _> =
                 text.split(',').map(|s| Uuid::parse_str(s.trim())).collect();
             *storage_config_ids = Some(ids.map_err(|_| {
-                (
+                error_json(
+                    locale,
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "invalid UUID in storage_config_ids"})),
+                    "upload.invalid_config_uuid",
                 )
             })?);
         }
@@ -297,20 +292,25 @@ async fn parse_upload_field(
 /// Extract file data and optional storage_config_ids from a multipart upload.
 async fn extract_upload_parts(
     multipart: &mut Multipart,
+    locale: Language,
 ) -> Result<(Vec<u8>, String, Option<Vec<Uuid>>), RouteError> {
     let mut file_data: Option<Vec<u8>> = None;
     let mut file_name = "file".to_string();
     let mut storage_config_ids: Option<Vec<Uuid>> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
-        parse_upload_field(field, &mut file_data, &mut file_name, &mut storage_config_ids).await?;
+        parse_upload_field(
+            field,
+            &mut file_data,
+            &mut file_name,
+            &mut storage_config_ids,
+            locale,
+        )
+        .await?;
     }
 
     let bytes = file_data.ok_or_else(|| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "no file field found in upload"})),
-        )
+        error_json(locale, StatusCode::BAD_REQUEST, "upload.file_missing")
     })?;
 
     Ok((bytes, file_name, storage_config_ids))
@@ -332,6 +332,7 @@ fn resolve_sort(params: &ImageListQuery) -> (&str, &str) {
 pub async fn list_images(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
+    locale: Locale,
     axum::extract::Query(params): axum::extract::Query<ImageListQuery>,
 ) -> Result<Json<ImageListResponse>, RouteError> {
     let page = params.page.max(1);
@@ -347,6 +348,7 @@ pub async fn list_images(
         search_term,
         params.storage_config_id,
         params.category_id,
+        locale.0,
     )
     .await?;
     let rows = fetch_user_images(
@@ -359,6 +361,7 @@ pub async fn list_images(
         offset,
         params.storage_config_id,
         params.category_id,
+        locale.0,
     )
     .await?;
     let items = map_rows_to_results(rows);
@@ -382,6 +385,7 @@ pub async fn list_images(
 pub async fn get_image(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
+    locale: Locale,
     Path(id): Path<Uuid>,
 ) -> Result<Json<UploadResult>, RouteError> {
     let result = state
@@ -402,17 +406,9 @@ pub async fn get_image(
             .await
             .map_err(|e| {
                 tracing::warn!("Get image query failed: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "internal error"})),
-                )
+                error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "image.internal_error")
             })?
-            .ok_or_else(|| {
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "image not found"})),
-                )
-            })
+            .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"))
             .map(UploadResult::from_row)
         })
         .await?;
@@ -425,6 +421,7 @@ async fn rename_image_in_db(
     id: Uuid,
     user_id: Uuid,
     name: &str,
+    locale: Language,
 ) -> Result<(), RouteError> {
     let updated_rows =
         sqlx::query("UPDATE images SET original_name = $1 WHERE id = $2 AND user_id = $3")
@@ -435,17 +432,11 @@ async fn rename_image_in_db(
             .await
             .map_err(|e| {
                 tracing::warn!("Rename image query failed: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "internal server error"})),
-                )
+                error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
             })?
             .rows_affected();
     if updated_rows == 0 {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "image not found"})),
-        ));
+        return Err(error_json(locale, StatusCode::NOT_FOUND, "image.not_found"));
     }
     Ok(())
 }
@@ -454,6 +445,7 @@ async fn refetch_image_row(
     pool: &DbPool,
     id: Uuid,
     user_id: Uuid,
+    locale: Language,
 ) -> Result<ImageRow, RouteError> {
     sqlx::query_as::<_, ImageRow>(
         "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size,\
@@ -470,17 +462,9 @@ async fn refetch_image_row(
     .await
     .map_err(|e| {
         tracing::warn!("Rename image re-fetch failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "internal server error"})),
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?
-    .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "image not found"})),
-        )
-    })
+    .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "image.not_found"))
 }
 
 /// PATCH /api/v1/images/{id} — rename an image's display name
@@ -488,11 +472,12 @@ pub async fn rename_image(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
-    Json(req): Json<UpdateImageRequest>,
+    locale: Locale,
+    JsonBody(req): JsonBody<UpdateImageRequest>,
 ) -> Result<Json<UploadResult>, RouteError> {
-    validate_original_name(&req.original_name)?;
-    rename_image_in_db(&state.pool, id, user.id, &req.original_name).await?;
-    let updated = refetch_image_row(&state.pool, id, user.id).await?;
+    validate_original_name(&req.original_name, locale.0)?;
+    rename_image_in_db(&state.pool, id, user.id, &req.original_name, locale.0).await?;
+    let updated = refetch_image_row(&state.pool, id, user.id, locale.0).await?;
 
     let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
 
@@ -502,6 +487,7 @@ pub async fn rename_image(
 /// GET /u/{public_key} — serve image publicly (unauthenticated)
 pub async fn public_get(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Path(public_key): Path<String>,
 ) -> Result<Response, RouteError> {
     let row = sqlx::query_as::<_, (String, String, String, String)>(
@@ -512,33 +498,19 @@ pub async fn public_get(
     .await
     .map_err(|e| {
         tracing::warn!("Public image query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "internal server error"})),
-        )
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?
-    .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "image not found"})),
-        )
-    })?;
+    .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"))?;
 
     let (storage_key, mime_type, status, storage_backend) = row;
     if !check_image_status(&status) {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "image not found"})),
-        ));
+        return Err(error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"));
     }
 
     let storage = state.router.for_backend(&storage_backend);
     let bytes = storage.get(&storage_key).await.map_err(|e| {
         tracing::warn!("Storage read failed on {}: {e}", storage.backend_name());
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "image not found"})),
-        )
+        error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found")
     })?;
 
     Ok(Response::builder()
@@ -560,6 +532,7 @@ fn mime_for_thumb_key(key: &str) -> &'static str {
 /// GET /u/thumb/{image_id} — serve generated thumbnail (unauthenticated)
 pub async fn public_get_thumb(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Path(image_id): Path<Uuid>,
 ) -> Result<Response, RouteError> {
     let row = sqlx::query_as::<_, (Option<String>, String)>(
@@ -570,16 +543,13 @@ pub async fn public_get_thumb(
     .await
     .map_err(|e| {
         tracing::warn!("Thumb query failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal error"})))
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "image.internal_error")
     })?
-    .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"}))))?;
+    .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"))?;
 
     let (thumb_key, storage_backend) = row;
     let thumb_key = thumb_key.ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "thumbnail not yet generated"})),
-        )
+        error_json(locale.0, StatusCode::NOT_FOUND, "image.thumbnail_not_ready")
     })?;
 
     let bytes = state
@@ -588,10 +558,7 @@ pub async fn public_get_thumb(
             let backend = state.router.for_backend(&storage_backend);
             backend.get(&thumb_key).await.map_err(|e| {
                 tracing::warn!("Thumb storage read failed: {e}");
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "thumbnail not found"})),
-                )
+                error_json(locale.0, StatusCode::NOT_FOUND, "image.thumbnail_not_found")
             })
         })
         .await?;
@@ -607,6 +574,7 @@ pub async fn public_get_thumb(
 async fn resolve_thumb_key_by_public_key(
     pool: &DbPool,
     public_key: &str,
+    locale: Language,
 ) -> Result<(String, String), RouteError> {
     let row: (Option<String>, String) = sqlx::query_as(
         "SELECT thumbnail_key, storage_backend FROM images \
@@ -617,24 +585,13 @@ async fn resolve_thumb_key_by_public_key(
     .await
     .map_err(|e| {
         tracing::warn!("Thumbnail-by-key query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "internal server error"})),
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?
-    .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "image not found"})),
-        )
-    })?;
+    .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "image.not_found"))?;
 
     let (thumb_key, storage_backend) = row;
     let thumb_key = thumb_key.ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "thumbnail not yet generated"})),
-        )
+        error_json(locale, StatusCode::NOT_FOUND, "image.thumbnail_not_ready")
     })?;
     Ok((thumb_key, storage_backend))
 }
@@ -642,10 +599,11 @@ async fn resolve_thumb_key_by_public_key(
 /// GET /t/{public_key} — serve thumbnail by public_key (alias)
 pub async fn public_get_thumb_by_key(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Path(public_key): Path<String>,
 ) -> Result<Response, RouteError> {
     let (thumb_key, storage_backend) =
-        resolve_thumb_key_by_public_key(&state.pool, &public_key).await?;
+        resolve_thumb_key_by_public_key(&state.pool, &public_key, locale.0).await?;
 
     let backend = state.router.for_backend(&storage_backend);
     let bytes = state
@@ -653,9 +611,10 @@ pub async fn public_get_thumb_by_key(
         .cached_thumb(&format!("thumb:pk:{}", public_key), 3600, async {
             backend.get(&thumb_key).await.map_err(|e| {
                 tracing::warn!("Thumb storage read by key failed: {e}");
-                (
+                error_json(
+                    locale.0,
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "thumbnail not found"})),
+                    "image.thumbnail_not_found",
                 )
             })
         })
@@ -672,6 +631,7 @@ pub async fn public_get_thumb_by_key(
 /// GET /u/webp/{image_id} — serve generated WebP (unauthenticated)
 pub async fn public_get_webp(
     State(state): State<Arc<AppState>>,
+    locale: Locale,
     Path(image_id): Path<Uuid>,
 ) -> Result<Response, RouteError> {
     let row = sqlx::query_as::<_, (Option<String>, String)>(
@@ -682,16 +642,13 @@ pub async fn public_get_webp(
     .await
     .map_err(|e| {
         tracing::warn!("WebP query failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "internal error"})))
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "image.internal_error")
     })?
-    .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({"error": "image not found"}))))?;
+    .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"))?;
 
     let (webp_key, storage_backend) = row;
     let webp_key = webp_key.ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "WebP not yet generated"})),
-        )
+        error_json(locale.0, StatusCode::NOT_FOUND, "image.webp_not_ready")
     })?;
 
     let bytes = state
@@ -700,10 +657,7 @@ pub async fn public_get_webp(
             let backend = state.router.for_backend(&storage_backend);
             backend.get(&webp_key).await.map_err(|e| {
                 tracing::warn!("WebP storage read failed: {e}");
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "WebP not found"})),
-                )
+                error_json(locale.0, StatusCode::NOT_FOUND, "image.webp_not_found")
             })
         })
         .await?;
@@ -720,6 +674,7 @@ async fn fetch_delete_target(
     pool: &DbPool,
     id: Uuid,
     user: &AuthUser,
+    locale: Language,
 ) -> Result<(String, String, Option<String>, Option<String>), RouteError> {
     sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
         r#"SELECT storage_key, storage_backend, thumbnail_key, webp_key
@@ -732,27 +687,20 @@ async fn fetch_delete_target(
     .await
     .map_err(|e| {
         tracing::warn!("Delete image query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "internal server error"})),
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?
-    .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "image not found"})),
-        )
-    })
+    .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "image.not_found"))
 }
 
 /// DELETE /api/v1/images/{id} — delete image + storage files (protected)
 pub async fn delete_image(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
+    locale: Locale,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, RouteError> {
     let (storage_key, storage_backend, thumb_key, webp_key) =
-        fetch_delete_target(&state.pool, id, &user).await?;
+        fetch_delete_target(&state.pool, id, &user, locale.0).await?;
     cleanup_storage_files(
         &state.router,
         &storage_backend,
@@ -768,10 +716,7 @@ pub async fn delete_image(
         .await
         .map_err(|e| {
             tracing::warn!("Image delete db failed: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "failed to delete image"})),
-            )
+            error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "image.delete_failed")
         })?;
 
     let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
@@ -791,6 +736,7 @@ async fn fetch_batch_delete_targets(
     pool: &DbPool,
     ids: &[Uuid],
     user: &AuthUser,
+    locale: Language,
 ) -> Result<Vec<(String, String, Option<String>, Option<String>)>, RouteError> {
     sqlx::query_as(
         r#"SELECT storage_key, storage_backend, thumbnail_key, webp_key
@@ -803,10 +749,7 @@ async fn fetch_batch_delete_targets(
     .await
     .map_err(|e| {
         tracing::warn!("Batch delete query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "internal server error"})),
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })
 }
 
@@ -814,11 +757,12 @@ async fn fetch_batch_delete_targets(
 pub async fn batch_delete(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
-    Json(body): Json<BatchDeleteRequest>,
+    locale: Locale,
+    JsonBody(body): JsonBody<BatchDeleteRequest>,
 ) -> Result<Json<serde_json::Value>, RouteError> {
-    validate_batch_ids(&body.ids)?;
+    validate_batch_ids(&body.ids, locale.0)?;
 
-    let rows = fetch_batch_delete_targets(&state.pool, &body.ids, &user).await?;
+    let rows = fetch_batch_delete_targets(&state.pool, &body.ids, &user, locale.0).await?;
 
     for (sk, sb, tk, wk) in &rows {
         cleanup_storage_files(&state.router, sb, sk, tk, wk).await;
@@ -830,9 +774,10 @@ pub async fn batch_delete(
         .await
         .map_err(|e| {
             tracing::warn!("Batch delete DB failed: {e}");
-            (
+            error_json(
+                locale.0,
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "failed to delete images"})),
+                "image.batch_delete_failed",
             )
         })?
         .rows_affected() as usize;
@@ -858,6 +803,7 @@ async fn ensure_category_owned(
     pool: &DbPool,
     category_id: Uuid,
     user_id: Uuid,
+    locale: Language,
 ) -> Result<(), RouteError> {
     use pichost_core::models::Category;
 
@@ -870,17 +816,14 @@ async fn ensure_category_owned(
     .fetch_optional(pool)
     .await
     .map_err(|e| {
-        (
+        error_json_args(
+            locale,
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
+            "common.db_error",
+            &[e.to_string()],
         )
     })?
-    .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "Category not found"})),
-        )
-    })?;
+    .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "category.not_found"))?;
     Ok(())
 }
 
@@ -889,10 +832,11 @@ pub async fn move_image(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
-    Json(body): Json<MoveImageRequest>,
+    locale: Locale,
+    JsonBody(body): JsonBody<MoveImageRequest>,
 ) -> Result<Json<serde_json::Value>, RouteError> {
     if let Some(category_id) = body.category_id {
-        ensure_category_owned(&state.pool, category_id, user.id).await?;
+        ensure_category_owned(&state.pool, category_id, user.id, locale.0).await?;
     }
 
     let result = sqlx::query("UPDATE images SET category_id = $1 WHERE id = $2 AND user_id = $3")
@@ -902,17 +846,16 @@ pub async fn move_image(
         .execute(&state.pool)
         .await
         .map_err(|e| {
-            (
+            error_json_args(
+                locale.0,
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": e.to_string()})),
+                "common.db_error",
+                &[e.to_string()],
             )
         })?;
 
     if result.rows_affected() == 0 {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "Image not found"})),
-        ));
+        return Err(error_json(locale.0, StatusCode::NOT_FOUND, "image.move_not_found"));
     }
 
     let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
@@ -926,18 +869,12 @@ pub struct BatchMoveRequest {
     pub category_id: Uuid,
 }
 
-fn validate_batch_move(ids: &[Uuid]) -> Result<(), RouteError> {
+fn validate_batch_move(ids: &[Uuid], locale: Language) -> Result<(), RouteError> {
     if ids.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "image_ids cannot be empty"})),
-        ));
+        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.batch_move_empty"));
     }
     if ids.len() > 100 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Maximum 100 images per batch move"})),
-        ));
+        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.batch_move_limit"));
     }
     Ok(())
 }
@@ -946,10 +883,11 @@ fn validate_batch_move(ids: &[Uuid]) -> Result<(), RouteError> {
 pub async fn batch_move_images(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
-    Json(body): Json<BatchMoveRequest>,
+    locale: Locale,
+    JsonBody(body): JsonBody<BatchMoveRequest>,
 ) -> Result<Json<serde_json::Value>, RouteError> {
-    validate_batch_move(&body.image_ids)?;
-    ensure_category_owned(&state.pool, body.category_id, user.id).await?;
+    validate_batch_move(&body.image_ids, locale.0)?;
+    ensure_category_owned(&state.pool, body.category_id, user.id, locale.0).await?;
 
     let result =
         sqlx::query("UPDATE images SET category_id = $1 WHERE user_id = $2 AND id = ANY($3)")
@@ -959,9 +897,11 @@ pub async fn batch_move_images(
             .execute(&state.pool)
             .await
             .map_err(|e| {
-                (
+                error_json_args(
+                    locale.0,
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": e.to_string()})),
+                    "common.db_error",
+                    &[e.to_string()],
                 )
             })?;
 
@@ -987,6 +927,7 @@ pub struct ImageLinks {
 pub async fn get_image_links(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthUser>,
+    locale: Locale,
     Path(image_id): Path<Uuid>,
 ) -> Result<Json<ImageLinks>, RouteError> {
     use crate::services::html_escape;
@@ -1000,17 +941,9 @@ pub async fn get_image_links(
     .await
     .map_err(|e| {
         tracing::warn!("Image links query failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "internal server error"})),
-        )
+        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })?
-    .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "image not found"})),
-        )
-    })?;
+    .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"))?;
 
     let (_public_key, original_name, url) = row;
     let markdown = format!("![{}]({})", original_name, url);
@@ -1036,7 +969,7 @@ mod rename_tests {
 
     #[test]
     fn validate_name_rejects_empty() {
-        let result = validate_original_name("");
+        let result = validate_original_name("", Language::En);
         assert!(result.is_err());
         let (code, _) = result.unwrap_err();
         assert_eq!(code, StatusCode::BAD_REQUEST);
@@ -1045,7 +978,7 @@ mod rename_tests {
     #[test]
     fn validate_name_rejects_too_long() {
         let long_name = "a".repeat(256);
-        let result = validate_original_name(&long_name);
+        let result = validate_original_name(&long_name, Language::En);
         assert!(result.is_err());
         let (code, _) = result.unwrap_err();
         assert_eq!(code, StatusCode::BAD_REQUEST);
@@ -1055,21 +988,21 @@ mod rename_tests {
     fn validate_name_rejects_path_separators() {
         for ch in &['/', '\\', '\0'] {
             let name = format!("bad{}name.txt", ch);
-            let result = validate_original_name(&name);
+            let result = validate_original_name(&name, Language::En);
             assert!(result.is_err(), "should reject char '{}'", ch);
         }
     }
 
     #[test]
     fn validate_name_accepts_valid() {
-        let result = validate_original_name("valid-file_name (1).jpg");
+        let result = validate_original_name("valid-file_name (1).jpg", Language::En);
         assert!(result.is_ok());
     }
 
     #[test]
     fn validate_name_accepts_max_length() {
         let name = "a".repeat(255);
-        let result = validate_original_name(&name);
+        let result = validate_original_name(&name, Language::En);
         assert!(result.is_ok());
     }
 }
@@ -1101,31 +1034,31 @@ mod tests {
 
     #[test]
     fn test_validate_batch_ids() {
-        let err = validate_batch_ids(&[]).unwrap_err();
+        let err = validate_batch_ids(&[], Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
         let many: Vec<Uuid> = (0..101).map(|_| Uuid::new_v4()).collect();
-        let err = validate_batch_ids(&many).unwrap_err();
+        let err = validate_batch_ids(&many, Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
         let ok: Vec<Uuid> = (0..100).map(|_| Uuid::new_v4()).collect();
-        assert!(validate_batch_ids(&ok).is_ok());
-        assert!(validate_batch_ids(&[Uuid::new_v4()]).is_ok());
+        assert!(validate_batch_ids(&ok, Language::En).is_ok());
+        assert!(validate_batch_ids(&[Uuid::new_v4()], Language::En).is_ok());
     }
 
     #[test]
     fn test_validate_batch_move() {
-        let err = validate_batch_move(&[]).unwrap_err();
+        let err = validate_batch_move(&[], Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
         let many: Vec<Uuid> = (0..101).map(|_| Uuid::new_v4()).collect();
-        assert!(validate_batch_move(&many).is_err());
+        assert!(validate_batch_move(&many, Language::En).is_err());
         let ok: Vec<Uuid> = (0..100).map(|_| Uuid::new_v4()).collect();
-        assert!(validate_batch_move(&ok).is_ok());
+        assert!(validate_batch_move(&ok, Language::En).is_ok());
     }
 
     #[test]
     fn test_validate_url_not_empty() {
-        assert!(validate_url_not_empty("").is_err());
-        assert!(validate_url_not_empty("   ").is_err());
-        assert!(validate_url_not_empty("http://x/y.png").is_ok());
+        assert!(validate_url_not_empty("", Language::En).is_err());
+        assert!(validate_url_not_empty("   ", Language::En).is_err());
+        assert!(validate_url_not_empty("http://x/y.png", Language::En).is_ok());
     }
 
     #[test]

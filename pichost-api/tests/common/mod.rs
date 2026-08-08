@@ -40,7 +40,7 @@ fn test_redis_url() -> String {
 
 /// Build an `AppConfig` suited for tests: raised rate limits, a fixed JWT
 /// secret, a token-encryption key, and a tempdir-backed local storage path.
-fn test_config(tempdir: &TempDir) -> AppConfig {
+pub fn test_config(tempdir: &TempDir) -> AppConfig {
     let mut cfg = AppConfig::default();
     cfg.database.url = test_db_url();
     cfg.redis.url = test_redis_url();
@@ -91,11 +91,13 @@ async fn init_pool() -> sqlx::PgPool {
     pool
 }
 
-/// Build a full test app backed by the real PG + Redis and a fresh local
-/// storage dir. Each call gets its own tempdir, PG pool, and Redis pool.
-pub async fn test_app() -> TestApp {
+/// Build a test app from a fully-prepared `AppConfig` (custom rate limits,
+/// OAuth credentials, etc.). The local-storage path is overridden with a
+/// fresh tempdir kept alive by the returned `TestApp`.
+pub async fn test_app_with_config(mut config: AppConfig) -> TestApp {
     let tempdir = TempDir::new().expect("tempdir");
-    let config = Arc::new(test_config(&tempdir));
+    config.storage.local_base_path = tempdir.path().to_path_buf();
+    let config = Arc::new(config);
 
     let pool = init_pool().await;
     let cache_pool = cache::create_pool(&test_redis_url(), 5);
@@ -124,6 +126,14 @@ pub async fn test_app() -> TestApp {
         state,
         _tempdir: tempdir,
     }
+}
+
+/// Build a full test app backed by the real PG + Redis and a fresh local
+/// storage dir. Each call gets its own tempdir, PG pool, and Redis pool.
+pub async fn test_app() -> TestApp {
+    let tempdir = TempDir::new().expect("tempdir");
+    let config = test_config(&tempdir);
+    test_app_with_config(config).await
 }
 
 /// Register a fresh user through the real API. The first user in an empty

@@ -1,6 +1,7 @@
 import { useCallback, type ChangeEvent } from 'react'
 import { useDropzone, type DropEvent } from 'react-dropzone'
 import { Upload } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 /** Custom getFilesFromEvent to bypass file-selector's broken getAsFileSystemHandle()
  *  path in secure contexts (localhost). getAsFileSystemHandle() returns null for
@@ -30,6 +31,7 @@ interface DropZoneProps {
 }
 
 export default function DropZone({ onUpload }: DropZoneProps) {
+  const { t } = useTranslation()
   const onDrop = useCallback(
     (accepted: File[]) => {
       if (accepted.length > 0) onUpload(accepted)
@@ -89,10 +91,10 @@ export default function DropZone({ onUpload }: DropZoneProps) {
               isDragActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)]'
             }`}
           >
-            {isDragActive ? 'Drop images here' : 'Drag & drop images, or click to select'}
+            {isDragActive ? t('dropzone.dropHint') : t('dropzone.dragHint')}
           </p>
           <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            PNG, JPEG, GIF, WebP, SVG, AVIF, BMP — up to 50 MB each
+            {t('dropzone.formatsHint')}
           </p>
         </div>
       </div>

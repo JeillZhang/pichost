@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Search, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 interface SearchBarProps {
   value: string
@@ -10,10 +11,12 @@ interface SearchBarProps {
 export default function SearchBar({
   value,
   onChange,
-  placeholder = 'Search by filename…',
+  placeholder,
 }: SearchBarProps) {
+  const { t } = useTranslation()
   const [localValue, setLocalValue] = useState(value)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const placeholderText = placeholder ?? t('search.placeholder')
 
   useEffect(() => {
     setLocalValue(value)
@@ -49,7 +52,7 @@ export default function SearchBar({
         type="text"
         value={localValue}
         onChange={(e) => handleChange(e.target.value)}
-        placeholder={placeholder}
+        placeholder={placeholderText}
         className="input-field pl-10 pr-8"
         style={{ paddingTop: '0.5rem', paddingBottom: '0.5rem' }}
       />
@@ -58,7 +61,7 @@ export default function SearchBar({
           onClick={handleClear}
           className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-0.5 transition-colors duration-150 hover:text-[var(--color-text-primary)]"
           style={{ color: 'var(--color-text-muted)' }}
-          aria-label="Clear search"
+          aria-label={t('search.clearAria')}
         >
           <X className="h-4 w-4" />
         </button>

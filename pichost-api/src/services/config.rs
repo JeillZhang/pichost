@@ -13,6 +13,8 @@ pub struct SystemConfig {
     pub public_url: Option<String>,
     pub default_backend: Option<String>,
     pub local_base_path: Option<String>,
+    pub i18n_language: Option<String>,
+    pub i18n_locales_dir: Option<String>,
 }
 
 impl SystemConfig {
@@ -27,6 +29,8 @@ impl SystemConfig {
             public_url: Some(cfg.server.public_url.clone()),
             default_backend: Some(cfg.storage.default_backend.clone()),
             local_base_path: Some(cfg.storage.local_base_path.display().to_string()),
+            i18n_language: Some(cfg.i18n.language.clone()),
+            i18n_locales_dir: cfg.i18n.locales_dir.as_ref().map(|p| p.display().to_string()),
         }
     }
 }
@@ -43,7 +47,8 @@ pub enum ConfigError {
 
 /// Read config.toml matching figment's nested key structure.
 /// Keys: database.url, redis.url, server.public_url,
-///       storage.default_backend, storage.local_base_path, auth.jwt_secret.
+///       storage.default_backend, storage.local_base_path, auth.jwt_secret,
+///       i18n.language, i18n.locales_dir.
 pub fn read_config_toml(path: &Path) -> Result<SystemConfig, ConfigError> {
     if !path.exists() {
         return Ok(SystemConfig::default());
@@ -69,6 +74,8 @@ pub fn read_config_toml(path: &Path) -> Result<SystemConfig, ConfigError> {
         public_url: get_str(&doc, "server", "public_url"),
         default_backend: get_str(&doc, "storage", "default_backend"),
         local_base_path: get_str(&doc, "storage", "local_base_path"),
+        i18n_language: get_str(&doc, "i18n", "language"),
+        i18n_locales_dir: get_str(&doc, "i18n", "locales_dir"),
     })
 }
 
@@ -108,6 +115,8 @@ pub fn write_config_toml(path: &Path, config: &SystemConfig) -> Result<(), Confi
     set_nested(&mut doc, "server", "public_url", &config.public_url);
     set_nested(&mut doc, "storage", "default_backend", &config.default_backend);
     set_nested(&mut doc, "storage", "local_base_path", &config.local_base_path);
+    set_nested(&mut doc, "i18n", "language", &config.i18n_language);
+    set_nested(&mut doc, "i18n", "locales_dir", &config.i18n_locales_dir);
 
     std::fs::write(path, doc.to_string()).map_err(|e| ConfigError::Io(e.to_string()))
 }
@@ -203,12 +212,16 @@ mod tests {
             public_url: Some("https://pichost.example.com".into()),
             default_backend: Some("local".into()),
             local_base_path: Some("./test-storage".into()),
+            i18n_language: Some("zh-CN".into()),
+            i18n_locales_dir: None,
         };
         write_config_toml(&path, &config).unwrap();
         let read = read_config_toml(&path).unwrap();
         assert_eq!(read.database_url, config.database_url);
         assert_eq!(read.public_url, config.public_url);
         assert_eq!(read.default_backend, config.default_backend);
+        assert_eq!(read.i18n_language, config.i18n_language);
+        assert_eq!(read.i18n_locales_dir, None);
     }
 
     #[test]

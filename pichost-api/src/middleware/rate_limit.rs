@@ -2,13 +2,17 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Request, State},
+    http::header::ACCEPT_LANGUAGE,
     http::StatusCode,
     middleware::Next,
     response::Response,
     Json,
 };
 
+use pichost_core::i18n::I18n;
+
 use crate::app::AppState;
+use crate::i18n_ext::{error_json_args, locale_from_header};
 use crate::middleware::auth::AuthUser;
 
 /// Rate limits are read from config (defaults match these constants).
@@ -16,12 +20,13 @@ use crate::middleware::auth::AuthUser;
 /// and E2E test environments can raise them (PICHOST_RATE_LIMIT_*_MAX).
 const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 
-fn too_many_response(retry_after: u64) -> (StatusCode, Json<serde_json::Value>) {
-    (
+fn too_many_response(req: &Request, retry_after: u64) -> (StatusCode, Json<serde_json::Value>) {
+    let locale = locale_from_header(req.headers().get(ACCEPT_LANGUAGE), I18n::global().language());
+    error_json_args(
+        locale,
         StatusCode::TOO_MANY_REQUESTS,
-        Json(serde_json::json!({
-            "error": format!("rate limit exceeded, retry after {}s", retry_after)
-        })),
+        "rate_limited",
+        &[retry_after.to_string()],
     )
 }
 
@@ -83,7 +88,7 @@ pub async fn rate_limit_auth(
         Ok(_) => Ok(next.run(req).await),
         Err(retry_after) => {
             tracing::warn!(ip = %ip, "auth rate limited");
-            Err(too_many_response(retry_after))
+            Err(too_many_response(&req, retry_after))
         }
     }
 }
@@ -103,7 +108,7 @@ pub async fn rate_limit_upload(
         Ok(_) => Ok(next.run(req).await),
         Err(retry_after) => {
             tracing::warn!(key = %key, "upload rate limited");
-            Err(too_many_response(retry_after))
+            Err(too_many_response(&req, retry_after))
         }
     }
 }
@@ -123,7 +128,7 @@ pub async fn rate_limit_general(
         Ok(_) => Ok(next.run(req).await),
         Err(retry_after) => {
             tracing::warn!(key = %key, "general rate limited");
-            Err(too_many_response(retry_after))
+            Err(too_many_response(&req, retry_after))
         }
     }
 }
@@ -139,7 +144,7 @@ pub async fn rate_limit_public(
         Ok(_) => Ok(next.run(req).await),
         Err(retry_after) => {
             tracing::warn!(ip = %ip, "public rate limited");
-            Err(too_many_response(retry_after))
+            Err(too_many_response(&req, retry_after))
         }
     }
 }
@@ -185,7 +190,11 @@ mod tests {
 
     #[test]
     fn test_too_many_response() {
-        let (status, json) = too_many_response(42);
+        let req = Request::builder()
+            .header(ACCEPT_LANGUAGE, "en")
+            .body(Body::empty())
+            .unwrap();
+        let (status, json) = too_many_response(&req, 42);
         assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(json.0["error"], "rate limit exceeded, retry after 42s");
     }
