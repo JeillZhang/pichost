@@ -4,11 +4,12 @@ import { useInfiniteQuery, keepPreviousData, useQuery, useQueryClient } from '@t
 import { useTranslation } from 'react-i18next'
 import { listImages, batchDeleteImages, listStorageConfigs } from '../api/client'
 import type { ImageInfo, PaginatedListParams } from '../api/client'
-import { CheckSquare, Square, Trash2, X, Code2, Server, HardDrive } from 'lucide-react'
+import { CheckSquare, Square, Trash2, X, Code2, Server, HardDrive, Folder } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
 import SortDropdown from '../components/SortDropdown'
 import CategoryTree from '../components/CategoryTree'
 import GlassSelect from '../components/ui/GlassSelect'
+import Sheet from '../components/ui/Sheet'
 
 const STORAGE_CONFIG_KEY = 'backend'
 
@@ -37,6 +38,7 @@ export default function Gallery() {
   )
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
+  const [categorySheetOpen, setCategorySheetOpen] = useState(false)
   const [selectMode, setSelectMode] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
@@ -193,6 +195,14 @@ export default function Gallery() {
             )}
           </h1>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCategorySheetOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm md:hidden"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
+              <Folder className="h-4 w-4" />
+              {t('gallery.allCategories')}
+            </button>
             <div className="w-48 sm:w-64">
               <SearchBar value={search} onChange={setSearch} />
             </div>
@@ -295,7 +305,7 @@ export default function Gallery() {
         {/* Grid */}
         {allImages.length > 0 && (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
               {allImages.map((img, index) => {
                 const isLast = index === allImages.length - 1
                 const isSelected = selected.has(img.id)
@@ -312,7 +322,7 @@ export default function Gallery() {
                       className={`absolute left-2 top-2 z-10 rounded-lg p-1 backdrop-blur-sm transition-all duration-150 ${
                         selectMode
                           ? 'bg-black/50 hover:bg-black/70'
-                          : 'bg-black/30 opacity-60 hover:bg-black/50 group-hover:opacity-100'
+                          : 'bg-black/30 opacity-100 hover:bg-black/50 md:opacity-60 md:group-hover:opacity-100'
                       }`}
                     >
                       {isSelected ? (
@@ -373,6 +383,21 @@ export default function Gallery() {
             )}
           </>
         )}
+
+        {/* Mobile category drawer */}
+        <Sheet
+          open={categorySheetOpen}
+          onClose={() => setCategorySheetOpen(false)}
+          title={t('categoryTree.categories')}
+        >
+          <CategoryTree
+            selectedId={categoryFilter}
+            onSelect={(id) => {
+              setCategoryFilter(id)
+              setCategorySheetOpen(false)
+            }}
+          />
+        </Sheet>
 
         {/* Confirm dialog */}
         {showConfirm && (
