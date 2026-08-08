@@ -32,3 +32,34 @@ test.describe.serial('no horizontal overflow on mobile', () => {
     })
   }
 })
+
+test('/settings expanded sections fit without overflow', async ({ page, request }) => {
+  await seedUserSession(page, request)
+  await page.goto('/settings')
+  await page.waitForTimeout(300)
+
+  const overflowOf = () =>
+    page.evaluate(() => {
+      const doc = document.documentElement
+      const body = document.body
+      return Math.max(
+        doc.scrollWidth - doc.clientWidth,
+        body.scrollWidth - body.clientWidth,
+      )
+    })
+
+  await page.getByRole('button', { name: /watermark/i }).click()
+  await page.waitForTimeout(200)
+  expect(await overflowOf()).toBeLessThanOrEqual(1)
+
+  await page.getByRole('button', { name: /preprocessing/i }).click()
+  await page.waitForTimeout(200)
+  const toggles = page.locator('input.toggle')
+  const toggleCount = await toggles.count()
+  for (let i = 0; i < toggleCount; i++) {
+    const toggle = toggles.nth(i)
+    if (!(await toggle.isChecked())) await toggle.check()
+  }
+  await page.waitForTimeout(200)
+  expect(await overflowOf()).toBeLessThanOrEqual(1)
+})
