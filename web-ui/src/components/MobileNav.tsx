@@ -22,7 +22,7 @@ export default function MobileNav({ open, onClose }: MobileNavProps) {
   const logout = useAuthStore((s) => s.logout)
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { overlayProps } = useOverlay(onClose)
+  const { overlayProps } = useOverlay(onClose, open)
 
   if (!open) return null
 

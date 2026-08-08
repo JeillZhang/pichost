@@ -12,7 +12,7 @@ interface SheetProps {
 
 export default function Sheet({ open, onClose, title, children }: SheetProps) {
   const { t } = useTranslation()
-  const { overlayProps } = useOverlay(onClose)
+  const { overlayProps } = useOverlay(onClose, open)
   if (!open) return null
 
   return (
