@@ -5,8 +5,16 @@ import useOverlay from './useOverlay'
 
 // Test harness: a tiny component consuming the hook.
 // Children render INSIDE the overlay so clicks on them bubble to it.
-function Harness({ onClose, children }: { onClose: () => void; children?: React.ReactNode }) {
-  const { overlayProps } = useOverlay(onClose)
+function Harness({
+  onClose,
+  enabled = true,
+  children,
+}: {
+  onClose: () => void
+  enabled?: boolean
+  children?: React.ReactNode
+}) {
+  const { overlayProps } = useOverlay(onClose, enabled)
   return (
     <div data-testid="overlay" {...overlayProps}>
       {children}
@@ -72,6 +80,18 @@ describe('useOverlay', () => {
     })
     // No stopPropagation on the panel: the mousedown reaches the overlay,
     // whose handler sees e.target (panel) !== e.currentTarget (overlay) → no close.
+    expect(onClose).not.toHaveBeenCalled()
+    act(() => root.unmount())
+  })
+
+  it('does not lock scroll or listen to Escape when disabled', () => {
+    const onClose = vi.fn()
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    act(() => root.render(<Harness onClose={onClose} enabled={false} />))
+    expect(document.body.style.overflow).toBe('')
+    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
     expect(onClose).not.toHaveBeenCalled()
     act(() => root.unmount())
   })
