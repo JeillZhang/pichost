@@ -29,14 +29,14 @@ export default function Admin() {
       </h1>
 
       {/* Tab bar */}
-      <div className="glass mb-5 flex gap-0.5 rounded-lg p-1">
+      <div className="glass mb-5 flex gap-0.5 overflow-x-auto rounded-lg p-1">
         {TABS.map((tab) => {
           const active = activeTab === tab.key
           return (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-all duration-200 ${
+              className={`flex-1 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-all duration-200 ${
                 active
                   ? 'bg-[var(--color-accent-subtle)] text-[var(--color-accent)] shadow-sm'
                   : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
