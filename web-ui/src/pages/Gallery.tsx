@@ -2,8 +2,8 @@ import { useRef, useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { listImages, batchDeleteImages, listStorageConfigs } from '../api/client'
-import type { ImageInfo, PaginatedListParams } from '../api/client'
+import { listImages, batchDeleteImages, listStorageConfigs, listCategories } from '../api/client'
+import type { ImageInfo, PaginatedListParams, CategoryTreeNode } from '../api/client'
 import { CheckSquare, Square, Trash2, X, Code2, Server, HardDrive, Folder } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
 import SortDropdown from '../components/SortDropdown'
@@ -24,6 +24,15 @@ function getProviderIcon(provider: string) {
     default:
       return <HardDrive className="h-3 w-3" />
   }
+}
+
+function findCategoryName(nodes: CategoryTreeNode[], id: string): string | null {
+  for (const node of nodes) {
+    if (node.id === id) return node.name
+    const child = findCategoryName(node.children, id)
+    if (child) return child
+  }
+  return null
 }
 
 export default function Gallery() {
@@ -50,6 +59,15 @@ export default function Gallery() {
     queryFn: () => listStorageConfigs(),
     staleTime: 5 * 60 * 1000,
   })
+
+  const { data: categories } = useQuery({
+    queryKey: ['categories'],
+    queryFn: listCategories,
+    staleTime: 5 * 60 * 1000,
+  })
+  const currentCategoryName = categoryFilter
+    ? findCategoryName(categories ?? [], categoryFilter)
+    : null
 
   const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteQuery({
@@ -196,14 +214,14 @@ export default function Gallery() {
               </span>
             )}
           </h1>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setCategorySheetOpen(true)}
               className="flex items-center gap-1.5 rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm md:hidden"
               style={{ color: 'var(--color-text-secondary)' }}
             >
               <Folder className="h-4 w-4" />
-              {t('gallery.allCategories')}
+              {currentCategoryName ?? t('gallery.allCategories')}
             </button>
             <div className="w-48 sm:w-64">
               <SearchBar value={search} onChange={setSearch} />

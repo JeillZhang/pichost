@@ -25,9 +25,13 @@ test.describe.serial('no horizontal overflow on mobile', () => {
       }
       await page.goto(path)
       await page.waitForTimeout(300)
-      const overflow = await page.evaluate(
-        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      )
+      // Measure BOTH doc and body: `overflow-x: clip` on html masks doc-level
+      // overflow, but body-level overflow still shows as horizontal scroll.
+      const overflow = await page.evaluate(() => {
+        const doc = document.documentElement.scrollWidth - document.documentElement.clientWidth
+        const body = document.body.scrollWidth - document.body.clientWidth
+        return Math.max(doc, body)
+      })
       expect(overflow).toBeLessThanOrEqual(1)
     })
   }
