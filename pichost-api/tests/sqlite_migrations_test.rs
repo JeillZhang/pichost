@@ -71,3 +71,20 @@ async fn sqlite_migrations_storage_configs() {
         .fetch_one(&pool).await.unwrap();
     assert_eq!(n, 2);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_migrations_all_ten() {
+    let pool = sqlite_pool().await;
+    MIGRATOR.run(&pool).await.unwrap();
+    let ver: i64 = sqlx::query_scalar("SELECT max(version) FROM _sqlx_migrations")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(ver, 10);
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pragma_table_info('users') WHERE name='watermark_config'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(n, 1);
+    let cat: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='categories'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(cat, 1);
+}
