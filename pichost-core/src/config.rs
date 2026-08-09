@@ -78,8 +78,20 @@ fn default_storage_quota() -> u64 {
     1_073_741_824 // 1 GB
 }
 
+/// Which database engine the API should connect to.
+/// `Postgres` is the default; `Sqlite` powers the lightweight "lite mode".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseMode {
+    #[default]
+    Postgres,
+    Sqlite,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DatabaseConfig {
+    #[serde(default)]
+    pub mode: DatabaseMode,
     pub url: String,
     pub max_connections: u32,
 }
@@ -229,6 +241,7 @@ impl Default for AppConfig {
                 rustfs: None,
             },
             database: DatabaseConfig {
+                mode: DatabaseMode::default(),
                 url: "postgres://pichost:pichost@localhost:5432/pichost".into(),
                 max_connections: 10,
             },
@@ -276,6 +289,7 @@ pub fn load_config() -> Result<AppConfig, figment::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     struct EnvGuard {
         key: &'static str,
@@ -387,6 +401,7 @@ mod tests {
         assert_eq!(w.processing.thumbnail_size, p.thumbnail_size);
     }
 
+    #[serial]
     #[test]
     fn test_load_config_env_override_and_restore() {
         let _guard = PichostEnvGuard::capture();

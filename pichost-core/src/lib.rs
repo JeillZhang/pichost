@@ -1,4 +1,6 @@
 pub mod config;
+#[cfg(test)]
+mod config_test;
 pub mod crypto;
 pub mod error;
 pub mod i18n;
