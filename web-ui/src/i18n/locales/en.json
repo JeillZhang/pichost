@@ -148,7 +148,13 @@
     "renameFailed": "Rename failed",
     "deleteFailed": "Delete failed",
     "loading": "Loading…",
-    "notFound": "Image not found."
+    "notFound": "Image not found.",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "zoomReset": "Reset zoom",
+    "zoomFit": "Fit to screen",
+    "zoomLevel": "Zoom {{percent}}%",
+    "openViewer": "View image"
   },
   "settings": {
     "profile": "Profile",
