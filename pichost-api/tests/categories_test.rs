@@ -366,6 +366,14 @@ async fn categories_depth_limit_rejects_third_level() {
     assert_eq!(status, StatusCode::CREATED, "second level should succeed: {resp}");
     let l2_id = resp["id"].as_str().unwrap().to_string();
 
+    let (status, resp) = send_json(
+        &app,
+        Method::POST,
+        "/api/v1/categories",
+        Some(&token),
+        &serde_json::json!({"name": "L3", "parent_id": l2_id}),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
     assert!(resp["error"].is_string());
 }
