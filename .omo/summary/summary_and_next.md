@@ -428,10 +428,40 @@
 
 ### 版本: 0.17.5 → **0.18.0**（Cargo.toml + web-ui/package.json 对齐 0.18.0）
 
+## 响应式布局 ✅ (本次完成)
+
+参考 `docs/superpowers/specs/2026-08-08-pichost-responsive-design.md`（方案 B：Tailwind 断点 + 少量共享组件）。
+
+### 共享组件层（新增）
+- **`useOverlay(onClose, enabled)` hook**: Escape 关闭 + body 滚动锁 + 覆盖层点击关闭，`enabled` 门控（修复 iOS Safari 关闭弹窗后页面滚动冻结的 CRITICAL）
+- **`ui/Modal`**: 移动端（<sm）底部弹层 / ≥sm 居中面板，`role="dialog"`，保留 `.glass-modal` 类（E2E 定位符依赖），内容区 `min-h-0 flex-1` 可滚动
+- **`ui/ConfirmDialog`**: 危险操作确认框，替换 3 处原生 confirm/alert
+- **`ui/Sheet`**: 左侧滑出抽屉（分类筛选）
+- **`clampLeft`**: 弹出层视口钳制（GlassSelect/DropdownMenu 窄屏防溢出）
+
+### 页面改造
+- **MobileNav 汉堡菜单**: <768px NavBar 收起链接，抽屉内含导航 + 用户操作（设置/管理/登出）+ 主题/语言切换
+- **Gallery**: 移动端分类按钮 → Sheet 抽屉复用 CategoryTree；网格 `grid-cols-2 sm:3 md:3 lg:4 xl:5`；选择按钮触屏常显
+- **CategoryTree**: 每行 ⋯ 按钮（触屏菜单，右键保留），菜单锚点双触发 + 视口钳制；`w-80` 弹窗 → Modal/ConfirmDialog
+- **弹窗迁移**: EditUserDialog/CreateInviteDialog/StorageConfigSection/SystemConfig/Gallery 全部改用共享 Modal/ConfirmDialog（含 backdrop-filter 包含块 hoist 处理）
+- **Admin 表格卡片化**: <sm 卡片列表（`data-testid="user-card"/"invite-card"`），≥sm 表格 + `overflow-x-auto`
+- **全局**: `overflow-x: clip` 守卫（修复 /gallery 66px 溢出）、容器 padding 断点化、WatermarkSettings/PreprocessingSettings 网格断点、DropZone 触屏点击区、Admin 标签栏滚动兜底、ImageDetail 重命名铅笔触屏常显
+
+### 验证
+- `cargo test --workspace` ✅ (324 pass, 0 fail — 后端零改动)
+- `cargo clippy --workspace -D warnings` ✅
+- 前端 vitest ✅ (60 pass — 新增 useOverlay 5 测 + Modal/ConfirmDialog 5 测 + clampLeft 3 测 + i18n 扩展)
+- Playwright E2E ✅ (94 pass, 1 skip — 新增 mobile-nav 3、mobile-gallery 1、mobile-admin 3、responsive 6、settings/admin/categories/gallery/upload/image-detail 扩展)
+- `npm run build` ✅
+- 全分支评审: 1 CRITICAL（useOverlay 滚动锁门控）+ 4 MEDIUM + 1 LOW 全部修复（5 commits），scoped re-review ALL ADDRESSED
+
+### 版本: 0.18.0 → **0.19.0**（Cargo.toml + web-ui/package.json 对齐 0.19.0，CHANGELOG 更新）
+
 ## 待实施
 
 | 阶段 | 主题 | 依赖 |
 |------|------|------|
 | i18n 扩展 | 新增语言 (ja/ko/...) — 后端 `locales/{lang}/messages.toml` + `Language` 枚举扩展，前端 `src/i18n/locales/{lang}.json` + LanguageSwitcher 枚举，键集相等性测试 | i18n 已落地 |
+| 触屏增强 | CategoryTree 长按手势（当前 ⋯ 按钮已覆盖触屏，长按列为后续增强） | 响应式已落地 |
 
-当前计划内阶段（P0–P4-I）+ i18n 已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划）。
+当前计划内阶段（P0–P4-I）+ i18n + 响应式布局已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划）。
