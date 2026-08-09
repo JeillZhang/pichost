@@ -1,6 +1,8 @@
 use chrono::Utc;
 use deadpool_redis::{redis::AsyncCommands, Pool};
 use pichost_core::models::TaskPayload;
+use pichost_core::state::{NackAction as StateNackAction, QueueError as StateQueueError};
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Errors from queue operations.
@@ -25,6 +27,83 @@ pub enum NackAction {
     DeadLetter,
 }
 
+/// Redis-backed implementation of `pichost_core::state::Queue`.
+///
+/// Thin wrapper over the free queue functions in this module — the Redis key
+/// layout (HSET task data + LPUSH/BRPOPLPUSH pending/processing lists) and
+/// the retry/dead-letter semantics are unchanged.
+#[derive(Clone)]
+pub struct RedisQueue {
+    pool: Pool,
+}
+
+/// Generic message stored in the task HSET `error` field when a task is nacked
+/// through the `Queue` trait (the trait carries no error detail).
+const NACK_ERR_MSG: &str = "nack: task failed";
+
+/// Map any queue-layer error into the coarse `Queue` trait error type.
+fn to_state_error(e: impl std::fmt::Display) -> StateQueueError {
+    StateQueueError::Other(e.to_string())
+}
+
+impl RedisQueue {
+    /// Create a queue backed by the given deadpool Redis pool.
+    pub fn new(pool: Pool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait::async_trait]
+impl pichost_core::state::Queue for RedisQueue {
+    async fn enqueue(&self, payload: &TaskPayload) -> Result<(), StateQueueError> {
+        enqueue_task(&self.pool, payload)
+            .await
+            .map_err(to_state_error)
+    }
+
+    async fn dequeue(
+        &self,
+        timeout: Duration,
+    ) -> Result<Option<TaskPayload>, StateQueueError> {
+        dequeue_task(&self.pool, timeout.as_secs())
+            .await
+            .map_err(to_state_error)
+    }
+
+    async fn ack(&self, task_id: Uuid) -> Result<(), StateQueueError> {
+        ack_task(&self.pool, task_id).await.map_err(to_state_error)
+    }
+
+    async fn nack(
+        &self,
+        task_id: Uuid,
+        retry_count: i32,
+        max_retries: i32,
+    ) -> Result<StateNackAction, StateQueueError> {
+        // Reload the stored payload so a retry round-trips the full task data.
+        let mut conn = self.pool.get().await.map_err(to_state_error)?;
+        let key = task_key(task_id);
+        let json: Option<String> = conn.hget(&key, "data").await.map_err(to_state_error)?;
+        let mut task: TaskPayload = match json {
+            Some(j) => serde_json::from_str(&j).map_err(to_state_error)?,
+            None => {
+                return Err(StateQueueError::Other(format!(
+                    "missing task data for id {task_id}"
+                )))
+            }
+        };
+        task.retry_count = retry_count;
+        task.max_retries = max_retries;
+        let action = nack_task(&self.pool, &task, NACK_ERR_MSG)
+            .await
+            .map_err(to_state_error)?;
+        Ok(match action {
+            NackAction::Retry => StateNackAction::Retry,
+            NackAction::DeadLetter => StateNackAction::DeadLetter,
+        })
+    }
+}
+
 // Redis key constants
 const KEY_PENDING: &str = "pichost:tasks:pending";
 const KEY_PROCESSING: &str = "pichost:tasks:processing";
@@ -39,7 +118,6 @@ fn task_key(task_id: Uuid) -> String {
 ///
 /// Serializes `task` to JSON, stores it in an HSET under `pichost:task:{task_id}`,
 /// and pushes the task ID to `pichost:tasks:pending`.
-#[allow(dead_code)]
 pub async fn enqueue_task(redis: &Pool, task: &TaskPayload) -> Result<(), QueueError> {
     let mut conn = redis.get().await?;
     let key = task_key(task.task_id);
