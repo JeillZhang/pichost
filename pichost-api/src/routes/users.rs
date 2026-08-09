@@ -264,8 +264,6 @@ where
     (bool,): crate::db::DbRow<DB>,
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
-    str: sqlx::Type<DB>,
-    for<'q> &'q str: sqlx::Encode<'q, DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     let Some(username) = username else {
@@ -303,8 +301,6 @@ where
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
     (bool,): crate::db::DbRow<DB>,
-    str: sqlx::Type<DB>,
-    for<'q> &'q str: sqlx::Encode<'q, DB>,
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -503,8 +499,6 @@ async fn update_password_hash<DB: DbType>(
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
-    str: sqlx::Type<DB>,
-    for<'q> &'q str: sqlx::Encode<'q, DB>,
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,

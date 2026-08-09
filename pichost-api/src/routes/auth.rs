@@ -229,8 +229,6 @@ where
     usize: sqlx::ColumnIndex<DB::Row>,
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
-    str: sqlx::Type<DB>,
-    for<'q> &'q str: sqlx::Encode<'q, DB>,
     Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,

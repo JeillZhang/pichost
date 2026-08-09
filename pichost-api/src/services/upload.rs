@@ -368,8 +368,6 @@ where
     (bool,): crate::db::DbRow<DB>,
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
-    str: sqlx::Type<DB>,
-    for<'q> &'q str: sqlx::Encode<'q, DB>,
     Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
@@ -400,8 +398,6 @@ async fn fetch_dedup_row<DB: DbType>(
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
-    str: sqlx::Type<DB>,
-    for<'q> &'q str: sqlx::Encode<'q, DB>,
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
@@ -723,8 +719,6 @@ where
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     (uuid::Uuid,): crate::db::DbRow<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
-    str: sqlx::Type<DB>,
-    for<'q> &'q str: sqlx::Encode<'q, DB>,
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -1253,16 +1247,7 @@ where
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
 {
-    let mut sql = "SELECT COUNT(*) FROM images WHERE user_id = ".to_string();
-    if !search_term.is_empty() {
-        sql.push_str(" AND original_name ILIKE ");
-    }
-    if config_id.is_some() {
-        sql.push_str(" AND storage_config_id = ");
-    }
-    if category_id.is_some() {
-        sql.push_str(" AND category_id = ");
-    }
+    let sql = build_count_sql(search_term, config_id, category_id);
     let mut q = sqlx::query(&sql).bind(user_id);
     if !search_term.is_empty() {
         q = q.bind(format!("%{search_term}%"));
@@ -1314,25 +1299,7 @@ where
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
-    let mut sql = "SELECT id,public_key,original_name,url,mime_type,file_size,\
-         sha256,width,height,status,thumbnail_url,webp_url,\
-         created_at,category_id,storage_config_id FROM images WHERE user_id = "
-        .to_string();
-    if !search_term.is_empty() {
-        sql.push_str(" AND original_name ILIKE ");
-    }
-    if config_id.is_some() {
-        sql.push_str(" AND storage_config_id = ");
-    }
-    if category_id.is_some() {
-        sql.push_str(" AND category_id = ");
-    }
-    sql.push_str(" ORDER BY ");
-    sql.push_str(sort_col);
-    sql.push(' ');
-    sql.push_str(order_dir);
-    sql.push_str(" LIMIT ");
-    sql.push_str(" OFFSET ");
+    let sql = build_list_sql(search_term, config_id, category_id, sort_col, order_dir);
     let mut q = sqlx::query_as::<_, ImageRow>(&sql).bind(user_id);
     if !search_term.is_empty() {
         q = q.bind(format!("%{search_term}%"));
@@ -1352,6 +1319,66 @@ where
             "common.internal_error",
         )
     })
+}
+
+fn build_count_sql(
+    search_term: &str,
+    config_id: Option<Uuid>,
+    category_id: Option<Uuid>,
+) -> String {
+    let mut n = 1;
+    let mut sql = format!("SELECT COUNT(*) FROM images WHERE user_id = ${n}");
+    if !search_term.is_empty() {
+        n += 1;
+        sql.push_str(&format!(" AND original_name ILIKE ${n}"));
+    }
+    if config_id.is_some() {
+        n += 1;
+        sql.push_str(&format!(" AND storage_config_id = ${n}"));
+    }
+    if category_id.is_some() {
+        n += 1;
+        sql.push_str(&format!(" AND category_id = ${n}"));
+    }
+    sql
+}
+
+/// Gallery list SQL with positional placeholders in bind order: user_id ($1),
+/// optional search/config/category filters ($2..$4), then LIMIT/OFFSET.
+#[allow(clippy::too_many_arguments)]
+fn build_list_sql(
+    search_term: &str,
+    config_id: Option<Uuid>,
+    category_id: Option<Uuid>,
+    sort_col: &str,
+    order_dir: &str,
+) -> String {
+    let mut n = 1;
+    let mut sql = format!(
+        "SELECT id,public_key,original_name,url,mime_type,file_size,\
+         sha256,width,height,status,thumbnail_url,webp_url,\
+         created_at,category_id,storage_config_id FROM images WHERE user_id = ${n}"
+    );
+    if !search_term.is_empty() {
+        n += 1;
+        sql.push_str(&format!(" AND original_name ILIKE ${n}"));
+    }
+    if config_id.is_some() {
+        n += 1;
+        sql.push_str(&format!(" AND storage_config_id = ${n}"));
+    }
+    if category_id.is_some() {
+        n += 1;
+        sql.push_str(&format!(" AND category_id = ${n}"));
+    }
+    n += 1;
+    let limit = n;
+    n += 1;
+    let offset = n;
+    sql.push_str(&format!(
+        " ORDER BY {sort_col} {order_dir} LIMIT ${limit} OFFSET ${offset}"
+    ));
+    sql
 }
 
 /// Fetch a single image by ID (owned by user).
@@ -1394,6 +1421,45 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_build_count_sql_no_filters() {
+        assert_eq!(
+            build_count_sql("", None, None),
+            "SELECT COUNT(*) FROM images WHERE user_id = $1"
+        );
+    }
+
+    #[test]
+    fn test_build_count_sql_with_filters() {
+        let uid = Uuid::new_v4();
+        let sql = build_count_sql("cat", Some(uid), Some(uid));
+        assert!(sql.starts_with("SELECT COUNT(*) FROM images WHERE user_id = $1"));
+        assert!(sql.contains(" AND original_name ILIKE $2"));
+        assert!(sql.contains(" AND storage_config_id = $3"));
+        assert!(sql.contains(" AND category_id = $4"));
+        assert_eq!(sql.matches('$').count(), 4);
+    }
+
+    #[test]
+    fn test_build_list_sql_no_filters() {
+        let sql = build_list_sql("", None, None, "created_at", "DESC");
+        assert!(sql.starts_with("SELECT id,public_key,"));
+        assert!(sql.ends_with(" ORDER BY created_at DESC LIMIT $2 OFFSET $3"));
+        assert!(!sql.contains("ILIKE"));
+    }
+
+    #[test]
+    fn test_build_list_sql_with_filters() {
+        let uid = Uuid::new_v4();
+        let sql = build_list_sql("cat", Some(uid), Some(uid), "file_size", "ASC");
+        assert!(sql.contains("WHERE user_id = $1"));
+        assert!(sql.contains(" AND original_name ILIKE $2"));
+        assert!(sql.contains(" AND storage_config_id = $3"));
+        assert!(sql.contains(" AND category_id = $4"));
+        assert!(sql.ends_with(" ORDER BY file_size ASC LIMIT $5 OFFSET $6"));
+        assert_eq!(sql.matches('$').count(), 6);
+    }
 
     fn sample_row(storage_config_id: Option<Uuid>, name: Option<String>, provider: Option<String>) -> ImageRow {
         ImageRow {

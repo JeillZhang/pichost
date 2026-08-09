@@ -216,8 +216,6 @@ where
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
-    str: sqlx::Type<DB>,
-    for<'q> &'q str: sqlx::Encode<'q, DB>,
     Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -568,8 +566,6 @@ where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     (i64, i64): crate::db::DbRow<DB>,
-    str: sqlx::Type<DB>,
-    for<'q> &'q str: sqlx::Encode<'q, DB>,
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
 {

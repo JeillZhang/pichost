@@ -12,7 +12,6 @@ use oauth2::{
     Scope, TokenResponse, TokenUrl,
 };
 use serde::Deserialize;
-use uuid::Uuid;
 
 use crate::app::AppState;
 use crate::i18n_ext::{error_json, error_json_args, JsonBody, Locale};
@@ -96,7 +95,7 @@ where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
-    (Uuid, String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
+    (uuid::Uuid, String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
     str: sqlx::Type<DB>,
@@ -294,8 +293,6 @@ where
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     (uuid::Uuid, String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
     (uuid::Uuid,): crate::db::DbRow<DB>,
-    str: sqlx::Type<DB>,
-    for<'q> &'q str: sqlx::Encode<'q, DB>,
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,

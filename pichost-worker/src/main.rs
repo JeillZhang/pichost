@@ -273,8 +273,6 @@ where
     for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
     chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    str: sqlx::Type<DB>,
-    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
 {
