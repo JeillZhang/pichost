@@ -26,7 +26,23 @@ pub async fn create_pool(
         DatabaseMode::Postgres => AnyConnectOptions::from_str(url)?,
         DatabaseMode::Sqlite => AnyConnectOptions::from_str(&sqlite_url(url))?,
     };
-    opts.connect_with(connect).await
+    let pool = opts.connect_with(connect).await?;
+    if mode == DatabaseMode::Sqlite {
+        enable_wal(&pool, url).await?;
+    }
+    Ok(pool)
+}
+
+/// WAL is a persistent property of the sqlite database file, so it can be
+/// restored with a single post-connect statement (AnyConnectOptions cannot
+/// carry it). Skipped for in-memory databases (`mode=memory`), where WAL is
+/// meaningless. Foreign keys are already enforced by sqlx by default.
+async fn enable_wal(pool: &DbPool, url: &str) -> Result<(), sqlx::Error> {
+    if sqlite_url(url).contains("mode=memory") {
+        return Ok(());
+    }
+    sqlx::query("PRAGMA journal_mode=WAL").execute(pool).await?;
+    Ok(())
 }
 
 pub async fn run_migrations(
