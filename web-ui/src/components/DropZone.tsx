@@ -58,7 +58,7 @@ export default function DropZone({ onUpload }: DropZoneProps) {
   return (
     <div
       {...getRootProps()}
-      className={`glass group relative cursor-pointer overflow-hidden rounded-xl border-2 border-dashed p-12 text-center transition-all duration-300 ${
+      className={`glass group relative flex min-h-[140px] cursor-pointer items-center justify-center overflow-hidden rounded-xl border-2 border-dashed p-8 text-center transition-all duration-300 sm:p-12 ${
         isDragActive
           ? 'scale-[1.01] border-[var(--color-accent)] bg-[var(--color-accent-subtle)] shadow-[var(--shadow-glow)]'
           : 'border-[var(--color-border)] hover:border-[var(--glass-border-base)] hover:bg-[var(--glass-tint-base)]/85'

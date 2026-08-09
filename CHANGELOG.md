@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Versions before 0.7.0 are not documented here.
 
+## [0.19.0] - 2026-08-08
+
+### Added
+
+- Responsive web layout: mobile hamburger navigation (MobileNav drawer), category filter drawer (Sheet) on mobile, touch-friendly category menu (⋯ button), shared Modal/ConfirmDialog components with mobile bottom-sheet behavior, admin table card-ification on small screens, global horizontal-overflow guard, responsive gallery grid (2/3/3/4/5 columns), settings grid/wrapping fixes, DropZone touch tap area, popover viewport clamping.
+
 ## [0.17.5] - 2026-08-02
 
 ### Added

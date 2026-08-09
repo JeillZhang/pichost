@@ -127,7 +127,7 @@ export default function AdminInvites() {
         </button>
       </div>
 
-      <div className="glass overflow-hidden rounded-xl">
+      <div className="glass hidden overflow-x-auto rounded-xl sm:block">
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
@@ -193,6 +193,58 @@ export default function AdminInvites() {
             })}
           </tbody>
         </table>
+      </div>
+
+      <div className="mt-3 flex flex-col gap-2 sm:hidden">
+        {codes.map((code) => {
+          const status = getStatus(code)
+          return (
+            <div key={code.code} data-testid="invite-card" className="glass rounded-xl p-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate font-mono text-sm font-medium" style={{ color: 'var(--color-text-primary)' }} title={code.code}>
+                  {truncateCode(code.code)}
+                </span>
+                <span
+                  className="inline-block shrink-0 rounded px-2 py-0.5 text-xs font-medium"
+                  style={{
+                    backgroundColor:
+                      status.key === 'active'
+                        ? 'var(--color-success-subtle)'
+                        : status.key === 'expired'
+                          ? 'var(--color-danger-subtle)'
+                          : 'var(--color-surface)',
+                    color: status.color,
+                  }}
+                >
+                  {status.label}
+                </span>
+              </div>
+              <div className="mt-2 space-y-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-3 w-3 shrink-0" />
+                  <span className="truncate">
+                    {t('adminInvites.tableCreated')}: {formatDate(code.created_at * 1000)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-3 w-3 shrink-0" />
+                  <span className="truncate">
+                    {t('adminInvites.tableExpires')}: {timeRemaining(code.expires_at)}
+                  </span>
+                </div>
+              </div>
+              <div className="mt-3 flex justify-end">
+                <button
+                  onClick={() => handleCopy(code.code)}
+                  className="flex min-h-[44px] items-center gap-1.5 rounded-lg px-3 text-sm"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  <Copy className="h-4 w-4" /> {t('adminInvites.tableCode')}
+                </button>
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       {showCreate && (

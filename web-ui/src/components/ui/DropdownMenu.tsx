@@ -49,7 +49,7 @@ export default function DropdownMenu({
       {open && (
         <div
           role="menu"
-          className="glass-elevated absolute z-50 min-w-[140px] overflow-hidden rounded-lg py-1"
+          className="glass-elevated absolute z-50 min-w-[140px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1"
           style={{
             top: 'calc(100% + 0.375rem)',
             ...(align === 'right' ? { right: 0 } : { left: 0 }),

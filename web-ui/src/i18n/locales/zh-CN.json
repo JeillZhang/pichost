@@ -12,7 +12,8 @@
     "admin": "管理",
     "adminBadge": "管理",
     "settings": "设置",
-    "logout": "退出登录"
+    "logout": "退出登录",
+    "menu": "菜单"
   },
   "search": {
     "placeholder": "按文件名搜索…",
@@ -89,6 +90,7 @@
   "gallery": {
     "title": "图库",
     "imagesCount": "{{count}} 张图片",
+    "allCategories": "全部分类",
     "allBackends": "全部后端",
     "selected": "已选 {{count}} 张",
     "deselectAll": "取消全选",
@@ -192,7 +194,8 @@
     "deleteCategory": "删除分类",
     "deleteConfirm": "这也会删除所有子分类。这些分类中的图片将被取消分类。",
     "deleting": "删除中...",
-    "newCategoryTitle": "新建分类"
+    "newCategoryTitle": "新建分类",
+    "moreActions": "更多操作"
   },
   "storageConfig": {
     "addTitle": "添加存储配置",
@@ -350,6 +353,7 @@
     "admin": "管理员",
     "quota": "配额",
     "actions": "操作",
+    "deleteTitle": "删除用户",
     "adminBadge": "管理员",
     "unlimited": "无限制",
     "deleteConfirm": "删除用户「{{name}}」？这将永久删除该用户的所有图片。",
@@ -416,5 +420,11 @@
     "users": "用户",
     "invites": "邀请码",
     "systemConfig": "系统配置"
+  },
+  "modal": {
+    "close": "关闭"
+  },
+  "confirmDialog": {
+    "confirm": "确认"
   }
 }

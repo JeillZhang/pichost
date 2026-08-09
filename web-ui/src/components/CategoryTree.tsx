@@ -2,7 +2,17 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, Folder, FolderOpen, Plus, Pencil, Trash2 } from 'lucide-react'
+import {
+  ChevronRight,
+  Folder,
+  FolderOpen,
+  Plus,
+  Pencil,
+  Trash2,
+  MoreHorizontal,
+} from 'lucide-react'
+import Modal from './ui/Modal'
+import ConfirmDialog from './ui/ConfirmDialog'
 import {
   listCategories,
   createCategory,
@@ -21,6 +31,8 @@ interface ContextMenuState {
   y: number
   nodeId: string
   nodeName: string
+  anchor?: 'cursor' | 'button'
+  buttonRect?: DOMRect
 }
 
 function TreeNode({
@@ -34,6 +46,7 @@ function TreeNode({
   setRenameValue,
   onRenameSubmit,
   onContextMenu,
+  onMenuButtonClick,
 }: {
   node: CategoryTreeNode
   depth: number
@@ -45,7 +58,9 @@ function TreeNode({
   setRenameValue: (v: string) => void
   onRenameSubmit: (id: string, name: string) => void
   onContextMenu: (e: React.MouseEvent, nodeId: string, nodeName: string) => void
+  onMenuButtonClick: (e: React.MouseEvent, nodeId: string, nodeName: string) => void
 }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const hasChildren = node.children.length > 0
   const isSelected = selectedId === node.id
@@ -101,6 +116,17 @@ function TreeNode({
         ) : (
           <span className="flex-1 truncate">{node.name}</span>
         )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onMenuButtonClick(e, node.id, node.name)
+          }}
+          aria-label={t('categoryTree.moreActions')}
+          className="rounded p-1 opacity-60 transition-opacity hover:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
+          <MoreHorizontal size={14} />
+        </button>
       </div>
       {expanded && hasChildren && (
         <div>
@@ -117,6 +143,7 @@ function TreeNode({
               setRenameValue={setRenameValue}
               onRenameSubmit={onRenameSubmit}
               onContextMenu={onContextMenu}
+              onMenuButtonClick={onMenuButtonClick}
             />
           ))}
         </div>
@@ -198,7 +225,24 @@ export default function CategoryTree({
   ) {
     e.preventDefault()
     e.stopPropagation()
-    setContextMenu({ x: e.clientX, y: e.clientY, nodeId, nodeName })
+    setContextMenu({ x: e.clientX, y: e.clientY, nodeId, nodeName, anchor: 'cursor' })
+  }
+
+  function handleMenuButtonClick(
+    e: React.MouseEvent,
+    nodeId: string,
+    nodeName: string,
+  ) {
+    e.stopPropagation()
+    const rect = e.currentTarget.getBoundingClientRect()
+    setContextMenu({
+      x: rect.left,
+      y: rect.bottom + 4,
+      nodeId,
+      nodeName,
+      anchor: 'button',
+      buttonRect: rect,
+    })
   }
 
   function handleRenameSubmit(id: string, name: string) {
@@ -217,6 +261,13 @@ export default function CategoryTree({
     setDeleteConfirmId(contextMenu.nodeId)
     setContextMenu(null)
   }
+
+  const menuX = contextMenu
+    ? Math.min(contextMenu.x, window.innerWidth - 160)
+    : 0
+  const menuY = contextMenu
+    ? Math.min(contextMenu.y, window.innerHeight - 100)
+    : 0
 
   return (
     <div className="flex flex-col">
@@ -269,6 +320,7 @@ export default function CategoryTree({
               setRenameValue={setRenameValue}
               onRenameSubmit={handleRenameSubmit}
               onContextMenu={handleContextMenu}
+              onMenuButtonClick={handleMenuButtonClick}
             />
           ))}
         </div>
@@ -295,7 +347,7 @@ export default function CategoryTree({
           <div
             ref={contextMenuRef}
             className="glass-elevated fixed z-50 min-w-[130px] rounded-lg py-1"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
+            style={{ left: menuX, top: menuY }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -319,108 +371,66 @@ export default function CategoryTree({
         )}
 
       {/* Create Modal */}
-      {showCreate &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-            onClick={() => setShowCreate(false)}
-          >
-            <div
-              className="glass-modal w-80 p-5"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3
-                className="mb-3 text-sm font-semibold"
-                style={{ color: 'var(--color-text-primary)', fontFamily: "'Outfit', system-ui, sans-serif" }}
-              >
-                {t('categoryTree.newCategory')}
-              </h3>
-              <input
-                type="text"
-                value={createName}
-                onChange={(e) => setCreateName(e.target.value)}
-                placeholder={t('categoryTree.categoryName')}
-                className="input-field mb-3"
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && createName.trim()) {
-                    createMutation.mutate({
-                      name: createName.trim(),
-                      parent_id: createParentId,
-                    })
-                  }
-                  if (e.key === 'Escape') setShowCreate(false)
-                }}
-              />
-              {createParentId && (
-                <p className="mb-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                  {t('categoryTree.subCategoryNote')}
-                </p>
-              )}
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setShowCreate(false)} className="btn-ghost text-xs">
-                  {t('categoryTree.cancel')}
-                </button>
-                <button
-                  onClick={() => {
-                    if (createName.trim()) {
-                      createMutation.mutate({
-                        name: createName.trim(),
-                        parent_id: createParentId,
-                      })
-                    }
-                  }}
-                  disabled={!createName.trim() || createMutation.isPending}
-                  className="btn-accent text-xs"
-                >
-                  {createMutation.isPending ? t('categoryTree.creating') : t('categoryTree.create')}
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body,
+      <Modal
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        title={t('categoryTree.newCategory')}
+        size="sm"
+      >
+        <input
+          type="text"
+          value={createName}
+          onChange={(e) => setCreateName(e.target.value)}
+          placeholder={t('categoryTree.categoryName')}
+          className="input-field mb-3"
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && createName.trim()) {
+              createMutation.mutate({
+                name: createName.trim(),
+                parent_id: createParentId,
+              })
+            }
+            if (e.key === 'Escape') setShowCreate(false)
+          }}
+        />
+        {createParentId && (
+          <p className="mb-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            {t('categoryTree.subCategoryNote')}
+          </p>
         )}
+        <div className="flex justify-end gap-2">
+          <button onClick={() => setShowCreate(false)} className="btn-ghost text-xs">
+            {t('categoryTree.cancel')}
+          </button>
+          <button
+            onClick={() => {
+              if (createName.trim()) {
+                createMutation.mutate({
+                  name: createName.trim(),
+                  parent_id: createParentId,
+                })
+              }
+            }}
+            disabled={!createName.trim() || createMutation.isPending}
+            className="btn-accent text-xs"
+          >
+            {createMutation.isPending ? t('categoryTree.creating') : t('categoryTree.create')}
+          </button>
+        </div>
+      </Modal>
 
       {/* Delete Confirmation Dialog */}
-      {deleteConfirmId &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-            onClick={() => setDeleteConfirmId(null)}
-          >
-            <div
-              className="glass-modal w-80 p-5"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3
-                className="mb-2 text-sm font-semibold"
-                style={{ color: 'var(--color-text-primary)', fontFamily: "'Outfit', system-ui, sans-serif" }}
-              >
-                {t('categoryTree.deleteCategory')}
-              </h3>
-              <p className="mb-4 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('categoryTree.deleteConfirm')}
-              </p>
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => setDeleteConfirmId(null)}
-                  className="btn-ghost text-xs"
-                >
-                  {t('categoryTree.cancel')}
-                </button>
-                <button
-                  onClick={() => deleteMutation.mutate(deleteConfirmId)}
-                  disabled={deleteMutation.isPending}
-                  className="btn-accent text-xs"
-                  style={{ background: 'var(--color-danger)' }}
-                >
-                  {deleteMutation.isPending ? t('categoryTree.deleting') : t('categoryTree.delete')}
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
+      <ConfirmDialog
+        open={!!deleteConfirmId}
+        onClose={() => setDeleteConfirmId(null)}
+        onConfirm={() => deleteMutation.mutate(deleteConfirmId!)}
+        title={t('categoryTree.deleteCategory')}
+        message={t('categoryTree.deleteConfirm')}
+        confirmLabel={t('categoryTree.delete')}
+        danger
+        pending={deleteMutation.isPending}
+      />
     </div>
   )
 }

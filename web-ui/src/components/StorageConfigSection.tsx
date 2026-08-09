@@ -1,5 +1,4 @@
 import { useState, type FormEvent } from 'react'
-import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -14,7 +13,6 @@ import {
   EyeOff,
   Check,
   Star,
-  X,
 } from 'lucide-react'
 import {
   listStorageConfigs,
@@ -26,6 +24,8 @@ import {
   type CreateStorageConfigRequest,
 } from '../api/client'
 import GlassSelect from './ui/GlassSelect'
+import Modal from './ui/Modal'
+import ConfirmDialog from './ui/ConfirmDialog'
 
 // ── Helpers ────────────────────────────────────────────────
 const PROVIDER_OPTIONS = [
@@ -145,37 +145,12 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
     color: 'var(--color-text-primary)',
   }
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-
-      <div
-        className="relative w-full max-w-md rounded-xl p-6"
-        style={{
-          backgroundColor: 'color-mix(in oklch, var(--glass-tint-base) calc(var(--glass-layer-modal-opacity) * 100%), transparent)',
-          border: '1px solid var(--glass-border-base)',
-          borderTopColor: 'var(--glass-border-strong)',
-          backdropFilter: 'blur(var(--glass-layer-modal-blur)) saturate(var(--glass-layer-modal-saturate))',
-          boxShadow: 'var(--glass-shadow)',
-        }}
-      >
-        {/* Header */}
-        <div className="mb-5 flex items-center justify-between">
-          <h2
-            className="text-lg font-semibold"
-            style={{ color: 'var(--color-text-primary)' }}
-          >
-            {isEdit ? t('storageConfig.editTitle') : t('storageConfig.addTitle')}
-          </h2>
-          <button
-            onClick={onClose}
-            className="rounded p-1 transition-colors hover:bg-[var(--color-surface)]"
-            style={{ color: 'var(--color-text-muted)' }}
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={isEdit ? t('storageConfig.editTitle') : t('storageConfig.addTitle')}
+    >
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Name */}
           <div>
@@ -343,9 +318,7 @@ function ConfigModal({ editing, onClose }: ConfigModalProps) {
             </div>
           </div>
         </form>
-      </div>
-    </div>,
-    document.body,
+    </Modal>
   )
 }
 
@@ -374,65 +347,18 @@ function DeleteConfirm({ config, onClose }: DeleteConfirmProps) {
     }
   }
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-
-      <div
-        className="relative w-full max-w-sm rounded-xl p-6"
-        style={{
-          backgroundColor: 'color-mix(in oklch, var(--glass-tint-base) calc(var(--glass-layer-modal-opacity) * 100%), transparent)',
-          border: '1px solid var(--glass-border-base)',
-          borderTopColor: 'var(--glass-border-strong)',
-          backdropFilter: 'blur(var(--glass-layer-modal-blur)) saturate(var(--glass-layer-modal-saturate))',
-          boxShadow: 'var(--glass-shadow)',
-        }}
-      >
-        <h2
-          className="mb-2 text-lg font-semibold"
-          style={{ color: 'var(--color-text-primary)' }}
-        >
-          {t('storageConfig.deleteConfigTitle')}
-        </h2>
-        <p className="mb-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          {t('storageConfig.deleteConfirmPrefix')}{' '}
-          <strong>{config.name}</strong>
-          {t('storageConfig.deleteConfirmSuffix')}
-        </p>
-        <p className="mb-4 text-xs" style={{ color: 'var(--color-danger)' }}>
-          {t('storageConfig.deleteWarning')}
-        </p>
-
-        <div className="flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={deleting}
-            className="rounded-lg px-4 py-2 text-sm transition-colors"
-            style={{ color: 'var(--color-text-muted)' }}
-          >
-            {t('storageConfig.cancel')}
-          </button>
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={deleting}
-            className="rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            style={{ backgroundColor: 'var(--color-danger)' }}
-          >
-            {deleting ? (
-              <>
-                <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" />
-                {t('storageConfig.deleting')}
-              </>
-            ) : (
-              t('storageConfig.delete')
-            )}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+  return (
+    <ConfirmDialog
+      open
+      onClose={onClose}
+      onConfirm={handleDelete}
+      title={t('storageConfig.deleteConfigTitle')}
+      message={`${t('storageConfig.deleteConfirmPrefix')} ${config.name}${t('storageConfig.deleteConfirmSuffix')} ${t('storageConfig.deleteWarning')}`}
+      confirmLabel={t('storageConfig.delete')}
+      cancelLabel={t('storageConfig.cancel')}
+      danger
+      pending={deleting}
+    />
   )
 }
 
@@ -475,10 +401,9 @@ export default function StorageConfigSection() {
   }
 
   return (
-    <div
-      className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--glass-tint-base)]/65 p-4 backdrop-blur-sm"
-    >
-      {/* Header */}
+    <div className="relative">
+      <div className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--glass-tint-base)]/65 p-4 backdrop-blur-sm">
+        {/* Header */}
       <div className="flex items-center justify-between">
         <h3
           className="text-sm font-medium"
@@ -622,7 +547,10 @@ export default function StorageConfigSection() {
         </div>
       )}
 
-      {/* Modals */}
+      </div>
+
+      {/* Modals — rendered outside the backdrop-filter container so
+          their fixed positioning is relative to the viewport. */}
       {modalOpen && <ConfigModal editing={editingConfig} onClose={closeModal} />}
       {deletingConfig && (
         <DeleteConfirm

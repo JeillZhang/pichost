@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import api, { type AdminConfig, type AdminConfigUpdate } from '../api/client'
 import Button from './ui/Button'
+import ConfirmDialog from './ui/ConfirmDialog'
 import GlassSelect from './ui/GlassSelect'
 
 interface TestResult {
@@ -130,6 +131,7 @@ export default function SystemConfig() {
   const [backups, setBackups] = useState<BackupInfo[]>([])
   const [backingUp, setBackingUp] = useState(false)
   const [restoring, setRestoring] = useState<string | null>(null)
+  const [restoreTarget, setRestoreTarget] = useState<string | null>(null)
 
   const fetchConfig = useCallback(async () => {
     setLoading(true)
@@ -233,8 +235,12 @@ export default function SystemConfig() {
     }
   }
 
-  async function handleRestore(filename: string) {
-    if (!window.confirm(t('systemConfig.restoreConfirm', { filename }))) return
+  function handleRestore(filename: string) {
+    setRestoreTarget(filename)
+  }
+
+  async function performRestore(filename: string) {
+    setRestoreTarget(null)
     setRestoring(filename)
     try {
       const res = await api
@@ -469,6 +475,17 @@ export default function SystemConfig() {
       <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
         {t('systemConfig.configFile')} <span className="font-mono">{config.config_path}</span>
       </p>
+
+      <ConfirmDialog
+        open={restoreTarget !== null}
+        onClose={() => setRestoreTarget(null)}
+        onConfirm={() => restoreTarget && void performRestore(restoreTarget)}
+        title={t('systemConfig.backups')}
+        message={t('systemConfig.restoreConfirm', { filename: restoreTarget ?? '' })}
+        confirmLabel={t('systemConfig.restore')}
+        danger
+        pending={restoring !== null}
+      />
     </div>
   )
 }

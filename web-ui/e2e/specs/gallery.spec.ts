@@ -94,6 +94,17 @@ test.describe.serial('gallery', () => {
     expect(((await after.json()) as { total: number }).total).toBe(0)
   })
 
+  test('batch delete confirm renders as shared Modal', async ({ page, request }) => {
+    await seedUserSession(page, request)
+    const gallery = new GalleryPage(page)
+    await gallery.goto()
+    await gallery.selectImage(0)
+    await gallery.deleteButton.click()
+    await expect(page.locator('.glass-modal')).toBeVisible()
+    await page.locator('.glass-modal').getByRole('button', { name: /cancel|取消/i }).click()
+    await expect(page.locator('.glass-modal')).toBeHidden()
+  })
+
   test('navigates to image detail on tile click', async ({ page, request }) => {
     await seedUserSession(page, request)
     const gallery = new GalleryPage(page)

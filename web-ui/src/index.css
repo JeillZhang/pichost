@@ -16,6 +16,9 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     color-scheme: light;
+    /* Clip (not hidden) avoids creating a scroll container, so sticky
+       elements (NavBar, Gallery sidebar) keep working. */
+    overflow-x: clip;
   }
 
   .dark {
@@ -29,6 +32,7 @@
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     font-size: 15px;
     line-height: 1.6;
+    overflow-x: clip;
   }
 
   /* ── Heading font ── */

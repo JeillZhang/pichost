@@ -2,13 +2,16 @@ import { useRef, useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { listImages, batchDeleteImages, listStorageConfigs } from '../api/client'
-import type { ImageInfo, PaginatedListParams } from '../api/client'
-import { CheckSquare, Square, Trash2, X, Code2, Server, HardDrive } from 'lucide-react'
+import { listImages, batchDeleteImages, listStorageConfigs, listCategories } from '../api/client'
+import type { ImageInfo, PaginatedListParams, CategoryTreeNode } from '../api/client'
+import { CheckSquare, Square, Trash2, X, Code2, Server, HardDrive, Folder } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
 import SortDropdown from '../components/SortDropdown'
 import CategoryTree from '../components/CategoryTree'
 import GlassSelect from '../components/ui/GlassSelect'
+import Sheet from '../components/ui/Sheet'
+import ConfirmDialog from '../components/ui/ConfirmDialog'
+import { toast } from 'sonner'
 
 const STORAGE_CONFIG_KEY = 'backend'
 
@@ -21,6 +24,15 @@ function getProviderIcon(provider: string) {
     default:
       return <HardDrive className="h-3 w-3" />
   }
+}
+
+function findCategoryName(nodes: CategoryTreeNode[], id: string): string | null {
+  for (const node of nodes) {
+    if (node.id === id) return node.name
+    const child = findCategoryName(node.children, id)
+    if (child) return child
+  }
+  return null
 }
 
 export default function Gallery() {
@@ -37,6 +49,7 @@ export default function Gallery() {
   )
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
+  const [categorySheetOpen, setCategorySheetOpen] = useState(false)
   const [selectMode, setSelectMode] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
@@ -46,6 +59,15 @@ export default function Gallery() {
     queryFn: () => listStorageConfigs(),
     staleTime: 5 * 60 * 1000,
   })
+
+  const { data: categories } = useQuery({
+    queryKey: ['categories'],
+    queryFn: listCategories,
+    staleTime: 5 * 60 * 1000,
+  })
+  const currentCategoryName = categoryFilter
+    ? findCategoryName(categories ?? [], categoryFilter)
+    : null
 
   const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteQuery({
@@ -161,8 +183,8 @@ export default function Gallery() {
     }
   }
 
-  const handleBatchMove = async () => {
-    alert(t('gallery.batchMovePlaceholder', { count: selected.size }))
+  const handleBatchMove = () => {
+    toast.info(t('gallery.batchMovePlaceholder', { count: selected.size }))
   }
 
   return (
@@ -192,7 +214,15 @@ export default function Gallery() {
               </span>
             )}
           </h1>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setCategorySheetOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--glass-border-base)] bg-[var(--glass-tint-base)]/65 px-3 py-1.5 text-sm md:hidden"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
+              <Folder className="h-4 w-4" />
+              {currentCategoryName ?? t('gallery.allCategories')}
+            </button>
             <div className="w-48 sm:w-64">
               <SearchBar value={search} onChange={setSearch} />
             </div>
@@ -295,7 +325,7 @@ export default function Gallery() {
         {/* Grid */}
         {allImages.length > 0 && (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
               {allImages.map((img, index) => {
                 const isLast = index === allImages.length - 1
                 const isSelected = selected.has(img.id)
@@ -312,7 +342,7 @@ export default function Gallery() {
                       className={`absolute left-2 top-2 z-10 rounded-lg p-1 backdrop-blur-sm transition-all duration-150 ${
                         selectMode
                           ? 'bg-black/50 hover:bg-black/70'
-                          : 'bg-black/30 opacity-60 hover:bg-black/50 group-hover:opacity-100'
+                          : 'bg-black/30 opacity-100 hover:bg-black/50 md:opacity-60 md:group-hover:opacity-100'
                       }`}
                     >
                       {isSelected ? (
@@ -374,38 +404,33 @@ export default function Gallery() {
           </>
         )}
 
+        {/* Mobile category drawer */}
+        <Sheet
+          open={categorySheetOpen}
+          onClose={() => setCategorySheetOpen(false)}
+          title={t('categoryTree.categories')}
+        >
+          <CategoryTree
+            selectedId={categoryFilter}
+            onSelect={(id) => {
+              setCategoryFilter(id)
+              setCategorySheetOpen(false)
+            }}
+          />
+        </Sheet>
+
         {/* Confirm dialog */}
-        {showConfirm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="glass-modal mx-4 w-full max-w-sm p-6">
-              <h2
-                className="mb-2 text-lg font-semibold"
-                style={{ color: 'var(--color-text-primary)' }}
-              >
-                {t('gallery.deleteConfirm', { count: selected.size })}
-              </h2>
-              <p className="mb-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                This cannot be undone. Images will be permanently deleted from storage.
-              </p>
-              <div className="flex justify-end gap-3">
-                <button onClick={() => setShowConfirm(false)} className="btn-ghost">
-                  {t('gallery.cancel')}
-                </button>
-                <button
-                  onClick={confirmDelete}
-                  disabled={isDeleting}
-                  className="btn-accent"
-                  style={{
-                    background: 'var(--color-danger)',
-                    color: 'white',
-                  }}
-                >
-                  {isDeleting ? t('gallery.deleting') : t('gallery.delete')}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <ConfirmDialog
+          open={showConfirm}
+          onClose={() => setShowConfirm(false)}
+          onConfirm={confirmDelete}
+          title={t('gallery.deleteConfirm', { count: selected.size })}
+          message="This cannot be undone. Images will be permanently deleted from storage."
+          confirmLabel={t('gallery.delete')}
+          cancelLabel={t('gallery.cancel')}
+          danger
+          pending={isDeleting}
+        />
       </div>
     </div>
   )

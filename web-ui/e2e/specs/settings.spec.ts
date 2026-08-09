@@ -155,3 +155,23 @@ test.describe.serial('settings', () => {
     await expect(page.getByRole('link', { name: /link google/i })).toBeVisible()
   })
 })
+
+test.describe('storage config dialogs on mobile', () => {
+  test.use({ viewport: { width: 375, height: 667 }, hasTouch: true })
+
+  test('config modal is bottom sheet on mobile', async ({ page, request }) => {
+    await seedUserSession(page, request)
+    await page.goto('/settings')
+    await page
+      .getByRole('button', { name: /storage backends|存储后端/i })
+      .click()
+    await page.getByRole('button', { name: /add|添加/i }).click()
+    const panel = page.locator('.glass-modal')
+    await expect(panel).toBeVisible()
+    const box = await panel.boundingBox()
+    const vh = page.viewportSize()!.height
+    expect(box!.y + box!.height).toBeGreaterThan(vh - 100)
+    await page.keyboard.press('Escape')
+    await expect(panel).toBeHidden()
+  })
+})

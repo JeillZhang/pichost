@@ -49,7 +49,7 @@ export function PreprocessingSettings() {
           />
         </div>
         {store.resize.enabled && (
-          <div className="flex items-center gap-3 pl-2">
+          <div className="flex flex-wrap items-center gap-3 pl-2">
             <label className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('preprocessing.max')}</label>
             <input
               type="number"
@@ -85,7 +85,7 @@ export function PreprocessingSettings() {
           />
         </div>
         {store.formatConvert.enabled && (
-          <div className="flex items-center gap-3 pl-2">
+          <div className="flex flex-wrap items-center gap-3 pl-2">
             <GlassSelect
               value={store.formatConvert.targetFormat}
               onChange={(v) => store.updateFormatConvert({
@@ -121,7 +121,7 @@ export function PreprocessingSettings() {
           />
         </div>
         {store.compression.enabled && (
-          <div className="flex items-center gap-3 pl-2">
+          <div className="flex flex-wrap items-center gap-3 pl-2">
             <label className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('preprocessing.quality')}</label>
             <input
               type="range"

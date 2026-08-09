@@ -105,3 +105,18 @@ test.describe.serial('upload', () => {
     }
   })
 })
+
+test.describe('dropzone on mobile', () => {
+  test.use({ viewport: { width: 375, height: 667 }, hasTouch: true })
+
+  test('dropzone has adequate tap height', async ({ page, request }) => {
+    await seedUserSession(page, request)
+    await page.goto('/dashboard')
+    const zone = page
+      .getByText(/drag|drop|拖拽|选择/i)
+      .first()
+      .locator('xpath=ancestor::div[contains(@class,"glass")][1]')
+    const box = await zone.boundingBox()
+    expect(box!.height).toBeGreaterThanOrEqual(140)
+  })
+})
