@@ -132,7 +132,7 @@ pub struct ImageListQuery {
     /// Sort order: "asc" or "desc"
     #[serde(default = "default_order")]
     pub order: String,
-    /// Optional search term (ILIKE match against original_name)
+    /// Optional search term (case-insensitive match against original_name)
     #[serde(default)]
     pub search: String,
     /// Optional storage config ID filter
@@ -293,7 +293,7 @@ where
 
     if let Some(quota) = user.storage_quota {
         let current_usage: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(file_size)::BIGINT, 0) FROM images WHERE user_id = $1",
+            "SELECT CAST(COALESCE(SUM(file_size), 0) AS BIGINT) FROM images WHERE user_id = $1",
         )
         .bind(user.id)
         .fetch_one(&state.pool)
@@ -556,24 +556,31 @@ where
     sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
-    [uuid::Uuid]: sqlx::Type<DB>,
 {
-    let configs = sqlx::query_as::<_, UserStorageConfig>(
+    let placeholders = (1..=ids.len())
+        .map(|i| format!("${i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
         "SELECT id, user_id, name, provider, is_default, \
          config, created_at, updated_at \
          FROM user_storage_configs \
-         WHERE id = ANY($1) AND user_id = $2 \
+         WHERE id IN ({placeholders}) AND user_id = ${} \
          ORDER BY created_at",
-    )
-    .bind(ids)
-    .bind(user_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("Failed to resolve upload configs: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
-    })?;
+        ids.len() + 1
+    );
+    let mut q = sqlx::query_as::<_, UserStorageConfig>(&sql);
+    for id in ids {
+        q = q.bind(id);
+    }
+    let configs = q
+        .bind(user_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Failed to resolve upload configs: {e}");
+            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        })?;
 
     if configs.is_empty() {
         return Err(error_json(
@@ -1330,7 +1337,7 @@ fn build_count_sql(
     let mut sql = format!("SELECT COUNT(*) FROM images WHERE user_id = ${n}");
     if !search_term.is_empty() {
         n += 1;
-        sql.push_str(&format!(" AND original_name ILIKE ${n}"));
+        sql.push_str(&format!(" AND LOWER(original_name) LIKE LOWER(${n})"));
     }
     if config_id.is_some() {
         n += 1;
@@ -1361,7 +1368,7 @@ fn build_list_sql(
     );
     if !search_term.is_empty() {
         n += 1;
-        sql.push_str(&format!(" AND original_name ILIKE ${n}"));
+        sql.push_str(&format!(" AND LOWER(original_name) LIKE LOWER(${n})"));
     }
     if config_id.is_some() {
         n += 1;
@@ -1435,7 +1442,7 @@ mod tests {
         let uid = Uuid::new_v4();
         let sql = build_count_sql("cat", Some(uid), Some(uid));
         assert!(sql.starts_with("SELECT COUNT(*) FROM images WHERE user_id = $1"));
-        assert!(sql.contains(" AND original_name ILIKE $2"));
+        assert!(sql.contains(" AND LOWER(original_name) LIKE LOWER($2)"));
         assert!(sql.contains(" AND storage_config_id = $3"));
         assert!(sql.contains(" AND category_id = $4"));
         assert_eq!(sql.matches('$').count(), 4);
@@ -1446,7 +1453,7 @@ mod tests {
         let sql = build_list_sql("", None, None, "created_at", "DESC");
         assert!(sql.starts_with("SELECT id,public_key,"));
         assert!(sql.ends_with(" ORDER BY created_at DESC LIMIT $2 OFFSET $3"));
-        assert!(!sql.contains("ILIKE"));
+        assert!(!sql.contains("LIKE"));
     }
 
     #[test]
@@ -1454,7 +1461,7 @@ mod tests {
         let uid = Uuid::new_v4();
         let sql = build_list_sql("cat", Some(uid), Some(uid), "file_size", "ASC");
         assert!(sql.contains("WHERE user_id = $1"));
-        assert!(sql.contains(" AND original_name ILIKE $2"));
+        assert!(sql.contains(" AND LOWER(original_name) LIKE LOWER($2)"));
         assert!(sql.contains(" AND storage_config_id = $3"));
         assert!(sql.contains(" AND category_id = $4"));
         assert!(sql.ends_with(" ORDER BY file_size ASC LIMIT $5 OFFSET $6"));
