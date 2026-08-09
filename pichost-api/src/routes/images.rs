@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use crate::db::DbQueryResult;
+use pichost_core::DbType;
 
 use axum::{
     extract::{Extension, Multipart, Path, State},
@@ -12,7 +14,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::db::DbPool;
+use sqlx::{Pool, Row};
 use crate::i18n_ext::{error_json, error_json_args, JsonBody, Locale};
 use crate::middleware::auth::AuthUser;
 use crate::services::upload::{self, ImageListQuery, ImageListResponse, ImageRow, UploadResult};
@@ -78,57 +80,59 @@ fn validate_original_name(name: &str, locale: Language) -> Result<(), RouteError
     Ok(())
 }
 
-fn push_optional_filters(
-    builder: &mut sqlx::QueryBuilder<'_, sqlx::Postgres>,
-    prefix: &str,
-    search_term: &str,
-    config_id: Option<Uuid>,
-    category_id: Option<Uuid>,
-) {
-    if !search_term.is_empty() {
-        builder.push(" AND ");
-        builder.push(prefix);
-        builder.push("original_name ILIKE ");
-        builder.push_bind(format!("%{search_term}%"));
-    }
-    if let Some(cid) = config_id {
-        builder.push(" AND ");
-        builder.push(prefix);
-        builder.push("storage_config_id = ");
-        builder.push_bind(cid);
-    }
-    if let Some(cat_id) = category_id {
-        builder.push(" AND ");
-        builder.push(prefix);
-        builder.push("category_id = ");
-        builder.push_bind(cat_id);
-    }
-}
 
-async fn count_user_images(
-    pool: &DbPool,
+
+async fn count_user_images<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     search_term: &str,
     config_id: Option<Uuid>,
     category_id: Option<Uuid>,
     locale: Language,
-) -> Result<i64, RouteError> {
-    let mut builder = sqlx::QueryBuilder::new("SELECT COUNT(*) FROM images WHERE user_id = ");
-    builder.push_bind(user_id);
-    push_optional_filters(&mut builder, "", search_term, config_id, category_id);
-    builder
-        .build_query_scalar::<i64>()
-        .fetch_one(pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Image count query failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
-        })
+) -> Result<i64, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64,): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
+    let mut sql = "SELECT COUNT(*) FROM images WHERE user_id = ".to_string();
+    if !search_term.is_empty() {
+        sql.push_str(" AND original_name ILIKE ");
+    }
+    if config_id.is_some() {
+        sql.push_str(" AND storage_config_id = ");
+    }
+    if category_id.is_some() {
+        sql.push_str(" AND category_id = ");
+    }
+    let mut q = sqlx::query(&sql).bind(user_id);
+    if !search_term.is_empty() {
+        q = q.bind(format!("%{search_term}%"));
+    }
+    if config_id.is_some() {
+        q = q.bind(config_id);
+    }
+    if category_id.is_some() {
+        q = q.bind(category_id);
+    }
+    let row = q.fetch_one(pool).await.map_err(|e| {
+        tracing::warn!("Image count query failed: {e}");
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })?;
+    row.try_get(0usize).map_err(|e| {
+        tracing::warn!("Image count decode failed: {e}");
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn fetch_user_images(
-    pool: &DbPool,
+async fn fetch_user_images<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     sort_col: &str,
     order_dir: &str,
@@ -138,32 +142,54 @@ async fn fetch_user_images(
     config_id: Option<Uuid>,
     category_id: Option<Uuid>,
     locale: Language,
-) -> Result<Vec<ImageRow>, RouteError> {
-    let mut builder = sqlx::QueryBuilder::new(
-        "SELECT i.id,i.public_key,i.original_name,i.url,i.mime_type,i.file_size,\
+) -> Result<Vec<ImageRow>, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
+    let mut sql = "SELECT i.id,i.public_key,i.original_name,i.url,i.mime_type,i.file_size,\
          i.sha256,i.width,i.height,i.status,i.thumbnail_url,i.webp_url,\
          i.created_at,i.category_id,i.storage_config_id,\
          c.name,c.provider FROM images i \
-         LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id WHERE i.user_id = ",
-    );
-    builder.push_bind(user_id);
-    push_optional_filters(&mut builder, "i.", search_term, config_id, category_id);
-    builder.push(" ORDER BY ");
-    builder.push(sort_col);
-    builder.push(' ');
-    builder.push(order_dir);
-    builder.push(" LIMIT ");
-    builder.push_bind(limit);
-    builder.push(" OFFSET ");
-    builder.push_bind(offset);
-    builder
-        .build_query_as::<ImageRow>()
-        .fetch_all(pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Image list query failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
-        })
+         LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id WHERE i.user_id = "
+        .to_string();
+    if !search_term.is_empty() {
+        sql.push_str(" AND i.original_name ILIKE ");
+    }
+    if config_id.is_some() {
+        sql.push_str(" AND i.storage_config_id = ");
+    }
+    if category_id.is_some() {
+        sql.push_str(" AND i.category_id = ");
+    }
+    sql.push_str(" ORDER BY ");
+    sql.push_str(sort_col);
+    sql.push(' ');
+    sql.push_str(order_dir);
+    sql.push_str(" LIMIT ");
+    sql.push_str(" OFFSET ");
+    let mut q = sqlx::query_as::<_, ImageRow>(&sql).bind(user_id);
+    if !search_term.is_empty() {
+        q = q.bind(format!("%{search_term}%"));
+    }
+    if config_id.is_some() {
+        q = q.bind(config_id);
+    }
+    if category_id.is_some() {
+        q = q.bind(category_id);
+    }
+    q = q.bind(limit).bind(offset);
+    q.fetch_all(pool).await.map_err(|e| {
+        tracing::warn!("Image list query failed: {e}");
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })
 }
 
 fn map_rows_to_results(rows: Vec<ImageRow>) -> Vec<UploadResult> {
@@ -175,12 +201,34 @@ fn map_rows_to_results(rows: Vec<ImageRow>) -> Vec<UploadResult> {
 // ---------------------------------------------------------------------------
 
 /// POST /api/v1/images — upload an image (protected)
-pub async fn upload_handler(
-    State(state): State<Arc<AppState>>,
+pub async fn upload_handler<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     locale: Locale,
     mut multipart: Multipart,
-) -> Result<(StatusCode, Json<Vec<UploadResult>>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<Vec<UploadResult>>), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64,): crate::db::DbRow<DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    (Uuid,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (bool,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
+    [uuid::Uuid]: sqlx::Type<DB>,
+{
     let (bytes, file_name, storage_config_ids) =
         extract_upload_parts(&mut multipart, locale.0).await?;
 
@@ -218,12 +266,34 @@ fn validate_url_not_empty(url: &str, locale: Language) -> Result<(), RouteError>
 }
 
 /// POST /api/v1/images/upload-url — upload from a remote URL (protected)
-pub async fn url_upload_handler(
-    State(state): State<Arc<AppState>>,
+pub async fn url_upload_handler<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     locale: Locale,
     JsonBody(payload): JsonBody<UrlUploadRequest>,
-) -> Result<(StatusCode, Json<Vec<UploadResult>>), RouteError> {
+) -> Result<(StatusCode, Json<Vec<UploadResult>>), RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64,): crate::db::DbRow<DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    (Uuid,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (bool,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
+    [uuid::Uuid]: sqlx::Type<DB>,
+{
     validate_url_not_empty(&payload.url, locale.0)?;
 
     let (bytes, file_name) = upload_url::fetch_image_from_url(&payload.url, locale.0).await?;
@@ -329,12 +399,25 @@ fn resolve_sort(params: &ImageListQuery) -> (&str, &str) {
 }
 
 /// GET /api/v1/images — list user's images with pagination, search, and sort (protected)
-pub async fn list_images(
-    State(state): State<Arc<AppState>>,
+pub async fn list_images<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     locale: Locale,
     axum::extract::Query(params): axum::extract::Query<ImageListQuery>,
-) -> Result<Json<ImageListResponse>, RouteError> {
+) -> Result<Json<ImageListResponse>, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64,): crate::db::DbRow<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let page = params.page.max(1);
     let per_page = params.per_page.clamp(1, 100);
     let offset = ((page - 1) * per_page) as i64;
@@ -382,12 +465,22 @@ pub async fn list_images(
 }
 
 /// GET /api/v1/images/{id} — single image detail (protected, cached)
-pub async fn get_image(
-    State(state): State<Arc<AppState>>,
+pub async fn get_image<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     locale: Locale,
     Path(id): Path<Uuid>,
-) -> Result<Json<UploadResult>, RouteError> {
+) -> Result<Json<UploadResult>, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let result = state
         .cache
         .cached_meta(&id, 600, async {
@@ -416,13 +509,23 @@ pub async fn get_image(
     Ok(Json(result))
 }
 
-async fn rename_image_in_db(
-    pool: &DbPool,
+async fn rename_image_in_db<DB: DbType>(
+    pool: &Pool<DB>,
     id: Uuid,
     user_id: Uuid,
     name: &str,
     locale: Language,
-) -> Result<(), RouteError> {
+) -> Result<(), RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let updated_rows =
         sqlx::query("UPDATE images SET original_name = $1 WHERE id = $2 AND user_id = $3")
             .bind(name)
@@ -434,19 +537,29 @@ async fn rename_image_in_db(
                 tracing::warn!("Rename image query failed: {e}");
                 error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
             })?
-            .rows_affected();
+            .affected();
     if updated_rows == 0 {
         return Err(error_json(locale, StatusCode::NOT_FOUND, "image.not_found"));
     }
     Ok(())
 }
 
-async fn refetch_image_row(
-    pool: &DbPool,
+async fn refetch_image_row<DB: DbType>(
+    pool: &Pool<DB>,
     id: Uuid,
     user_id: Uuid,
     locale: Language,
-) -> Result<ImageRow, RouteError> {
+) -> Result<ImageRow, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_as::<_, ImageRow>(
         "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size,\
          i.sha256, i.width, i.height, i.status, i.thumbnail_url, i.webp_url, \
@@ -468,13 +581,26 @@ async fn refetch_image_row(
 }
 
 /// PATCH /api/v1/images/{id} — rename an image's display name
-pub async fn rename_image(
-    State(state): State<Arc<AppState>>,
+pub async fn rename_image<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
     locale: Locale,
     JsonBody(req): JsonBody<UpdateImageRequest>,
-) -> Result<Json<UploadResult>, RouteError> {
+) -> Result<Json<UploadResult>, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     validate_original_name(&req.original_name, locale.0)?;
     rename_image_in_db(&state.pool, id, user.id, &req.original_name, locale.0).await?;
     let updated = refetch_image_row(&state.pool, id, user.id, locale.0).await?;
@@ -485,11 +611,17 @@ pub async fn rename_image(
 }
 
 /// GET /u/{public_key} — serve image publicly (unauthenticated)
-pub async fn public_get(
-    State(state): State<Arc<AppState>>,
+pub async fn public_get<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Path(public_key): Path<String>,
-) -> Result<Response, RouteError> {
+) -> Result<Response, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (std::string::String, std::string::String, std::string::String, std::string::String): crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let row = sqlx::query_as::<_, (String, String, String, String)>(
         "SELECT storage_key, mime_type, status, storage_backend FROM images WHERE public_key = $1",
     )
@@ -532,11 +664,17 @@ fn mime_for_thumb_bytes(bytes: &[u8]) -> &'static str {
 }
 
 /// GET /u/thumb/{image_id} — serve generated thumbnail (unauthenticated)
-pub async fn public_get_thumb(
-    State(state): State<Arc<AppState>>,
+pub async fn public_get_thumb<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Path(image_id): Path<Uuid>,
-) -> Result<Response, RouteError> {
+) -> Result<Response, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<std::string::String>, std::string::String): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let row = sqlx::query_as::<_, (Option<String>, String)>(
         "SELECT thumbnail_key, storage_backend FROM images WHERE id = $1 AND status IN ('active', 'ready')",
     )
@@ -573,11 +711,20 @@ pub async fn public_get_thumb(
         .unwrap())
 }
 
-async fn resolve_thumb_key_by_public_key(
-    pool: &DbPool,
+async fn resolve_thumb_key_by_public_key<DB: DbType>(
+    pool: &Pool<DB>,
     public_key: &str,
     locale: Language,
-) -> Result<(String, String), RouteError> {
+) -> Result<(String, String), RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<std::string::String>, std::string::String): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+{
     let row: (Option<String>, String) = sqlx::query_as(
         "SELECT thumbnail_key, storage_backend FROM images \
          WHERE public_key = $1 AND status IN ('active', 'ready')",
@@ -599,11 +746,18 @@ async fn resolve_thumb_key_by_public_key(
 }
 
 /// GET /t/{public_key} — serve thumbnail by public_key (alias)
-pub async fn public_get_thumb_by_key(
-    State(state): State<Arc<AppState>>,
+pub async fn public_get_thumb_by_key<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Path(public_key): Path<String>,
-) -> Result<Response, RouteError> {
+) -> Result<Response, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<std::string::String>, std::string::String): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+{
     let (thumb_key, storage_backend) =
         resolve_thumb_key_by_public_key(&state.pool, &public_key, locale.0).await?;
 
@@ -631,11 +785,17 @@ pub async fn public_get_thumb_by_key(
 }
 
 /// GET /u/webp/{image_id} — serve generated WebP (unauthenticated)
-pub async fn public_get_webp(
-    State(state): State<Arc<AppState>>,
+pub async fn public_get_webp<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Path(image_id): Path<Uuid>,
-) -> Result<Response, RouteError> {
+) -> Result<Response, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<std::string::String>, std::string::String): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let row = sqlx::query_as::<_, (Option<String>, String)>(
         "SELECT webp_key, storage_backend FROM images WHERE id = $1 AND status IN ('active', 'ready')",
     )
@@ -672,12 +832,19 @@ pub async fn public_get_webp(
         .unwrap())
 }
 
-async fn fetch_delete_target(
-    pool: &DbPool,
+async fn fetch_delete_target<DB: DbType>(
+    pool: &Pool<DB>,
     id: Uuid,
     user: &AuthUser,
     locale: Language,
-) -> Result<(String, String, Option<String>, Option<String>), RouteError> {
+) -> Result<(String, String, Option<String>, Option<String>), RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (String, String, Option<String>, Option<String>): crate::db::DbRow<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
         r#"SELECT storage_key, storage_backend, thumbnail_key, webp_key
            FROM images WHERE id = $1 AND (user_id = $2 OR $3)"#,
@@ -695,12 +862,19 @@ async fn fetch_delete_target(
 }
 
 /// DELETE /api/v1/images/{id} — delete image + storage files (protected)
-pub async fn delete_image(
-    State(state): State<Arc<AppState>>,
+pub async fn delete_image<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     locale: Locale,
     Path(id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, RouteError> {
+) -> Result<Json<serde_json::Value>, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (String, String, Option<String>, Option<String>): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let (storage_key, storage_backend, thumb_key, webp_key) =
         fetch_delete_target(&state.pool, id, &user, locale.0).await?;
     cleanup_storage_files(
@@ -734,12 +908,22 @@ pub struct BatchDeleteRequest {
     pub ids: Vec<Uuid>,
 }
 
-async fn fetch_batch_delete_targets(
-    pool: &DbPool,
+async fn fetch_batch_delete_targets<DB: DbType>(
+    pool: &Pool<DB>,
     ids: &[Uuid],
     user: &AuthUser,
     locale: Language,
-) -> Result<Vec<(String, String, Option<String>, Option<String>)>, RouteError> {
+) -> Result<Vec<(String, String, Option<String>, Option<String>)>, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (String, String, Option<String>, Option<String>): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
+    [uuid::Uuid]: sqlx::Type<DB>,
+{
     sqlx::query_as(
         r#"SELECT storage_key, storage_backend, thumbnail_key, webp_key
            FROM images WHERE id = ANY($1) AND (user_id = $2 OR $3)"#,
@@ -756,12 +940,26 @@ async fn fetch_batch_delete_targets(
 }
 
 /// POST /api/v1/images/batch-delete — delete multiple images (protected)
-pub async fn batch_delete(
-    State(state): State<Arc<AppState>>,
+pub async fn batch_delete<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     locale: Locale,
     JsonBody(body): JsonBody<BatchDeleteRequest>,
-) -> Result<Json<serde_json::Value>, RouteError> {
+) -> Result<Json<serde_json::Value>, RouteError>
+where
+    <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    (String, String, Option<String>, Option<String>): crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    [uuid::Uuid]: sqlx::Type<DB>,
+    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
+    Vec<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB>,
+{
     validate_batch_ids(&body.ids, locale.0)?;
 
     let rows = fetch_batch_delete_targets(&state.pool, &body.ids, &user, locale.0).await?;
@@ -782,7 +980,7 @@ pub async fn batch_delete(
                 "image.batch_delete_failed",
             )
         })?
-        .rows_affected() as usize;
+        .affected() as usize;
 
     for image_id in &body.ids {
         let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", image_id)).await;
@@ -801,12 +999,18 @@ pub struct MoveImageRequest {
     pub category_id: Option<Uuid>,
 }
 
-async fn ensure_category_owned(
-    pool: &DbPool,
+async fn ensure_category_owned<DB: DbType>(
+    pool: &Pool<DB>,
     category_id: Uuid,
     user_id: Uuid,
     locale: Language,
-) -> Result<(), RouteError> {
+) -> Result<(), RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::Category: crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     use pichost_core::models::Category;
 
     sqlx::query_as::<_, Category>(
@@ -830,13 +1034,23 @@ async fn ensure_category_owned(
 }
 
 /// POST /api/v1/images/{id}/move — move an image to a category
-pub async fn move_image(
-    State(state): State<Arc<AppState>>,
+pub async fn move_image<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
     locale: Locale,
     JsonBody(body): JsonBody<MoveImageRequest>,
-) -> Result<Json<serde_json::Value>, RouteError> {
+) -> Result<Json<serde_json::Value>, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::Category: crate::db::DbRow<DB>,
+    <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     if let Some(category_id) = body.category_id {
         ensure_category_owned(&state.pool, category_id, user.id, locale.0).await?;
     }
@@ -856,7 +1070,7 @@ pub async fn move_image(
             )
         })?;
 
-    if result.rows_affected() == 0 {
+    if result.affected() == 0 {
         return Err(error_json(locale.0, StatusCode::NOT_FOUND, "image.move_not_found"));
     }
 
@@ -882,12 +1096,20 @@ fn validate_batch_move(ids: &[Uuid], locale: Language) -> Result<(), RouteError>
 }
 
 /// POST /api/v1/images/batch-move — move multiple images to a category
-pub async fn batch_move_images(
-    State(state): State<Arc<AppState>>,
+pub async fn batch_move_images<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     locale: Locale,
     JsonBody(body): JsonBody<BatchMoveRequest>,
-) -> Result<Json<serde_json::Value>, RouteError> {
+) -> Result<Json<serde_json::Value>, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::Category: crate::db::DbRow<DB>,
+    <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Vec<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     validate_batch_move(&body.image_ids, locale.0)?;
     ensure_category_owned(&state.pool, body.category_id, user.id, locale.0).await?;
 
@@ -913,7 +1135,7 @@ pub async fn batch_move_images(
 
     Ok(Json(json!({
         "message": "Images moved to category",
-        "moved": result.rows_affected()
+        "moved": result.affected()
     })))
 }
 
@@ -926,12 +1148,18 @@ pub struct ImageLinks {
 }
 
 /// GET /api/v1/images/{id}/links — get share link formats only
-pub async fn get_image_links(
-    State(state): State<Arc<AppState>>,
+pub async fn get_image_links<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     locale: Locale,
     Path(image_id): Path<Uuid>,
-) -> Result<Json<ImageLinks>, RouteError> {
+) -> Result<Json<ImageLinks>, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (std::string::String, std::string::String, std::string::String): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     use crate::services::html_escape;
 
     let row: (String, String, String) = sqlx::query_as(

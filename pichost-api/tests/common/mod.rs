@@ -60,7 +60,7 @@ pub fn test_config(tempdir: &TempDir) -> AppConfig {
 /// A ready-to-drive test app: the production router plus the shared state.
 pub struct TestApp {
     pub router: Router,
-    pub state: Arc<AppState>,
+    pub state: Arc<AppState<sqlx::Postgres>>,
     /// Keeps the local-storage tempdir alive.
     _tempdir: TempDir,
 }

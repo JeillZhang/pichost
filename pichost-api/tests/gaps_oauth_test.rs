@@ -22,7 +22,7 @@ const JWT_SECRET: &str = "test-jwt-secret-0123456789abcdef0123456789abcdef";
 
 struct OAuthApp {
     router: Router,
-    state: Arc<AppState>,
+    state: Arc<AppState<sqlx::Postgres>>,
     _tempdir: TempDir,
 }
 

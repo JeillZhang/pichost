@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         router,
     });
 
-    let app = configure_app(state);
+    let app = configure_app::<sqlx::Postgres>(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     tracing::info!("API on :3000");

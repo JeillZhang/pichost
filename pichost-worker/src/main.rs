@@ -5,7 +5,9 @@ use deadpool_redis::{Config as RedisConfig, Pool as RedisPool, Runtime};
 use pichost_core::storage::local::LocalStorage;
 use pichost_core::storage::s3::RustfsStorage;
 use pichost_core::storage::StorageBackend;
+use pichost_core::DbType;
 use pichost_core::StorageRouter;
+use sqlx::Pool;
 use tokio::task::JoinHandle;
 
 mod config;
@@ -17,8 +19,8 @@ mod queue;
 mod watermark;
 
 /// Bundled state shared across all worker tasks.
-struct WorkerState {
-    pool: sqlx::PgPool,
+struct WorkerState<DB: DbType> {
+    pool: Pool<DB>,
     redis: RedisPool,
     config: Arc<pichost_core::config::AppConfig>,
     router: Arc<StorageRouter>,
@@ -69,11 +71,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Recover stale tasks and initialise the StorageRouter for all configured backends.
-async fn init_worker_state(
-    pool: sqlx::PgPool,
+async fn init_worker_state<DB: DbType>(
+    pool: Pool<DB>,
     redis: RedisPool,
     config: Arc<pichost_core::config::AppConfig>,
-) -> Result<WorkerState, Box<dyn std::error::Error>> {
+) -> Result<WorkerState<DB>, Box<dyn std::error::Error>>
+where
+    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
+{
     // Startup recovery: re-enqueue stale tasks from processing queue
     let recovered =
         queue::recover_stale_tasks(&redis, config.worker.task_timeout).await?;
@@ -110,7 +115,25 @@ async fn init_worker_state(
 }
 
 /// Spawn one `worker_loop` task per configured concurrency slot.
-fn spawn_workers(state: WorkerState) -> Vec<JoinHandle<()>> {
+fn spawn_workers<DB: DbType>(state: WorkerState<DB>) -> Vec<JoinHandle<()>>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    str: sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    for<'q> Option<&'q str>: sqlx::Encode<'q, DB>,
+    for<'q> Option<&'q str>: sqlx::Type<DB>,
+{
     let concurrency = state.config.worker.concurrency;
     let mut handles = Vec::with_capacity(concurrency);
     for i in 0..concurrency {
@@ -128,13 +151,31 @@ fn spawn_workers(state: WorkerState) -> Vec<JoinHandle<()>> {
     handles
 }
 
-async fn worker_loop(
+async fn worker_loop<DB: DbType>(
     worker_id: usize,
-    pool: sqlx::PgPool,
+    pool: Pool<DB>,
     redis: RedisPool,
     config: Arc<pichost_core::config::AppConfig>,
     router: Arc<StorageRouter>,
-) {
+)
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    str: sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    for<'q> Option<&'q str>: sqlx::Encode<'q, DB>,
+    for<'q> Option<&'q str>: sqlx::Type<DB>,
+{
     let timeout = config.worker.queue_poll_timeout;
 
     loop {
@@ -168,12 +209,22 @@ async fn worker_loop(
 }
 
 /// Handle the result of a single task processing attempt.
-async fn handle_task_result(
-    worker_id: usize, pool: &sqlx::PgPool, redis: &RedisPool,
+async fn handle_task_result<DB: DbType>(
+    worker_id: usize, pool: &Pool<DB>, redis: &RedisPool,
     task: queue::TaskPayload,
     result: Result<Result<(), pipeline::PipelineError>, tokio::time::error::Elapsed>,
     config: &pichost_core::config::AppConfig,
-) {
+)
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    str: sqlx::Type<DB>,
+    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+{
     let task_id = task.task_id;
     match result {
         Ok(Ok(())) => {
@@ -208,13 +259,25 @@ async fn handle_task_result(
 }
 
 /// Persist dead-letter task failure in the database.
-async fn handle_dead_letter(
-    pool: &sqlx::PgPool,
+async fn handle_dead_letter<DB: DbType>(
+    pool: &Pool<DB>,
     image_id: uuid::Uuid,
     retry_count: i32,
     max_retries: i32,
     error: &str,
-) {
+)
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    str: sqlx::Type<DB>,
+    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+{
     let now = chrono::Utc::now();
     let _ = sqlx::query(
         r#"INSERT INTO upload_tasks

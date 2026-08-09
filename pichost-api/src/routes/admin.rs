@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use pichost_core::DbType;
 use std::sync::Arc;
 
 use axum::{
@@ -23,7 +24,7 @@ where
 
 use crate::app::AppState;
 use crate::cache::{Cache, InviteCodeInfo};
-use crate::db::DbPool;
+use sqlx::Pool;
 use crate::i18n_ext::{error_json, error_json_args, JsonBody, Locale};
 use crate::metrics::{TOTAL_IMAGES, TOTAL_STORAGE_BYTES, TOTAL_USERS};
 use crate::middleware::auth::AuthUser;
@@ -137,8 +138,8 @@ pub struct TestResult {
     pub redis: Option<String>,
 }
 
-struct UserUpdateParams<'a> {
-    pool: &'a DbPool,
+struct UserUpdateParams<'a, DB: DbType> {
+    pool: &'a Pool<DB>,
     user_id: Uuid,
     username: &'a str,
     email: &'a Option<String>,
@@ -206,10 +207,26 @@ async fn hash_password_if_provided(
     Ok(Some(hash))
 }
 
-async fn execute_user_update(
-    params: UserUpdateParams<'_>,
+async fn execute_user_update<DB: DbType>(
+    params: UserUpdateParams<'_, DB>,
     locale: Language,
-) -> Result<(), AdminError> {
+) -> Result<(), AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     if let Some(ph) = params.password_hash {
         sqlx::query(
             r#"UPDATE users SET username = $1, email = $2, is_admin = $3,
@@ -262,11 +279,17 @@ type UserFields = (
     Option<serde_json::Value>,
 );
 
-async fn fetch_user_fields(
-    pool: &DbPool,
+async fn fetch_user_fields<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     locale: Language,
-) -> Result<UserFields, AdminError> {
+) -> Result<UserFields, AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (String, Option<String>, bool, String, Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_as::<_, UserFields>(
         "SELECT username, email, is_admin, storage_backend, storage_quota, watermark_config \
          FROM users WHERE id = $1",
@@ -307,24 +330,41 @@ fn merge_user_fields(body: &UpdateUserBody, existing: UserFields) -> UserFields 
     )
 }
 
-async fn fetch_and_merge_user_fields(
-    pool: &DbPool,
+async fn fetch_and_merge_user_fields<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     body: &UpdateUserBody,
     locale: Language,
-) -> Result<UserFields, AdminError> {
+) -> Result<UserFields, AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (String, Option<String>, bool, String, Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let existing = fetch_user_fields(pool, user_id, locale).await?;
     Ok(merge_user_fields(body, existing))
 }
 
 // ── delete_user helpers ────────────────────────────────────────────────
 
-async fn collect_and_cleanup_storage_files(
+async fn collect_and_cleanup_storage_files<DB: DbType>(
     router: &StorageRouter,
-    pool: &DbPool,
+    pool: &Pool<DB>,
     user_id: Uuid,
     locale: Language,
-) -> Result<usize, AdminError> {
+) -> Result<usize, AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (String, Option<String>, Option<String>): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let image_keys: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
         r#"SELECT storage_key, thumbnail_key, webp_key FROM images WHERE user_id = $1"#,
     )
@@ -351,7 +391,12 @@ async fn collect_and_cleanup_storage_files(
     Ok(count)
 }
 
-async fn delete_user_from_db(pool: &DbPool, user_id: Uuid, locale: Language) -> Result<(), AdminError> {
+async fn delete_user_from_db<DB: DbType>(pool: &Pool<DB>, user_id: Uuid, locale: Language) -> Result<(), AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query("DELETE FROM images WHERE user_id = $1")
         .bind(user_id)
         .execute(pool)
@@ -373,9 +418,15 @@ async fn delete_user_from_db(pool: &DbPool, user_id: Uuid, locale: Language) -> 
     Ok(())
 }
 
-async fn verify_user_exists(pool: &DbPool, user_id: Uuid, locale: Language) -> Result<(), AdminError> {
+async fn verify_user_exists<DB: DbType>(pool: &Pool<DB>, user_id: Uuid, locale: Language) -> Result<(), AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (bool,): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let exists: bool =
-        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
+        sqlx::query_scalar::<DB, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
             .bind(user_id)
             .fetch_one(pool)
             .await
@@ -440,7 +491,13 @@ fn try_parse_cached_stats(stats_map: &HashMap<String, String>) -> Option<AdminSt
     })
 }
 
-async fn query_total_users(pool: &DbPool, locale: Language) -> Result<i64, AdminError> {
+async fn query_total_users<DB: DbType>(pool: &Pool<DB>, locale: Language) -> Result<i64, AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (i64,): crate::db::DbRow<DB>,
+{
     sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(pool)
         .await
@@ -450,7 +507,13 @@ async fn query_total_users(pool: &DbPool, locale: Language) -> Result<i64, Admin
         })
 }
 
-async fn query_total_quota(pool: &DbPool, locale: Language) -> Result<Option<i64>, AdminError> {
+async fn query_total_quota<DB: DbType>(pool: &Pool<DB>, locale: Language) -> Result<Option<i64>, AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<i64>,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+{
     sqlx::query_scalar(
         "SELECT SUM(storage_quota)::BIGINT FROM users WHERE storage_quota IS NOT NULL",
     )
@@ -462,7 +525,12 @@ async fn query_total_quota(pool: &DbPool, locale: Language) -> Result<Option<i64
     })
 }
 
-async fn query_image_stats(pool: &DbPool, locale: Language) -> Result<(i64, i64), AdminError> {
+async fn query_image_stats<DB: DbType>(pool: &Pool<DB>, locale: Language) -> Result<(i64, i64), AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64, i64): crate::db::DbRow<DB>,
+{
     sqlx::query_as::<_, (i64, i64)>(
         r#"SELECT COUNT(*)::BIGINT as total_images, COALESCE(SUM(file_size), 0)::BIGINT as total_size
            FROM images"#,
@@ -475,7 +543,13 @@ async fn query_image_stats(pool: &DbPool, locale: Language) -> Result<(i64, i64)
     })
 }
 
-async fn query_active_users_24h(pool: &DbPool) -> i64 {
+async fn query_active_users_24h<DB: DbType>(pool: &Pool<DB>) -> i64
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (i64,): crate::db::DbRow<DB>,
+{
     sqlx::query_scalar(
         r#"SELECT COUNT(DISTINCT user_id) FROM images
            WHERE created_at > NOW() - INTERVAL '24 hours'"#,
@@ -485,11 +559,20 @@ async fn query_active_users_24h(pool: &DbPool) -> i64 {
     .unwrap_or(0)
 }
 
-async fn query_backend_stats(
-    pool: &DbPool,
+async fn query_backend_stats<DB: DbType>(
+    pool: &Pool<DB>,
     backend_name: &str,
     locale: Language,
-) -> Result<BackendStats, AdminError> {
+) -> Result<BackendStats, AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64, i64): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+{
     sqlx::query_as::<_, (i64, i64)>(
         "SELECT COUNT(*)::BIGINT, COALESCE(SUM(file_size), 0)::BIGINT FROM images WHERE storage_backend = $1",
     )
@@ -574,11 +657,23 @@ fn config_file_path() -> std::path::PathBuf {
 // ── Handlers ───────────────────────────────────────────────────────────
 
 /// GET /api/v1/admin/users — paginated user list (admin only)
-pub async fn list_users(
-    State(state): State<Arc<AppState>>,
+pub async fn list_users<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Query(pagination): Query<PaginationQuery>,
-) -> Result<Json<ListUsersResponse>, AdminError> {
+) -> Result<Json<ListUsersResponse>, AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (i64,): crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let offset = pagination.offset.unwrap_or(0).max(0);
     let limit = pagination.limit.unwrap_or(50).clamp(1, 200);
 
@@ -626,13 +721,28 @@ pub struct UpdateUserBody {
 }
 
 /// PATCH /api/v1/admin/users/{id} — update user fields (admin only)
-pub async fn update_user(
-    State(state): State<Arc<AppState>>,
+pub async fn update_user<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Extension(current_user): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
     JsonBody(body): JsonBody<UpdateUserBody>,
-) -> Result<Json<UserInfo>, AdminError> {
+) -> Result<Json<UserInfo>, AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     // Prevent self-demotion
     if body.is_admin == Some(false) && current_user.id == user_id {
         return Err(error_json(
@@ -654,7 +764,7 @@ pub async fn update_user(
     let password_hash = hash_password_if_provided(&body.password, locale.0).await?;
 
     execute_user_update(
-        UserUpdateParams {
+        UserUpdateParams::<'_, DB> {
             pool: &state.pool,
             user_id,
             username: &new_username,
@@ -681,12 +791,19 @@ pub async fn update_user(
 }
 
 /// DELETE /api/v1/admin/users/{id} — delete user and all images (admin only)
-pub async fn delete_user(
-    State(state): State<Arc<AppState>>,
+pub async fn delete_user<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Extension(current_user): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
-) -> Result<(StatusCode, Json<serde_json::Value>), AdminError> {
+) -> Result<(StatusCode, Json<serde_json::Value>), AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (String, Option<String>, Option<String>): crate::db::DbRow<DB>,
+    (bool,): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     // Prevent self-deletion
     if current_user.id == user_id {
         return Err(error_json(
@@ -736,10 +853,20 @@ pub struct AdminStats {
 }
 
 /// GET /api/v1/admin/stats — system-wide statistics (admin only, cached 5 min)
-pub async fn get_admin_stats(
-    State(state): State<Arc<AppState>>,
+pub async fn get_admin_stats<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
-) -> Result<Json<AdminStats>, AdminError> {
+) -> Result<Json<AdminStats>, AdminError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64, i64): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (Option<i64>,): crate::db::DbRow<DB>,
+    (i64,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+{
     // Try cache first using nil UUID as admin stats key
     if let Ok(Some(stats_map)) = state.cache.get_user_stats(&uuid::Uuid::nil()).await {
         if let Some(stats) = try_parse_cached_stats(&stats_map) {
@@ -791,8 +918,8 @@ pub async fn get_admin_stats(
 // ── Invite Code handlers ──
 
 /// POST /api/v1/admin/invites — create an invite code (admin only)
-pub async fn create_invite(
-    State(state): State<Arc<AppState>>,
+pub async fn create_invite<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Extension(admin): Extension<AuthUser>,
     JsonBody(body): JsonBody<CreateInviteBody>,
@@ -815,8 +942,8 @@ pub async fn create_invite(
 }
 
 /// GET /api/v1/admin/invites — list all invite codes (admin only)
-pub async fn list_invites(
-    State(state): State<Arc<AppState>>,
+pub async fn list_invites<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
 ) -> Result<Json<Vec<InviteCodeInfo>>, AdminError> {
     let codes = state.cache.list_invite_codes().await.map_err(|e| {
@@ -869,8 +996,8 @@ pub async fn get_admin_config(locale: Locale) -> Result<Json<ConfigResponse>, Ad
 /// PUT /api/v1/admin/config — write config.toml with auto-backup.
 /// Merge semantics: fields omitted from the body (None) keep their
 /// current on-disk value, so a partial update never wipes other keys.
-pub async fn update_admin_config(
-    state: State<Arc<AppState>>,
+pub async fn update_admin_config<DB: DbType>(
+    state: State<Arc<AppState<DB>>>,
     locale: Locale,
     JsonBody(body): JsonBody<UpdateConfigBody>,
 ) -> Result<Json<ConfigResponse>, AdminError> {
@@ -950,8 +1077,8 @@ pub async fn test_admin_config(
 }
 
 /// POST /api/v1/admin/config/backup — materializes config.toml if missing, then backs it up
-pub async fn backup_admin_config(
-    State(state): State<Arc<AppState>>,
+pub async fn backup_admin_config<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
 ) -> Result<Json<BackupInfo>, AdminError> {
     let path = config_file_path();

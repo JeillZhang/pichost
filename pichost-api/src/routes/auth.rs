@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use pichost_core::DbType;
+use sqlx::Pool;
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -129,8 +131,8 @@ pub(crate) fn generate_tokens(
     Ok((access_token, refresh_token, access_claims, refresh_claims))
 }
 
-async fn check_invite_code(
-    state: &AppState,
+async fn check_invite_code<DB: DbType>(
+    state: &AppState<DB>,
     invite_code: Option<&str>,
     is_first_user: bool,
     locale: Language,
@@ -192,10 +194,16 @@ async fn revoke_old_tokens(cache: &Cache, claims: &RefreshTokenClaims, now: usiz
 
 // ---- Handlers ----
 
-async fn count_existing_users(
-    pool: &sqlx::PgPool,
+async fn count_existing_users<DB: DbType>(
+    pool: &Pool<DB>,
     locale: Language,
-) -> Result<i64, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<i64, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (i64,): crate::db::DbRow<DB>,
+{
     sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(pool)
         .await
@@ -205,15 +213,30 @@ async fn count_existing_users(
         })
 }
 
-async fn insert_user(
-    state: &AppState,
+async fn insert_user<DB: DbType>(
+    state: &AppState<DB>,
     username: &str,
     email: &Option<String>,
     hash: &str,
     is_admin: bool,
     storage_quota: Option<i64>,
     locale: Language,
-) -> Result<Uuid, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Uuid, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_scalar(
         "INSERT INTO users (username, email, password_hash, is_admin, storage_quota) \
          VALUES ($1, $2, $3, $4, $5) RETURNING id",
@@ -242,11 +265,26 @@ async fn insert_user(
     })
 }
 
-pub async fn register(
-    State(state): State<Arc<AppState>>,
+pub async fn register<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     JsonBody(payload): JsonBody<RegisterRequest>,
-) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    (i64,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     validate_register_payload(&payload, locale.0)?;
     let user_count = count_existing_users(&state.pool, locale.0).await?;
     let is_first_user = user_count == 0;
@@ -283,12 +321,26 @@ fn validate_register_payload(
     Ok(())
 }
 
-async fn create_user_and_tokens(
-    state: &AppState,
+async fn create_user_and_tokens<DB: DbType>(
+    state: &AppState<DB>,
     payload: &RegisterRequest,
     is_first_user: bool,
     locale: Language,
-) -> Result<(Uuid, String, String, Option<i64>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(uuid::Uuid, String, String, Option<i64>), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let hash = hash_password(&payload.password, locale)?;
     let storage_quota = if state.config.upload.storage_quota_default > 0 {
         Some(state.config.upload.storage_quota_default as i64)
@@ -324,13 +376,19 @@ async fn create_user_and_tokens(
     Ok((user_id, access_token, refresh_token, storage_quota))
 }
 
-pub async fn login(
-    State(state): State<Arc<AppState>>,
+pub async fn login<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     JsonBody(payload): JsonBody<LoginRequest>,
-) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid, String, Option<String>, String, bool, Option<i64>): crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     // Query user
-    let row = sqlx::query_as::<_, (Uuid, String, Option<String>, String, bool, Option<i64>)>(
+    let row = sqlx::query_as::<_, (uuid::Uuid, String, Option<String>, String, bool, Option<i64>)>(
         "SELECT id, username, email, password_hash, is_admin, storage_quota FROM users WHERE username = $1",
     )
     .bind(&payload.username)
@@ -375,11 +433,17 @@ pub async fn login(
     Ok((StatusCode::OK, Json(response)))
 }
 
-async fn lookup_user_for_refresh(
-    pool: &sqlx::PgPool,
+async fn lookup_user_for_refresh<DB: DbType>(
+    pool: &Pool<DB>,
     sub: &str,
     locale: Language,
-) -> Result<(Uuid, String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)>
+) -> Result<(uuid::Uuid, String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)>
+
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     let user_id: Uuid = sub
         .parse()
@@ -398,11 +462,17 @@ async fn lookup_user_for_refresh(
     Ok((user_id, row.0, row.1, row.2, row.3))
 }
 
-pub async fn refresh(
-    State(state): State<Arc<AppState>>,
+pub async fn refresh<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     JsonBody(payload): JsonBody<RefreshRequest>,
-) -> Result<(StatusCode, Json<RefreshResponse>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<RefreshResponse>), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let config = &state.config;
     let key = DecodingKey::from_secret(config.auth.jwt_secret.as_bytes());
     let mut validation = Validation::new(Algorithm::HS256);
@@ -444,8 +514,8 @@ pub async fn refresh(
     })))
 }
 
-pub async fn logout(
-    State(state): State<Arc<AppState>>,
+pub async fn logout<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     headers: HeaderMap,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {

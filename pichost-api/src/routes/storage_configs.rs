@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use pichost_core::DbType;
 
 use axum::{
     extract::{Path, State},
@@ -6,7 +7,7 @@ use axum::{
     Extension, Json,
 };
 use serde::Deserialize;
-use sqlx::PgPool;
+use sqlx::Pool;
 use uuid::Uuid;
 
 use pichost_core::{
@@ -70,12 +71,19 @@ fn build_response(config: &UserStorageConfig) -> UserStorageConfigResponse {
     }
 }
 
-async fn check_config_limit(
+async fn check_config_limit<DB: DbType>(
     max_configs: Option<u32>,
-    pool: &PgPool,
+    pool: &Pool<DB>,
     user_id: Uuid,
     locale: Language,
-) -> Result<(), ApiError> {
+) -> Result<(), ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (i64,): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let max = max_configs.unwrap_or(5) as i64;
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM user_storage_configs WHERE user_id = $1",
@@ -99,12 +107,23 @@ async fn check_config_limit(
     Ok(())
 }
 
-async fn check_name_unique(
-    pool: &PgPool,
+async fn check_name_unique<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     name: &str,
     locale: Language,
-) -> Result<(), ApiError> {
+) -> Result<(), ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (bool,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM user_storage_configs \
          WHERE user_id = $1 AND name = $2)",
@@ -128,11 +147,16 @@ async fn check_name_unique(
     Ok(())
 }
 
-async fn unset_other_defaults(
-    pool: &PgPool,
+async fn unset_other_defaults<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     locale: Language,
-) -> Result<(), ApiError> {
+) -> Result<(), ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query("UPDATE user_storage_configs SET is_default = false WHERE user_id = $1")
         .bind(user_id)
         .execute(pool)
@@ -144,12 +168,18 @@ async fn unset_other_defaults(
     Ok(())
 }
 
-async fn fetch_user_config(
-    pool: &PgPool,
+async fn fetch_user_config<DB: DbType>(
+    pool: &Pool<DB>,
     config_id: Uuid,
     user_id: Uuid,
     locale: Language,
-) -> Result<UserStorageConfig, ApiError> {
+) -> Result<UserStorageConfig, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_as::<_, UserStorageConfig>(
         "SELECT id, user_id, name, provider, is_default, \
          config, created_at, updated_at \
@@ -264,11 +294,17 @@ async fn verify_repo_access(
 // ── Handlers ────────────────────────────────────────────────────────────
 
 /// GET /api/v1/users/me/storage-configs
-pub async fn list_configs(
-    State(state): State<Arc<AppState>>,
+pub async fn list_configs<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Extension(user): Extension<AuthUser>,
-) -> Result<Json<Vec<UserStorageConfigResponse>>, ApiError> {
+) -> Result<Json<Vec<UserStorageConfigResponse>>, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let configs = sqlx::query_as::<_, UserStorageConfig>(
         "SELECT id, user_id, name, provider, is_default, \
          config, created_at, updated_at \
@@ -289,12 +325,28 @@ pub async fn list_configs(
 }
 
 /// POST /api/v1/users/me/storage-configs
-pub async fn create_config(
-    State(state): State<Arc<AppState>>,
+pub async fn create_config<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Extension(user): Extension<AuthUser>,
     JsonBody(req): JsonBody<CreateConfigRequest>,
-) -> Result<(StatusCode, Json<UserStorageConfigResponse>), ApiError> {
+) -> Result<(StatusCode, Json<UserStorageConfigResponse>), ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (bool,): crate::db::DbRow<DB>,
+    (i64,): crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+{
     if !["github", "gitcode"].contains(&req.provider.as_str()) {
         return Err(error_json(
             locale.0,
@@ -360,24 +412,44 @@ pub async fn create_config(
 }
 
 /// GET /api/v1/users/me/storage-configs/{id}
-pub async fn get_config(
-    State(state): State<Arc<AppState>>,
+pub async fn get_config<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
-) -> Result<Json<UserStorageConfigResponse>, ApiError> {
+) -> Result<Json<UserStorageConfigResponse>, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let config = fetch_user_config(&state.pool, id, user.id, locale.0).await?;
     Ok(Json(build_response(&config)))
 }
 
 /// PATCH /api/v1/users/me/storage-configs/{id}
-pub async fn update_config(
-    State(state): State<Arc<AppState>>,
+pub async fn update_config<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
     JsonBody(req): JsonBody<UpdateConfigRequest>,
-) -> Result<Json<UserStorageConfigResponse>, ApiError> {
+) -> Result<Json<UserStorageConfigResponse>, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (bool,): crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+{
     let existing = fetch_user_config(&state.pool, id, user.id, locale.0).await?;
 
     let new_name = req.name.as_ref().cloned()
@@ -430,12 +502,20 @@ pub async fn update_config(
 }
 
 /// DELETE /api/v1/users/me/storage-configs/{id}
-pub async fn delete_config(
-    State(state): State<Arc<AppState>>,
+pub async fn delete_config<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<StatusCode, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (i64,): crate::db::DbRow<DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let _existing = fetch_user_config(&state.pool, id, user.id, locale.0).await?;
 
     let ref_count: i64 = sqlx::query_scalar(
@@ -469,12 +549,18 @@ pub async fn delete_config(
 }
 
 /// POST /api/v1/users/me/storage-configs/{id}/default
-pub async fn set_default(
-    State(state): State<Arc<AppState>>,
+pub async fn set_default<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Extension(user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
-) -> Result<Json<UserStorageConfigResponse>, ApiError> {
+) -> Result<Json<UserStorageConfigResponse>, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let _existing = fetch_user_config(&state.pool, id, user.id, locale.0).await?;
 
     unset_other_defaults(&state.pool, user.id, locale.0).await?;

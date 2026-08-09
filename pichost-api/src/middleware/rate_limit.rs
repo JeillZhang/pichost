@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use pichost_core::DbType;
 
 use axum::{
     extract::{Request, State},
@@ -77,8 +78,8 @@ async fn check_rate_limit(
     }
 }
 
-pub async fn rate_limit_auth(
-    State(state): State<Arc<AppState>>,
+pub async fn rate_limit_auth<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
@@ -93,8 +94,8 @@ pub async fn rate_limit_auth(
     }
 }
 
-pub async fn rate_limit_upload(
-    State(state): State<Arc<AppState>>,
+pub async fn rate_limit_upload<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
@@ -113,8 +114,8 @@ pub async fn rate_limit_upload(
     }
 }
 
-pub async fn rate_limit_general(
-    State(state): State<Arc<AppState>>,
+pub async fn rate_limit_general<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
@@ -133,8 +134,8 @@ pub async fn rate_limit_general(
     }
 }
 
-pub async fn rate_limit_public(
-    State(state): State<Arc<AppState>>,
+pub async fn rate_limit_public<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
@@ -222,7 +223,7 @@ mod tests {
         assert_eq!(res, Ok(10));
     }
 
-    fn rate_state(max: u32) -> Arc<AppState> {
+    async fn rate_state(max: u32) -> Arc<AppState<sqlx::Sqlite>> {
         use pichost_core::StorageRouter;
         let mut cfg = pichost_core::config::AppConfig::default();
         cfg.rate_limit.auth_max = max;
@@ -230,9 +231,8 @@ mod tests {
         cfg.rate_limit.general_max = max;
         cfg.rate_limit.public_max = max;
         Arc::new(AppState {
-            pool: sqlx::postgres::PgPoolOptions::new()
-                .max_connections(1)
-                .connect_lazy("postgres://pichost:pichost@localhost:5432/pichost")
+            pool: crate::db::create_sqlite_pool("sqlite::memory:", 1)
+                .await
                 .unwrap(),
             cache: Arc::new(crate::cache::Cache::new(crate::cache::create_pool(
                 "redis://localhost:6379",
@@ -268,7 +268,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "requires running PostgreSQL and Redis"]
     async fn test_rate_limit_auth_middleware_429() {
-        let state = rate_state(1);
+        let state = rate_state(1).await;
         let app = Router::new()
             .route("/", axum::routing::get(|| async { "ok" }))
             .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_auth))
@@ -281,7 +281,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "requires running PostgreSQL and Redis"]
     async fn test_rate_limit_upload_middleware_429() {
-        let state = rate_state(1);
+        let state = rate_state(1).await;
         let app = Router::new()
             .route("/", axum::routing::get(|| async { "ok" }))
             .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_upload))
@@ -294,7 +294,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "requires running PostgreSQL and Redis"]
     async fn test_rate_limit_general_middleware_429() {
-        let state = rate_state(1);
+        let state = rate_state(1).await;
         let app = Router::new()
             .route("/", axum::routing::get(|| async { "ok" }))
             .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_general))
@@ -307,7 +307,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "requires running PostgreSQL and Redis"]
     async fn test_rate_limit_public_middleware_429() {
-        let state = rate_state(1);
+        let state = rate_state(1).await;
         let app = Router::new()
             .route("/", axum::routing::get(|| async { "ok" }))
             .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_public))

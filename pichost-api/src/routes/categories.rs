@@ -1,4 +1,7 @@
 use std::sync::Arc;
+use crate::db::DbQueryResult;
+use pichost_core::DbType;
+use sqlx::Pool;
 
 use axum::{
     extract::{Json, Path, State},
@@ -69,13 +72,19 @@ fn build_children(parent_id: Uuid, all: &[Category]) -> Vec<CategoryTreeNode> {
 
 // ── Depth validation ────────────────────────────────────────────────────
 
-async fn validate_depth(
-    pool: &sqlx::PgPool,
+async fn validate_depth<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     parent_id: Uuid,
     current: i32,
     locale: Language,
-) -> Result<(), RouteError> {
+) -> Result<(), RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::Category: crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     if current >= MAX_DEPTH {
         return Err(error_json_args(
             locale,
@@ -112,11 +121,17 @@ async fn validate_depth(
 // ── Handlers ────────────────────────────────────────────────────────────
 
 /// GET /api/v1/categories
-pub async fn list_categories(
-    State(state): State<Arc<AppState>>,
+pub async fn list_categories<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
-) -> Result<Json<Vec<CategoryTreeNode>>, RouteError> {
+) -> Result<Json<Vec<CategoryTreeNode>>, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::Category: crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let rows: Vec<Category> = sqlx::query_as::<_, Category>(
         "SELECT id, user_id, name, parent_id, created_at \
          FROM categories WHERE user_id = $1 ORDER BY created_at",
@@ -136,12 +151,20 @@ pub async fn list_categories(
 }
 
 /// POST /api/v1/categories
-pub async fn create_category(
-    State(state): State<Arc<AppState>>,
+pub async fn create_category<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
     JsonBody(req): JsonBody<CreateCategoryRequest>,
-) -> Result<(StatusCode, Json<Category>), RouteError> {
+) -> Result<(StatusCode, Json<Category>), RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::Category: crate::db::DbRow<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let name = req.name.trim().to_string();
     if name.is_empty() || name.len() > 128 {
         return Err(error_json(
@@ -184,12 +207,18 @@ pub async fn create_category(
 }
 
 /// GET /api/v1/categories/{id}
-pub async fn get_category(
-    State(state): State<Arc<AppState>>,
+pub async fn get_category<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
     Path(id): Path<Uuid>,
-) -> Result<Json<Category>, RouteError> {
+) -> Result<Json<Category>, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::Category: crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_as::<_, Category>(
         "SELECT id, user_id, name, parent_id, created_at \
          FROM categories WHERE id = $1 AND user_id = $2",
@@ -211,13 +240,20 @@ pub async fn get_category(
 }
 
 /// PATCH /api/v1/categories/{id}
-pub async fn update_category(
-    State(state): State<Arc<AppState>>,
+pub async fn update_category<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
     Path(id): Path<Uuid>,
     JsonBody(req): JsonBody<UpdateCategoryRequest>,
-) -> Result<Json<Category>, RouteError> {
+) -> Result<Json<Category>, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::Category: crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let existing = sqlx::query_as::<_, Category>(
         "SELECT id, user_id, name, parent_id, created_at \
          FROM categories WHERE id = $1 AND user_id = $2",
@@ -257,12 +293,20 @@ pub async fn update_category(
 }
 
 /// DELETE /api/v1/categories/{id}
-pub async fn delete_category(
-    State(state): State<Arc<AppState>>,
+pub async fn delete_category<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
     Path(id): Path<Uuid>,
-) -> Result<StatusCode, RouteError> {
+) -> Result<StatusCode, RouteError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let result = sqlx::query("DELETE FROM categories WHERE id = $1 AND user_id = $2")
         .bind(id)
         .bind(user.id)
@@ -276,7 +320,7 @@ pub async fn delete_category(
                 &[e.to_string()],
             )
         })?;
-    if result.rows_affected() == 0 {
+    if result.affected() == 0 {
         return Err(error_json(
             locale,
             StatusCode::NOT_FOUND,

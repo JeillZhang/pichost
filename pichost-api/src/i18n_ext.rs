@@ -30,21 +30,23 @@ impl Locale {
         Self(locale_from_header(headers.get(ACCEPT_LANGUAGE), fallback))
     }
 }
-impl FromRequestParts<crate::app::AppState> for Locale {
+impl<DB: pichost_core::DbType> FromRequestParts<crate::app::AppState<DB>> for Locale {
     type Rejection = std::convert::Infallible;
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
-        _state: &crate::app::AppState,
+        _state: &crate::app::AppState<DB>,
     ) -> Result<Self, Self::Rejection> {
         Ok(Self::from_parts(&parts.headers))
     }
 }
 
-impl FromRequestParts<std::sync::Arc<crate::app::AppState>> for Locale {
+impl<DB: pichost_core::DbType> FromRequestParts<std::sync::Arc<crate::app::AppState<DB>>>
+    for Locale
+{
     type Rejection = std::convert::Infallible;
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
-        _state: &std::sync::Arc<crate::app::AppState>,
+        _state: &std::sync::Arc<crate::app::AppState<DB>>,
     ) -> Result<Self, Self::Rejection> {
         Ok(Self::from_parts(&parts.headers))
     }

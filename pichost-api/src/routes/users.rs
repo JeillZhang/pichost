@@ -1,8 +1,9 @@
 use std::sync::Arc;
+use pichost_core::DbType;
 
 use axum::{extract::State, http::StatusCode, Extension, Json};
 use serde::Serialize;
-use sqlx::PgPool;
+use sqlx::Pool;
 use uuid::Uuid;
 
 use argon2::{
@@ -26,11 +27,19 @@ pub struct UserStats {
 }
 
 /// GET /api/v1/users/me/stats — usage statistics (protected, cached)
-pub async fn get_my_stats(
-    State(state): State<Arc<AppState>>,
+pub async fn get_my_stats<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
-) -> Result<Json<UserStats>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<UserStats>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64, Option<i64>): crate::db::DbRow<DB>,
+    (Option<i64>,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let quota = fetch_user_quota(&state.pool, user.id, locale).await?;
 
     let cache_stats = state.cache.get_user_stats(&user.id).await.ok().flatten();
@@ -53,11 +62,18 @@ pub async fn get_my_stats(
     Ok(Json(stats))
 }
 
-async fn fetch_user_quota(
-    pool: &PgPool,
+async fn fetch_user_quota<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     locale: Language,
-) -> Result<Option<i64>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Option<i64>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<i64>,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_scalar("SELECT storage_quota FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_optional(pool)
@@ -88,11 +104,17 @@ fn try_cached_stats(
     })
 }
 
-async fn query_user_stats(
-    pool: &PgPool,
+async fn query_user_stats<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     locale: Language,
-) -> Result<(i64, i64), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(i64, i64), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64, Option<i64>): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let row = sqlx::query_as::<_, (i64, Option<i64>)>(
         r#"SELECT COUNT(*)::BIGINT as total_images,
                   COALESCE(SUM(file_size), 0)::BIGINT as total_size
@@ -161,12 +183,23 @@ fn build_user_profile(row: ProfileRow) -> UserProfile {
     }
 }
 
-async fn fetch_profile_row(
-    pool: &PgPool,
+async fn fetch_profile_row<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     log_msg: &str,
     locale: Language,
-) -> Result<Option<ProfileRow>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Option<ProfileRow>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_as::<_, ProfileRow>(PROFILE_SELECT)
         .bind(user_id)
         .fetch_optional(pool)
@@ -178,19 +211,30 @@ async fn fetch_profile_row(
 }
 
 /// GET /api/v1/users/me — current user's full profile
-pub async fn get_my_profile(
-    State(state): State<Arc<AppState>>,
+pub async fn get_my_profile<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
-) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let row = fetch_profile_row(&state.pool, user.id, "User profile query failed", locale)
         .await?
         .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "user.not_found"))?;
     Ok(Json(build_user_profile(row)))
 }
 
-fn ensure_backend_exists(
-    state: &AppState,
+fn ensure_backend_exists<DB: DbType>(
+    state: &AppState<DB>,
     payload: &UpdateProfileRequest,
     locale: Language,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
@@ -207,12 +251,23 @@ fn ensure_backend_exists(
     Ok(())
 }
 
-async fn ensure_username_available(
-    pool: &PgPool,
+async fn ensure_username_available<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     username: Option<&str>,
     locale: Language,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (bool,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let Some(username) = username else {
         return Ok(());
     };
@@ -237,12 +292,23 @@ async fn ensure_username_available(
     Ok(())
 }
 
-async fn ensure_email_available(
-    pool: &PgPool,
+async fn ensure_email_available<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     email: Option<&str>,
     locale: Language,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (bool,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let Some(email) = email else {
         return Ok(());
     };
@@ -280,14 +346,24 @@ fn serialize_watermark_config(
     }
 }
 
-async fn apply_profile_update(
-    pool: &PgPool,
+async fn apply_profile_update<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     payload: &UpdateProfileRequest,
     wm_provided: bool,
     wm_value: &Option<serde_json::Value>,
     locale: Language,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query(
         "UPDATE users SET \
          username = COALESCE($1, username), \
@@ -325,12 +401,28 @@ async fn apply_profile_update(
 }
 
 /// PATCH /api/v1/users/me — update own profile
-pub async fn update_my_profile(
-    State(state): State<Arc<AppState>>,
+pub async fn update_my_profile<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
     JsonBody(payload): JsonBody<UpdateProfileRequest>,
-) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (bool,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     ensure_backend_exists(&state, &payload, locale)?;
     ensure_username_available(&state.pool, user.id, payload.username.as_deref(), locale).await?;
     ensure_email_available(&state.pool, user.id, payload.email.as_deref(), locale).await?;
@@ -344,11 +436,18 @@ pub async fn update_my_profile(
     Ok(Json(build_user_profile(row)))
 }
 
-async fn fetch_password_hash(
-    pool: &PgPool,
+async fn fetch_password_hash<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     locale: Language,
-) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<String, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (std::string::String,): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let current_hash: Option<String> =
         sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
             .bind(user_id)
@@ -395,12 +494,21 @@ fn hash_new_password(
         })
 }
 
-async fn update_password_hash(
-    pool: &PgPool,
+async fn update_password_hash<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     new_hash: &str,
     locale: Language,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2")
         .bind(new_hash)
         .bind(user_id)
@@ -414,12 +522,21 @@ async fn update_password_hash(
 }
 
 /// POST /api/v1/users/me/password — change own password
-pub async fn change_my_password(
-    State(state): State<Arc<AppState>>,
+pub async fn change_my_password<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
     JsonBody(payload): JsonBody<ChangePasswordRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (std::string::String,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     if payload.new_password.len() < 8 {
         return Err(error_json(
             locale,

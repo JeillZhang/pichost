@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use pichost_core::DbType;
 
 use axum::{
     extract::{Request, State},
@@ -25,11 +26,17 @@ pub struct AuthUser {
     pub watermark_config: Option<pichost_core::models::WatermarkConfig>,
 }
 
-pub async fn require_auth(
-    State(state): State<Arc<AppState>>,
+pub async fn require_auth<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     mut req: Request,
     next: Next,
-) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let locale = locale_from_header(req.headers().get(ACCEPT_LANGUAGE), I18n::global().language());
     let token = extract_bearer_token(&req)?;
     let claims = decode_and_validate_jwt(token, state.config.auth.jwt_secret.as_bytes(), locale)?;
@@ -71,11 +78,17 @@ fn decode_and_validate_jwt(
     Ok(token_data.claims)
 }
 
-async fn check_blacklist_and_quota(
-    state: &AppState,
+async fn check_blacklist_and_quota<DB: DbType>(
+    state: &AppState<DB>,
     claims: &AccessTokenClaims,
     locale: Language,
-) -> Result<AuthUser, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<AuthUser, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     if state.cache.exists(&format!("bl:{}", claims.jti)).await.unwrap_or(true) {
         return Err(error_json(locale, StatusCode::UNAUTHORIZED, "auth.token_revoked"));
     }
@@ -252,14 +265,13 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
-    fn auth_state() -> Arc<crate::app::AppState> {
+    async fn auth_state() -> Arc<crate::app::AppState<sqlx::Sqlite>> {
         use pichost_core::StorageRouter;
         let mut cfg = pichost_core::config::AppConfig::default();
         cfg.auth.jwt_secret = SECRET.to_string();
         Arc::new(crate::app::AppState {
-            pool: sqlx::postgres::PgPoolOptions::new()
-                .max_connections(1)
-                .connect_lazy("postgres://pichost:pichost@localhost:5432/pichost")
+            pool: crate::db::create_sqlite_pool("sqlite::memory:", 1)
+                .await
                 .unwrap(),
             cache: Arc::new(crate::cache::Cache::new(crate::cache::create_pool(
                 "redis://localhost:6379",
@@ -273,7 +285,7 @@ mod tests {
         })
     }
 
-    fn auth_app(state: Arc<crate::app::AppState>) -> Router {
+    fn auth_app(state: Arc<crate::app::AppState<sqlx::Sqlite>>) -> Router {
         Router::new()
             .route("/", get(|| async { "ok" }))
             .route_layer(middleware::from_fn_with_state(
@@ -299,7 +311,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "requires running PostgreSQL and Redis"]
     async fn test_require_auth_revoked_token() {
-        let state = auth_state();
+        let state = auth_state().await;
         let token = mint_access("user-1", false, 900);
         let claims: AccessTokenClaims = decode(
             &token,
@@ -320,7 +332,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_require_auth_invalid_subject() {
         let token = mint_access("not-a-uuid", false, 900);
-        let status = hit_with_token(auth_app(auth_state()), &token).await;
+        let status = hit_with_token(auth_app(auth_state().await), &token).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 }

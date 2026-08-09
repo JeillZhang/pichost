@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use pichost_core::DbType;
 
 use axum::extract::Multipart;
 use axum::http::StatusCode;
@@ -6,7 +7,7 @@ use axum::Json;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
-use sqlx::PgPool;
+use sqlx::{Pool, Row};
 use uuid::Uuid;
 
 use crate::app::AppState;
@@ -264,12 +265,19 @@ pub async fn extract_file_from_multipart(
 
 /// Validates file against max-size limits (admin vs user) and per-user
 /// storage quota.  file_size is in bytes.
-async fn check_upload_quotas(
-    state: &AppState,
+async fn check_upload_quotas<DB: DbType>(
+    state: &AppState<DB>,
     user: &AuthUser,
     file_size: u64,
     locale: Language,
-) -> Result<(), ApiError> {
+) -> Result<(), ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (i64,): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let max_size = if user.is_admin {
         state.config.upload.max_file_size_admin
     } else {
@@ -315,13 +323,28 @@ async fn check_upload_quotas(
 /// Checks whether this user already uploaded the same content for a
 /// specific storage config (per-user, per-sha256, per-config dedup).
 /// Returns `Some(UploadResult)` if a duplicate exists, `None` otherwise.
-async fn try_dedup(
-    state: &AppState,
+async fn try_dedup<DB: DbType>(
+    state: &AppState<DB>,
     user_id: Uuid,
     sha256: &str,
     storage_config_id: Option<Uuid>,
     locale: Language,
-) -> Result<Option<UploadResult>, ApiError> {
+) -> Result<Option<UploadResult>, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (bool,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     if !dedup_exists(state, user_id, sha256, storage_config_id, locale).await? {
         return Ok(None);
     }
@@ -331,13 +354,25 @@ async fn try_dedup(
 
 /// Returns whether an image with the same sha256 already exists for this
 /// user and storage config.
-async fn dedup_exists(
-    state: &AppState,
+async fn dedup_exists<DB: DbType>(
+    state: &AppState<DB>,
     user_id: Uuid,
     sha256: &str,
     storage_config_id: Option<Uuid>,
     locale: Language,
-) -> Result<bool, ApiError> {
+) -> Result<bool, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (bool,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM images \
          WHERE user_id=$1 AND sha256=$2 \
@@ -355,13 +390,28 @@ async fn dedup_exists(
 }
 
 /// Fetches the existing duplicate image row (with its storage config join).
-async fn fetch_dedup_row(
-    state: &AppState,
+async fn fetch_dedup_row<DB: DbType>(
+    state: &AppState<DB>,
     user_id: Uuid,
     sha256: &str,
     storage_config_id: Option<Uuid>,
     locale: Language,
-) -> Result<ImageRow, ApiError> {
+) -> Result<ImageRow, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_as::<_, ImageRow>(
         "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size, \
          i.sha256, i.width, i.height, i.status, i.thumbnail_url, i.webp_url, \
@@ -384,7 +434,14 @@ async fn fetch_dedup_row(
 }
 
 /// Generates a collision-free 6-char hex public key.
-async fn generate_public_key(state: &AppState, locale: Language) -> Result<String, ApiError> {
+async fn generate_public_key<DB: DbType>(state: &AppState<DB>, locale: Language) -> Result<String, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (bool,): crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     use rand::Rng;
     loop {
         let key = format!("{:06x}", rand::thread_rng().gen::<u32>() & 0xFFFFFF);
@@ -457,12 +514,22 @@ fn resolve_encryption_key(
 /// Resolve which storage configs to use for this upload.
 /// - `Some(ids)`: lookup specific configs (must belong to user).
 /// - `None`: fall back to user's default config, or local if none exists.
-async fn resolve_upload_configs(
-    pool: &PgPool,
+async fn resolve_upload_configs<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     storage_config_ids: Option<Vec<Uuid>>,
     locale: Language,
-) -> Result<Vec<UserStorageConfig>, ApiError> {
+) -> Result<Vec<UserStorageConfig>, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
+    [uuid::Uuid]: sqlx::Type<DB>,
+{
     if let Some(ids) = storage_config_ids {
         if ids.is_empty() {
             return Ok(vec![]);
@@ -480,12 +547,22 @@ async fn resolve_upload_configs(
 }
 
 /// Loads the user's configs matching the given ids, erroring when none match.
-async fn fetch_configs_by_ids(
-    pool: &PgPool,
+async fn fetch_configs_by_ids<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     ids: &[Uuid],
     locale: Language,
-) -> Result<Vec<UserStorageConfig>, ApiError> {
+) -> Result<Vec<UserStorageConfig>, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
+    [uuid::Uuid]: sqlx::Type<DB>,
+{
     let configs = sqlx::query_as::<_, UserStorageConfig>(
         "SELECT id, user_id, name, provider, is_default, \
          config, created_at, updated_at \
@@ -513,11 +590,17 @@ async fn fetch_configs_by_ids(
 }
 
 /// Loads the user's default storage config, if one exists.
-async fn fetch_default_config(
-    pool: &PgPool,
+async fn fetch_default_config<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     locale: Language,
-) -> Result<Option<UserStorageConfig>, ApiError> {
+) -> Result<Option<UserStorageConfig>, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_as::<_, UserStorageConfig>(
         "SELECT id, user_id, name, provider, is_default, \
          config, created_at, updated_at \
@@ -619,8 +702,8 @@ async fn write_to_storage(
 
 /// Inserts a new image record into the database, optionally linking a config.
 #[allow(clippy::too_many_arguments)]
-async fn insert_image_record(
-    pool: &PgPool,
+async fn insert_image_record<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     public_key: &str,
     original_name: &str,
@@ -634,7 +717,22 @@ async fn insert_image_record(
     url: &str,
     storage_config_id: Option<Uuid>,
     locale: Language,
-) -> Result<Uuid, ApiError> {
+) -> Result<Uuid, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_scalar(
         r#"INSERT INTO images
            (user_id, public_key, original_name, storage_key, storage_backend,
@@ -670,8 +768,8 @@ async fn insert_image_record(
 /// Orchestrates storage write + DB insert for one backend config.
 /// Returns `(image_id, storage_key, backend_key, public_key, url)`.
 #[allow(clippy::too_many_arguments)]
-async fn persist_image_for_config(
-    state: &AppState,
+async fn persist_image_for_config<DB: DbType>(
+    state: &AppState<DB>,
     user: &AuthUser,
     config: &UserStorageConfig,
     encryption_key: &[u8; 32],
@@ -682,7 +780,22 @@ async fn persist_image_for_config(
     height: Option<i32>,
     sha256: &str,
     locale: Language,
-) -> Result<(Uuid, String, String, String, String), ApiError> {
+) -> Result<(uuid::Uuid, String, String, String, String), ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    (bool,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let storage = state
         .router
         .for_config(config, encryption_key)
@@ -800,8 +913,8 @@ fn config_info(config: &UserStorageConfig) -> StorageConfigInfo {
 /// Upload the image to a single backend config. Handles dedup, storage,
 /// DB insert, and worker enqueue.
 #[allow(clippy::too_many_arguments)]
-async fn upload_to_single_backend(
-    state: &AppState,
+async fn upload_to_single_backend<DB: DbType>(
+    state: &AppState<DB>,
     user: &AuthUser,
     config: &UserStorageConfig,
     encryption_key: &[u8; 32],
@@ -812,7 +925,24 @@ async fn upload_to_single_backend(
     width: Option<i32>,
     height: Option<i32>,
     locale: Language,
-) -> Result<UploadResult, ApiError> {
+) -> Result<UploadResult, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    (bool,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let config_id = if config.id.is_nil() {
         None
     } else {
@@ -870,14 +1000,36 @@ async fn upload_to_single_backend(
 /// to `upload_to_single_backend` for each config.
 ///
 /// Returns one `UploadResult` per backend.
-pub async fn process_upload(
-    state: &AppState,
+pub async fn process_upload<DB: DbType>(
+    state: &AppState<DB>,
     user: &AuthUser,
     bytes: Vec<u8>,
     file_name: String,
     storage_config_ids: Option<Vec<Uuid>>,
     locale: Language,
-) -> Result<Vec<UploadResult>, ApiError> {
+) -> Result<Vec<UploadResult>, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64,): crate::db::DbRow<DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    (bool,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
+    [uuid::Uuid]: sqlx::Type<DB>,
+{
     if !infer::is_image(&bytes) {
         return Err(error_json(
             locale,
@@ -897,7 +1049,7 @@ pub async fn process_upload(
     let mime_type = detect_mime(&bytes);
     let (width, height) = image_dimensions(&bytes);
 
-    let ctx = UploadCtx {
+    let ctx = UploadCtx::<'_, DB> {
         state,
         user,
         encryption_key: &encryption_key,
@@ -913,8 +1065,8 @@ pub async fn process_upload(
 }
 
 /// Shared upload parameters passed to `run_backend_uploads`.
-struct UploadCtx<'a> {
-    state: &'a AppState,
+struct UploadCtx<'a, DB: DbType> {
+    state: &'a AppState<DB>,
     user: &'a AuthUser,
     encryption_key: &'a [u8; 32],
     bytes: &'a [u8],
@@ -928,10 +1080,27 @@ struct UploadCtx<'a> {
 
 /// Runs the upload against 1-2 storage configs, uploading the second config
 /// in parallel when two are configured.
-async fn run_backend_uploads(
-    ctx: &UploadCtx<'_>,
+async fn run_backend_uploads<DB: DbType>(
+    ctx: &UploadCtx<'_, DB>,
     configs: &[UserStorageConfig],
-) -> Result<Vec<UploadResult>, ApiError> {
+) -> Result<Vec<UploadResult>, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    (bool,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     if configs.len() == 1 {
         let result = upload_to_single_backend(
             ctx.state,
@@ -982,11 +1151,24 @@ async fn run_backend_uploads(
 // ── Gallery queries ────────────────────────────────────────────────────────
 
 /// Query one page of images for a user. Builds sorted, search-filtered SQL.
-pub async fn list_user_images(
-    pool: &PgPool,
+pub async fn list_user_images<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     query: &ImageListQuery,
-) -> Result<ImageListResponse, ApiError> {
+) -> Result<ImageListResponse, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64,): crate::db::DbRow<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+{
     let page = query.page.max(1);
     let per_page = query.per_page.clamp(1, 100);
     let offset = ((page - 1) * per_page) as i64;
@@ -1054,55 +1236,64 @@ fn calc_total_pages(total: i64, per_page: u32) -> u32 {
     }
 }
 
-/// Appends search / storage-config / category WHERE clauses (in that order)
-/// to a gallery query builder. Empty filters are skipped.
-fn push_optional_filters(
-    builder: &mut sqlx::QueryBuilder<'_, sqlx::Postgres>,
-    search_term: &str,
-    config_id: Option<Uuid>,
-    category_id: Option<Uuid>,
-) {
-    if !search_term.is_empty() {
-        builder.push(" AND original_name ILIKE ");
-        builder.push_bind(format!("%{search_term}%"));
-    }
-    if let Some(cid) = config_id {
-        builder.push(" AND storage_config_id = ");
-        builder.push_bind(cid);
-    }
-    if let Some(cat_id) = category_id {
-        builder.push(" AND category_id = ");
-        builder.push_bind(cat_id);
-    }
-}
-
-async fn count_user_images(
-    pool: &PgPool,
+async fn count_user_images<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     search_term: &str,
     config_id: Option<Uuid>,
     category_id: Option<Uuid>,
-) -> Result<i64, ApiError> {
-    let mut builder = sqlx::QueryBuilder::new("SELECT COUNT(*) FROM images WHERE user_id = ");
-    builder.push_bind(user_id);
-    push_optional_filters(&mut builder, search_term, config_id, category_id);
-    builder
-        .build_query_scalar::<i64>()
-        .fetch_one(pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Image count query failed: {e}");
-            error_json(
-                I18n::global().language(),
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "common.internal_error",
-            )
-        })
+) -> Result<i64, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64,): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+{
+    let mut sql = "SELECT COUNT(*) FROM images WHERE user_id = ".to_string();
+    if !search_term.is_empty() {
+        sql.push_str(" AND original_name ILIKE ");
+    }
+    if config_id.is_some() {
+        sql.push_str(" AND storage_config_id = ");
+    }
+    if category_id.is_some() {
+        sql.push_str(" AND category_id = ");
+    }
+    let mut q = sqlx::query(&sql).bind(user_id);
+    if !search_term.is_empty() {
+        q = q.bind(format!("%{search_term}%"));
+    }
+    if config_id.is_some() {
+        q = q.bind(config_id);
+    }
+    if category_id.is_some() {
+        q = q.bind(category_id);
+    }
+    let row = q.fetch_one(pool).await.map_err(|e| {
+        tracing::warn!("Image count query failed: {e}");
+        error_json(
+            I18n::global().language(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
+    })?;
+    row.try_get(0usize).map_err(|e| {
+        tracing::warn!("Image count decode failed: {e}");
+        error_json(
+            I18n::global().language(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn fetch_user_images(
-    pool: &PgPool,
+async fn fetch_user_images<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     sort_col: &str,
     order_dir: &str,
@@ -1111,42 +1302,74 @@ async fn fetch_user_images(
     offset: i64,
     config_id: Option<Uuid>,
     category_id: Option<Uuid>,
-) -> Result<Vec<ImageRow>, ApiError> {
-    let mut builder = sqlx::QueryBuilder::new(
-        "SELECT id,public_key,original_name,url,mime_type,file_size,\
+) -> Result<Vec<ImageRow>, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
+    let mut sql = "SELECT id,public_key,original_name,url,mime_type,file_size,\
          sha256,width,height,status,thumbnail_url,webp_url,\
-         created_at,category_id,storage_config_id FROM images WHERE user_id = ",
-    );
-    builder.push_bind(user_id);
-    push_optional_filters(&mut builder, search_term, config_id, category_id);
-    builder.push(" ORDER BY ");
-    builder.push(sort_col);
-    builder.push(' ');
-    builder.push(order_dir);
-    builder.push(" LIMIT ");
-    builder.push_bind(limit);
-    builder.push(" OFFSET ");
-    builder.push_bind(offset);
-    builder
-        .build_query_as::<ImageRow>()
-        .fetch_all(pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Image list query failed: {e}");
-            error_json(
-                I18n::global().language(),
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "common.internal_error",
-            )
-        })
+         created_at,category_id,storage_config_id FROM images WHERE user_id = "
+        .to_string();
+    if !search_term.is_empty() {
+        sql.push_str(" AND original_name ILIKE ");
+    }
+    if config_id.is_some() {
+        sql.push_str(" AND storage_config_id = ");
+    }
+    if category_id.is_some() {
+        sql.push_str(" AND category_id = ");
+    }
+    sql.push_str(" ORDER BY ");
+    sql.push_str(sort_col);
+    sql.push(' ');
+    sql.push_str(order_dir);
+    sql.push_str(" LIMIT ");
+    sql.push_str(" OFFSET ");
+    let mut q = sqlx::query_as::<_, ImageRow>(&sql).bind(user_id);
+    if !search_term.is_empty() {
+        q = q.bind(format!("%{search_term}%"));
+    }
+    if config_id.is_some() {
+        q = q.bind(config_id);
+    }
+    if category_id.is_some() {
+        q = q.bind(category_id);
+    }
+    q = q.bind(limit).bind(offset);
+    q.fetch_all(pool).await.map_err(|e| {
+        tracing::warn!("Image list query failed: {e}");
+        error_json(
+            I18n::global().language(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
+    })
 }
 
 /// Fetch a single image by ID (owned by user).
-pub async fn get_user_image(
-    pool: &PgPool,
+pub async fn get_user_image<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     image_id: Uuid,
-) -> Result<Option<UploadResult>, ApiError> {
+) -> Result<Option<UploadResult>, ApiError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_as::<_, ImageRow>(
         "SELECT id, public_key, original_name, url, mime_type, file_size, \
          sha256, width, height, status, thumbnail_url, webp_url, \
@@ -1339,23 +1562,6 @@ mod tests {
     fn test_image_dimensions() {
         assert_eq!(image_dimensions(&png_bytes()), (Some(2), Some(3)));
         assert_eq!(image_dimensions(b"garbage"), (None, None));
-    }
-
-    #[test]
-    fn test_push_optional_filters_all() {
-        let mut builder = sqlx::QueryBuilder::<sqlx::Postgres>::new("SELECT * FROM images");
-        push_optional_filters(&mut builder, "test", Some(Uuid::new_v4()), Some(Uuid::new_v4()));
-        let sql = builder.sql();
-        assert!(sql.contains("AND original_name ILIKE"));
-        assert!(sql.contains("AND storage_config_id ="));
-        assert!(sql.contains("AND category_id ="));
-    }
-
-    #[test]
-    fn test_push_optional_filters_none() {
-        let mut builder = sqlx::QueryBuilder::<sqlx::Postgres>::new("SELECT * FROM images");
-        push_optional_filters(&mut builder, "", None, None);
-        assert_eq!(builder.sql(), "SELECT * FROM images");
     }
 
     #[test]

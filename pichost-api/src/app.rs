@@ -12,17 +12,18 @@ use pichost_core::config::AppConfig;
 use pichost_core::storage::local::LocalStorage;
 use pichost_core::storage::s3::RustfsStorage;
 use pichost_core::storage::StorageBackend;
+use pichost_core::DbType;
 use pichost_core::StorageRouter;
+use sqlx::Pool;
 use tower_http::cors::CorsLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::cache::Cache;
-use crate::db::DbPool;
 use crate::middleware::rate_limit;
 
 #[derive(Clone)]
-pub struct AppState {
-    pub pool: DbPool,
+pub struct AppState<DB: DbType> {
+    pub pool: Pool<DB>,
     pub cache: Arc<Cache>,
     pub config: Arc<AppConfig>,
     pub router: Arc<StorageRouter>,
@@ -52,7 +53,26 @@ pub async fn init_storage_backends(config: &AppConfig) -> StorageRouter {
     StorageRouter::new(backends, config.storage.default_backend.clone())
 }
 
-fn auth_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
+fn auth_routes<DB: DbType>(state: Arc<AppState<DB>>) -> Router<Arc<AppState<DB>>>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid, String, Option<String>, String, bool, Option<i64>): crate::db::DbRow<DB>,
+    (String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (i64,): crate::db::DbRow<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (uuid::Uuid, String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     Router::new()
         .route("/register", post(crate::routes::auth::register))
         .route("/login", post(crate::routes::auth::login))
@@ -68,7 +88,31 @@ fn auth_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         ))
 }
 
-fn upload_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
+fn upload_routes<DB: DbType>(state: Arc<AppState<DB>>) -> Router<Arc<AppState<DB>>>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    (i64,): crate::db::DbRow<DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (bool,): crate::db::DbRow<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
+    [uuid::Uuid]: sqlx::Type<DB>,
+{
     let protected =
         middleware::from_fn_with_state(state.clone(), crate::middleware::auth::require_auth);
     Router::new()
@@ -81,7 +125,31 @@ fn upload_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route_layer(protected)
 }
 
-fn image_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
+fn image_routes<DB: DbType>(state: Arc<AppState<DB>>) -> Router<Arc<AppState<DB>>>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    (std::string::String, std::string::String, std::string::String): crate::db::DbRow<DB>,
+    (String, String, Option<String>, Option<String>): crate::db::DbRow<DB>,
+    (i64,): crate::db::DbRow<DB>,
+    pichost_core::models::Category: crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Vec<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
+    [uuid::Uuid]: sqlx::Type<DB>,
+{
     let protected =
         middleware::from_fn_with_state(state.clone(), crate::middleware::auth::require_auth);
     Router::new()
@@ -103,7 +171,30 @@ fn image_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route_layer(protected)
 }
 
-fn user_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
+fn user_routes<DB: DbType>(state: Arc<AppState<DB>>) -> Router<Arc<AppState<DB>>>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    (bool,): crate::db::DbRow<DB>,
+    (i64, Option<i64>): crate::db::DbRow<DB>,
+    (i64,): crate::db::DbRow<DB>,
+    (std::string::String,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (Option<i64>,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+{
     let protected =
         middleware::from_fn_with_state(state.clone(), crate::middleware::auth::require_auth);
     Router::new()
@@ -137,7 +228,19 @@ fn user_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route_layer(protected)
 }
 
-fn category_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
+fn category_routes<DB: DbType>(state: Arc<AppState<DB>>) -> Router<Arc<AppState<DB>>>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    pichost_core::models::Category: crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let protected =
         middleware::from_fn_with_state(state.clone(), crate::middleware::auth::require_auth);
     Router::new()
@@ -159,7 +262,29 @@ fn category_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route_layer(protected)
 }
 
-fn admin_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
+fn admin_routes<DB: DbType>(state: Arc<AppState<DB>>) -> Router<Arc<AppState<DB>>>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    (String, Option<String>, Option<String>): crate::db::DbRow<DB>,
+    (i64, i64): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (Option<i64>,): crate::db::DbRow<DB>,
+    (bool,): crate::db::DbRow<DB>,
+    (i64,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let protected =
         middleware::from_fn_with_state(state.clone(), crate::middleware::auth::require_auth);
     let admin_protected =
@@ -191,7 +316,15 @@ fn admin_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route_layer(protected)
 }
 
-fn public_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
+fn public_routes<DB: DbType>(state: Arc<AppState<DB>>) -> Router<Arc<AppState<DB>>>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<std::string::String>, std::string::String): crate::db::DbRow<DB>,
+    (std::string::String, std::string::String, std::string::String, std::string::String): crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     Router::new()
         .route("/{public_key}", get(crate::routes::images::public_get))
         .route("/thumb/{image_id}", get(crate::routes::images::public_get_thumb))
@@ -202,7 +335,14 @@ fn public_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         ))
 }
 
-fn thumb_alias_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
+fn thumb_alias_routes<DB: DbType>(state: Arc<AppState<DB>>) -> Router<Arc<AppState<DB>>>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<std::string::String>, std::string::String): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+{
     Router::new()
         .route("/{public_key}", get(crate::routes::images::public_get_thumb_by_key))
         .route_layer(middleware::from_fn_with_state(
@@ -212,7 +352,49 @@ fn thumb_alias_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
 }
 
 /// Assembles route groups into the top-level Router with shared middleware layers.
-pub fn build_router(state: Arc<AppState>) -> Router {
+pub fn build_router<DB: DbType>(state: Arc<AppState<DB>>) -> Router
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    (Option<std::string::String>, std::string::String): crate::db::DbRow<DB>,
+    (std::string::String, std::string::String, std::string::String): crate::db::DbRow<DB>,
+    pichost_core::models::Category: crate::db::DbRow<DB>,
+    (String, Option<String>, Option<String>): crate::db::DbRow<DB>,
+    (String, String, Option<String>, Option<String>): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (i64, i64): crate::db::DbRow<DB>,
+    (i64,): crate::db::DbRow<DB>,
+    (Option<i64>,): crate::db::DbRow<DB>,
+    (bool,): crate::db::DbRow<DB>,
+    (uuid::Uuid, String, Option<String>, String, bool, Option<i64>): crate::db::DbRow<DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    (String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
+    (String, String, String, String): crate::db::DbRow<DB>,
+    (i64, Option<i64>): crate::db::DbRow<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
+    (String,): crate::db::DbRow<DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Vec<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
+    [uuid::Uuid]: sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+{
     Router::new()
         .nest("/api/v1/auth", auth_routes(state.clone()))
         .nest("/api/v1/images", upload_routes(state.clone()))
@@ -264,7 +446,45 @@ fn setup_security_headers(router: Router) -> Router {
 }
 
 /// Assembles the complete application router with security headers.
-pub fn configure_app(state: Arc<AppState>) -> Router {
+pub fn configure_app<DB: DbType>(state: Arc<AppState<DB>>) -> Router
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    pichost_core::models::Category: crate::db::DbRow<DB>,
+    (Option<std::string::String>, std::string::String): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (std::string::String, std::string::String, std::string::String): crate::db::DbRow<DB>,
+    (String, Option<String>, Option<String>): crate::db::DbRow<DB>,
+    (String, String, Option<String>, Option<String>): crate::db::DbRow<DB>,
+    (i64, i64): crate::db::DbRow<DB>,
+    (i64,): crate::db::DbRow<DB>,
+    (Option<i64>,): crate::db::DbRow<DB>,
+    (bool,): crate::db::DbRow<DB>,
+    (uuid::Uuid, String, Option<String>, String, bool, Option<i64>): crate::db::DbRow<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
+    (i64, Option<i64>): crate::db::DbRow<DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Vec<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
+    [uuid::Uuid]: sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+{
     setup_security_headers(build_router(state))
 }
 
@@ -274,11 +494,10 @@ mod tests {
     use crate::cache::{create_pool, Cache};
     use pichost_core::config::RustfsStorageConfig;
 
-    fn test_state() -> Arc<AppState> {
+    async fn test_state() -> Arc<AppState<sqlx::Sqlite>> {
         Arc::new(AppState {
-            pool: sqlx::postgres::PgPoolOptions::new()
-                .max_connections(1)
-                .connect_lazy("postgres://pichost:pichost@localhost:5432/pichost")
+            pool: crate::db::create_sqlite_pool("sqlite::memory:", 1)
+                .await
                 .unwrap(),
             cache: Arc::new(Cache::new(create_pool("redis://localhost:6379", 2))),
             config: Arc::new(AppConfig::default()),
@@ -312,10 +531,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_route_builders_construct() {
-        let state = test_state();
+        let state = test_state().await;
         let _ = auth_routes(state.clone());
-        let _ = upload_routes(state.clone());
-        let _ = image_routes(state.clone());
+        // upload/image routes bind &[Uuid] (ANY($1)) — PostgreSQL-only;
+        // exercised by the PG integration harness (tests/common).
         let _ = user_routes(state.clone());
         let _ = category_routes(state.clone());
         let _ = admin_routes(state.clone());

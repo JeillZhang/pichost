@@ -1,11 +1,12 @@
 use std::sync::Arc;
+use pichost_core::DbType;
 
 use pichost_core::config::AppConfig;
 use pichost_core::crypto::decode_key;
 use pichost_core::models::UserStorageConfig;
 use pichost_core::storage::StorageBackend;
 use pichost_core::StorageRouter;
-use sqlx::PgPool;
+use sqlx::Pool;
 
 use crate::processor;
 
@@ -32,11 +33,19 @@ pub enum PipelineError {
 
 use crate::queue::TaskPayload;
 
-async fn load_watermarked_image(
-    pool: &PgPool,
+async fn load_watermarked_image<DB: DbType>(
+    pool: &Pool<DB>,
     task: &TaskPayload,
     raw_img: image::DynamicImage,
-) -> Result<image::DynamicImage, PipelineError> {
+) -> Result<image::DynamicImage, PipelineError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+{
     let watermark_config = fetch_watermark_config(pool, task).await?;
     match watermark_config {
         Some(ref wm_cfg) if wm_cfg.enabled && !wm_cfg.text.is_empty() => {
@@ -47,12 +56,21 @@ async fn load_watermarked_image(
     }
 }
 
-async fn fetch_watermark_config(
-    pool: &PgPool,
+async fn fetch_watermark_config<DB: DbType>(
+    pool: &Pool<DB>,
     task: &TaskPayload,
-) -> Result<Option<pichost_core::models::WatermarkConfig>, PipelineError> {
+) -> Result<Option<pichost_core::models::WatermarkConfig>, PipelineError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<serde_json::Value>,): crate::db::DbRow<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+{
     let watermark_config: Option<pichost_core::models::WatermarkConfig> =
-        sqlx::query_scalar::<_, Option<serde_json::Value>>(
+        sqlx::query_scalar::<DB, Option<serde_json::Value>>(
             "SELECT watermark_config FROM users WHERE id = $1",
         )
         .bind(task.user_id)
@@ -64,12 +82,29 @@ async fn fetch_watermark_config(
     Ok(watermark_config)
 }
 
-pub async fn process_task(
-    pool: &PgPool,
+pub async fn process_task<DB: DbType>(
+    pool: &Pool<DB>,
     router: &StorageRouter,
     config: &AppConfig,
     task: &TaskPayload,
-) -> Result<(), PipelineError> {
+) -> Result<(), PipelineError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    str: sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    for<'q> Option<&'q str>: sqlx::Encode<'q, DB>,
+    for<'q> Option<&'q str>: sqlx::Type<DB>,
+{
     let backend = resolve_backend(pool, router, config, task).await?;
 
     let (raw_img, fmt, _bytes) = read_source_image(backend.as_ref(), task).await?;
@@ -107,12 +142,24 @@ pub async fn process_task(
 /// If the task references a storage config (git backends), the config is
 /// fetched from the database and a dynamic backend is created via
 /// `router.for_config()`. Otherwise falls back to `router.for_backend()`.
-async fn resolve_backend(
-    pool: &PgPool,
+async fn resolve_backend<DB: DbType>(
+    pool: &Pool<DB>,
     router: &StorageRouter,
     config: &AppConfig,
     task: &TaskPayload,
-) -> Result<Arc<dyn StorageBackend>, PipelineError> {
+) -> Result<Arc<dyn StorageBackend>, PipelineError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+{
     if let Some(config_id) = &task.storage_config_id {
         let storage_config = fetch_storage_config(pool, config_id).await?;
         let enc_key = resolve_encryption_key(config);
@@ -125,10 +172,22 @@ async fn resolve_backend(
 }
 
 /// Fetch a user storage config by ID from the database.
-async fn fetch_storage_config(
-    pool: &PgPool,
+async fn fetch_storage_config<DB: DbType>(
+    pool: &Pool<DB>,
     config_id: &uuid::Uuid,
-) -> Result<UserStorageConfig, PipelineError> {
+) -> Result<UserStorageConfig, PipelineError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+{
     sqlx::query_as::<_, UserStorageConfig>(
         "SELECT id, user_id, name, provider, is_default, \
          config, created_at, updated_at \
@@ -213,8 +272,8 @@ async fn read_source_image(
 
 /// Persist processing results into the images table.
 #[allow(clippy::too_many_arguments)]
-async fn update_image_record(
-    pool: &PgPool,
+async fn update_image_record<DB: DbType>(
+    pool: &Pool<DB>,
     task: &TaskPayload,
     width: i32,
     height: i32,
@@ -223,7 +282,16 @@ async fn update_image_record(
     thumb_written: bool,
     webp_written: bool,
     public_url: &str,
-) -> Result<(), PipelineError> {
+) -> Result<(), PipelineError>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    for<'q> Option<&'q str>: sqlx::Encode<'q, DB>,
+    for<'q> Option<&'q str>: sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    str: sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let thumb_url = format!("{}/u/thumb/{}", public_url, task.image_id);
     let webp_url = format!("{}/u/webp/{}", public_url, task.image_id);
     sqlx::query(
@@ -498,19 +566,24 @@ mod tests {
     );
 
     async fn test_pg_pool() -> sqlx::PgPool {
-        let pool = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(5)
-            .connect(TEST_DB_URL)
-            .await
-            .unwrap();
-        sqlx::migrate!("../migrations").run(&pool).await.unwrap();
+        let pool = crate::db::create_pg_pool(TEST_DB_URL, 5).await.unwrap();
+        crate::db::run_pg_migrations(&pool).await.unwrap();
         pool
     }
 
-    async fn insert_user_with_watermark(
-        pool: &sqlx::PgPool,
+    async fn insert_user_with_watermark<DB: DbType>(
+        pool: &Pool<DB>,
         watermark: Option<serde_json::Value>,
-    ) -> uuid::Uuid {
+    ) -> uuid::Uuid
+    where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
         let user_id = uuid::Uuid::new_v4();
         sqlx::query(
             "INSERT INTO users (id, username, password_hash, watermark_config) \
@@ -525,7 +598,13 @@ mod tests {
         user_id
     }
 
-    async fn insert_image(pool: &sqlx::PgPool, user_id: uuid::Uuid) -> uuid::Uuid {
+    async fn insert_image<DB: DbType>(pool: &Pool<DB>, user_id: uuid::Uuid) -> uuid::Uuid
+    where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
         let image_id = uuid::Uuid::new_v4();
         let pk = format!("{:x}", image_id)[..16].to_string();
         sqlx::query(
@@ -543,7 +622,12 @@ mod tests {
         image_id
     }
 
-    async fn cleanup_user(pool: &sqlx::PgPool, user_id: uuid::Uuid) {
+    async fn cleanup_user<DB: DbType>(pool: &Pool<DB>, user_id: uuid::Uuid)
+    where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
         sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(user_id)
             .execute(pool)
@@ -716,10 +800,15 @@ mod tests {
         cleanup_user(&pool, user_id).await;
     }
 
-    async fn insert_storage_config(
-        pool: &sqlx::PgPool,
+    async fn insert_storage_config<DB: DbType>(
+        pool: &Pool<DB>,
         user_id: uuid::Uuid,
-    ) -> uuid::Uuid {
+    ) -> uuid::Uuid
+    where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
         let config_id = uuid::Uuid::new_v4();
         sqlx::query(
             "INSERT INTO user_storage_configs (id, user_id, name, provider, config) \
