@@ -86,3 +86,27 @@ async fn sqlite_admin_stats_queries() {
     assert_eq!(quota, None);
     let _ = &uid;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_gallery_and_batch_queries() {
+    let pool = sqlite_pool().await;
+    MIGRATOR.run(&pool).await.unwrap();
+    let uid: String = sqlx::query_scalar(
+        "INSERT INTO users (username, password_hash) VALUES ('gallery','h') RETURNING id")
+        .fetch_one(&pool).await.unwrap();
+    // Dialect-neutral IN-shape smoke: per-id placeholder expansion (ANY($1) replacement)
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM images WHERE user_id = ? AND id IN (?, ?)")
+        .bind(&uid)
+        .bind("00000000-0000-0000-0000-000000000000")
+        .bind("00000000-0000-0000-0000-000000000000")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(n, 0);
+    // Dialect-neutral LOWER-shape smoke: LOWER(col) LIKE LOWER(?) (ILIKE replacement)
+    let m: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM images WHERE user_id = ? AND LOWER(original_name) LIKE LOWER(?)")
+        .bind(&uid)
+        .bind("%foo%")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(m, 0);
+}

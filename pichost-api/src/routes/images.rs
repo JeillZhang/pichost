@@ -172,7 +172,7 @@ fn build_count_sql(
     let mut sql = format!("SELECT COUNT(*) FROM images WHERE user_id = ${n}");
     if !search_term.is_empty() {
         n += 1;
-        sql.push_str(&format!(" AND original_name ILIKE ${n}"));
+        sql.push_str(&format!(" AND LOWER(original_name) LIKE LOWER(${n})"));
     }
     if config_id.is_some() {
         n += 1;
@@ -205,7 +205,7 @@ fn build_list_sql(
     );
     if !search_term.is_empty() {
         n += 1;
-        sql.push_str(&format!(" AND i.original_name ILIKE ${n}"));
+        sql.push_str(&format!(" AND LOWER(i.original_name) LIKE LOWER(${n})"));
     }
     if config_id.is_some() {
         n += 1;
@@ -950,19 +950,20 @@ where
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
-    [uuid::Uuid]: sqlx::Type<DB>,
 {
-    sqlx::query_as(
-        r#"SELECT storage_key, storage_backend, thumbnail_key, webp_key
-           FROM images WHERE id = ANY($1) AND (user_id = $2 OR $3)"#,
-    )
-    .bind(ids)
-    .bind(user.id)
-    .bind(user.is_admin)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| {
+    let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("${i}")).collect();
+    let user_param = ids.len() + 1;
+    let admin_param = ids.len() + 2;
+    let sql = format!(
+        "SELECT storage_key, storage_backend, thumbnail_key, webp_key FROM images \
+         WHERE id IN ({}) AND (user_id = ${user_param} OR ${admin_param})",
+        placeholders.join(", ")
+    );
+    let mut q = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(&sql);
+    for id in ids {
+        q = q.bind(id);
+    }
+    q.bind(user.id).bind(user.is_admin).fetch_all(pool).await.map_err(|e| {
         tracing::warn!("Batch delete query failed: {e}");
         error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })
@@ -985,9 +986,6 @@ where
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
-    [uuid::Uuid]: sqlx::Type<DB>,
-    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
-    Vec<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB>,
 {
     validate_batch_ids(&body.ids, locale.0)?;
 
@@ -997,8 +995,13 @@ where
         cleanup_storage_files(&state.router, sb, sk, tk, wk).await;
     }
 
-    let deleted = sqlx::query("DELETE FROM images WHERE id = ANY($1)")
-        .bind(&body.ids)
+    let placeholders: Vec<String> = (1..=body.ids.len()).map(|i| format!("${i}")).collect();
+    let sql = format!("DELETE FROM images WHERE id IN ({})", placeholders.join(", "));
+    let mut q = sqlx::query(&sql);
+    for image_id in &body.ids {
+        q = q.bind(image_id);
+    }
+    let deleted = q
         .execute(&state.pool)
         .await
         .map_err(|e| {
@@ -1137,17 +1140,22 @@ where
     pichost_core::models::Category: crate::db::DbRow<DB>,
     <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Vec<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     validate_batch_move(&body.image_ids, locale.0)?;
     ensure_category_owned(&state.pool, body.category_id, user.id, locale.0).await?;
 
-    let result =
-        sqlx::query("UPDATE images SET category_id = $1 WHERE user_id = $2 AND id = ANY($3)")
-            .bind(body.category_id)
-            .bind(user.id)
-            .bind(&body.image_ids)
-            .execute(&state.pool)
+    let placeholders: Vec<String> =
+        (3..3 + body.image_ids.len()).map(|i| format!("${i}")).collect();
+    let sql = format!(
+        "UPDATE images SET category_id = $1 WHERE user_id = $2 AND id IN ({})",
+        placeholders.join(", ")
+    );
+    let mut q = sqlx::query(&sql).bind(body.category_id).bind(user.id);
+    for image_id in &body.image_ids {
+        q = q.bind(image_id);
+    }
+    let result = q
+        .execute(&state.pool)
             .await
             .map_err(|e| {
                 error_json_args(
@@ -1283,7 +1291,7 @@ mod tests {
         let uid = Uuid::new_v4();
         let sql = build_count_sql("cat", Some(uid), Some(uid));
         assert!(sql.starts_with("SELECT COUNT(*) FROM images WHERE user_id = $1"));
-        assert!(sql.contains(" AND original_name ILIKE $2"));
+        assert!(sql.contains(" AND LOWER(original_name) LIKE LOWER($2)"));
         assert!(sql.contains(" AND storage_config_id = $3"));
         assert!(sql.contains(" AND category_id = $4"));
         assert_eq!(sql.matches('$').count(), 4);
@@ -1302,7 +1310,7 @@ mod tests {
         let uid = Uuid::new_v4();
         let sql = build_list_sql("cat", Some(uid), Some(uid), "file_size", "ASC");
         assert!(sql.contains("WHERE i.user_id = $1"));
-        assert!(sql.contains(" AND i.original_name ILIKE $2"));
+        assert!(sql.contains(" AND LOWER(i.original_name) LIKE LOWER($2)"));
         assert!(sql.contains(" AND i.storage_config_id = $3"));
         assert!(sql.contains(" AND i.category_id = $4"));
         assert!(sql.ends_with(" ORDER BY file_size ASC LIMIT $5 OFFSET $6"));
