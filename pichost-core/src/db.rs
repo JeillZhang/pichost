@@ -70,4 +70,28 @@ pub async fn run_sqlite_migrations(pool: &SqlitePool) -> Result<(), sqlx::migrat
     SQLITE_MIGRATOR.run(pool).await
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DbErrorKind {
+    UniqueViolation,
+    Other,
+}
+
+/// Maps driver error codes onto dialect-neutral kinds:
+/// PG SQLSTATE 23505 (unique_violation) and SQLite extended codes 2067
+/// (SQLITE_CONSTRAINT_UNIQUE), 1555 (SQLITE_CONSTRAINT_PRIMARYKEY) plus
+/// base 19 (SQLITE_CONSTRAINT) → UniqueViolation.
+pub fn db_error_kind(err: &sqlx::Error) -> DbErrorKind {
+    match err {
+        sqlx::Error::Database(db) => {
+            let code = db.code().map(|c| c.to_string()).unwrap_or_default();
+            if code == "23505" || code == "2067" || code == "19" || code == "1555" {
+                DbErrorKind::UniqueViolation
+            } else {
+                DbErrorKind::Other
+            }
+        }
+        _ => DbErrorKind::Other,
+    }
+}
+
 

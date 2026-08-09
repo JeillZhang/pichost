@@ -1,4 +1,5 @@
-use crate::db::{create_pg_pool, create_sqlite_pool, run_pg_migrations, run_sqlite_migrations};
+use crate::db::{create_pg_pool, create_sqlite_pool, db_error_kind, run_pg_migrations, run_sqlite_migrations, DbErrorKind};
+use sqlx::SqlitePool;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static WAL_TEST_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -42,4 +43,44 @@ async fn create_sqlite_pool_file_enables_wal() {
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{suffix}", db_path.display()));
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_unique_violation_code_maps() {
+    // 真实 sqlite 约束错误驱动（sqlx 无 new_for_test 公共 API）:
+    // 在 sqlite::memory: 上建带 UNIQUE 约束的表，插入重复值捕获错误
+    let pool = create_sqlite_pool("sqlite::memory:", 1).await.unwrap();
+    let pk_err = duplicate_insert(&pool, "t_pk", "id TEXT PRIMARY KEY").await;
+    let unique_err = duplicate_insert(&pool, "t_unique", "id TEXT UNIQUE").await;
+    if let sqlx::Error::Database(db) = &pk_err {
+        eprintln!(
+            "sqlite PK constraint error: code={:?} message={}",
+            db.code(),
+            db.message()
+        );
+    }
+    if let sqlx::Error::Database(db) = &unique_err {
+        eprintln!(
+            "sqlite UNIQUE constraint error: code={:?} message={}",
+            db.code(),
+            db.message()
+        );
+    }
+    assert_eq!(db_error_kind(&pk_err), DbErrorKind::UniqueViolation);
+    assert_eq!(db_error_kind(&unique_err), DbErrorKind::UniqueViolation);
+}
+
+async fn duplicate_insert(pool: &SqlitePool, table: &str, column_def: &str) -> sqlx::Error {
+    sqlx::query(&format!("CREATE TABLE {table} ({column_def})"))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(&format!("INSERT INTO {table} (id) VALUES ('a')"))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(&format!("INSERT INTO {table} (id) VALUES ('a')"))
+        .execute(pool)
+        .await
+        .unwrap_err()
 }
