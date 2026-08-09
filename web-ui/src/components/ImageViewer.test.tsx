@@ -47,15 +47,25 @@ describe('ImageViewer', () => {
     act(() => root.unmount())
   })
 
-  it('wheel zooms in on negative deltaY and out on positive', () => {
-    const root = render(<ImageViewer open {...PROPS} onClose={vi.fn()} />)
-    const el = surface()
-    act(() => el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
-    expect(level()!.textContent).toContain('110%')
-    act(() => el.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true })))
-    expect(level()!.textContent).toContain('100%')
-    act(() => root.unmount())
-  })
+      it('wheel zooms in on negative deltaY and out on positive', () => {
+        const root = render(<ImageViewer open {...PROPS} onClose={vi.fn()} />)
+        const el = surface()
+        act(() => el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
+        expect(level()!.textContent).toContain('110%')
+        act(() => el.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true })))
+        expect(level()!.textContent).toContain('100%')
+        act(() => root.unmount())
+      })
+
+      it('wheel can zoom out below fit (91%) — zoom-out always responds', () => {
+        const root = render(<ImageViewer open {...PROPS} onClose={vi.fn()} />)
+        const el = surface()
+        act(() => el.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true })))
+        expect(level()!.textContent).toContain('91%') // 1 / 1.1 below fit 100%
+        act(() => el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
+        expect(level()!.textContent).toContain('100%') // 91 × 1.1 → back at fit
+        act(() => root.unmount())
+      })
 
   it('toolbar buttons zoom in/out and percentage resets to fit', () => {
     const root = render(<ImageViewer open {...PROPS} onClose={vi.fn()} />)

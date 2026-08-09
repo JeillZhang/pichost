@@ -46,7 +46,7 @@
 1. 点击详情页图片打开全屏查看器，Escape/关闭按钮/遮罩点击均可关闭
 2. 桌面端：滚轮缩放（锚定光标）、拖拽平移、双击 fit↔100% 切换
 3. 移动端：双指捏合缩放、单指拖拽平移（`touch-action: none`），375×667 视口工具栏可操作
-4. 缩放范围 `[fitScale, 8.0]`，关闭后重置（不记忆状态）
+4. 缩放范围 `[0.25, 8.0]`（`fitScale` 为打开初始值，非下界 — 缩小始终有反馈），关闭后重置（不记忆状态）
 5. 现有 E2E 与 vitest 全部保持通过；不破坏任何现有选择器
 
 ---
@@ -109,7 +109,7 @@ sequenceDiagram
     V->>I: 渲染 img（浏览器缓存命中）
     U->>V: 滚轮 / 捏合 / 按钮
     V->>Z: zoomAt(delta, anchor) 或 zoomBy(factor)
-    Z->>Z: 锚点数学 + 范围钳制 [fitScale, 8.0]
+    Z->>Z: 锚点数学 + 范围钳制 [0.25, 8.0]
     V->>I: transform 更新
     U->>V: Escape / ✕ / 遮罩点击
     V->>Z: reset()（关闭即重置，不记忆状态）
@@ -127,7 +127,7 @@ sequenceDiagram
 | `scale` | 相对原图自然像素的缩放倍数（`1.0 = 100%`，与工具栏百分比一致） |
 | `fitScale` | 打开时计算：`min(viewportW/naturalW, viewportH/naturalH, 1)` —— contain 适配且**小图不放大** |
 | `offset {x, y}` | 相对容器中心的平移量（CSS `translate`） |
-| 范围 | `scale ∈ [fitScale, 8.0]` |
+| 范围 | `scale ∈ [MIN_SCALE, MAX_ZOOM]` = `[0.25, 8.0]`；`fitScale` 仅为打开初始值与双击目标 |
 | 滚轮步进 | 每格 ×1.1（指数级） |
 | 按钮步进 | 每步 ×1.25 |
 | 自然尺寸来源 | 优先 `ImageInfo.width/height`（同步可得）；缺失时回退 `<img onLoad>` 的 `naturalWidth/Height` |
@@ -225,7 +225,7 @@ isFit / displayPercent（四舍五入整数）              → 派生值
 
 **`src/hooks/useImageZoom.test.ts`**（纯函数，无 DOM）：
 - fitScale 计算（contain 适配、小图不放大、超宽/超高图）
-- 范围钳制（`[fitScale, 8.0]`）
+- 范围钳制（`[0.25, 8.0]`；修复：缩小下界由 fitScale 改为固定 25%，打开即 fit 时缩小不再失效）
 - 锚点数学：缩放前后锚点下的图像点坐标不变
 - 平移钳制（大于视口可平移、小于视口钳制为 0）
 - `toggleFit` / `reset` / `displayPercent`

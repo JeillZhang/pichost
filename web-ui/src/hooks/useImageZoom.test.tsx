@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { useImageZoom, MAX_ZOOM } from './useImageZoom'
+import { useImageZoom, MAX_ZOOM, MIN_SCALE } from './useImageZoom'
 
 // React 19 requires this for act() to flush updates synchronously.
 ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -61,13 +61,23 @@ describe('useImageZoom', () => {
     act(() => root.unmount())
   })
 
-  it('clamps zoom to [fitScale, MAX_ZOOM]', () => {
+  it('clamps zoom to [MIN_SCALE, MAX_ZOOM] and allows shrinking below fit', () => {
     const { api, root } = mount()
     act(() => api.open(1000, 1000, 500, 500))
     act(() => api.zoomBy(1000))
     expect(api.zoom.scale).toBe(MAX_ZOOM)
     act(() => api.zoomBy(0.0001))
-    expect(api.zoom.scale).toBe(api.zoom.fitScale)
+    expect(api.zoom.scale).toBe(MIN_SCALE) // 0.25 — below fitScale (0.5), so zoom-out always responds
+    act(() => root.unmount())
+  })
+
+  it('zoomAt shrinks below fitScale down to MIN_SCALE', () => {
+    const { api, root } = mount()
+    act(() => api.open(1000, 1000, 500, 500)) // fitScale 0.5
+    act(() => api.zoomAt(1 / 1.1, 0, 0))
+    expect(api.zoom.scale).toBeLessThan(api.zoom.fitScale) // 0.4545... — zoom-out works at fit
+    act(() => api.zoomAt(0.0001, 0, 0))
+    expect(api.zoom.scale).toBe(MIN_SCALE)
     act(() => root.unmount())
   })
 

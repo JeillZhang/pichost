@@ -11,6 +11,7 @@ Versions before 0.7.0 are not documented here.
 ### Added
 
 - Image detail zoom viewer: click the image to open a fullscreen lightbox with cursor-anchored wheel zoom, drag pan, double-click fit↔100% toggle, two-finger pinch / single-finger drag on touch devices, toolbar zoom in/out/reset buttons with percentage display, and keyboard `+`/`-`/`0` shortcuts.
+- Zoom range is 25%–800% with `fitScale` as the open/restore level (not the minimum) — zoom-out always responds, even when the image is already fit to the viewport.
 
 ## [0.19.1] - 2026-08-09
 

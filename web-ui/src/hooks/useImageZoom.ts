@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 
 export const MAX_ZOOM = 8
+export const MIN_SCALE = 0.25
 export const WHEEL_STEP = 1.1
 export const BUTTON_STEP = 1.25
 
@@ -73,7 +74,7 @@ export function useImageZoom() {
   /** Scale by `factor`, keeping the point under `anchor` (viewport coords, origin = viewport center) fixed. */
   const zoomAt = useCallback((factor: number, anchorX: number, anchorY: number) => {
     setZoom((z) => {
-      const next = clamp(z.scale * factor, z.fitScale, MAX_ZOOM)
+      const next = clamp(z.scale * factor, MIN_SCALE, MAX_ZOOM)
       const ratio = next / z.scale
       const rawX = anchorX - (anchorX - z.offsetX) * ratio
       const rawY = anchorY - (anchorY - z.offsetY) * ratio
@@ -84,7 +85,7 @@ export function useImageZoom() {
   /** Scale by `factor` anchored at the viewport center (buttons/keyboard). */
   const zoomBy = useCallback((factor: number) => {
     setZoom((z) => {
-      const next = clamp(z.scale * factor, z.fitScale, MAX_ZOOM)
+      const next = clamp(z.scale * factor, MIN_SCALE, MAX_ZOOM)
       const ratio = next / z.scale
       return { ...z, scale: next, ...clampOffset(z, next, z.offsetX * ratio, z.offsetY * ratio) }
     })
