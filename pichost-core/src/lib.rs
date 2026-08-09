@@ -10,6 +10,7 @@ pub mod i18n;
 pub mod models;
 #[cfg(test)]
 mod models_test;
+pub mod state;
 pub mod storage;
 
 pub use db::DbType;
