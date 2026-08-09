@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Versions before 0.7.0 are not documented here.
 
+## [0.19.1] - 2026-08-09
+
+### Fixed
+
+- Thumbnails/WebP variants not displaying (placeholder shown instead): worker stored variant URLs as `/u/thumb-{id}` / `/u/webp-{id}`, but the routes are `/u/thumb/{id}` / `/u/webp/{id}` — every variant request 404'd. Worker now writes the correct slash-separated URLs.
+- PNG thumbnails served with `image/jpeg` Content-Type (thumb keys carry no extension, so key-based MIME guessing was wrong). With `X-Content-Type-Options: nosniff`, browsers refused to render them — the serving handler now detects the MIME from the thumbnail bytes.
+
 ## [0.19.0] - 2026-08-08
 
 ### Added
