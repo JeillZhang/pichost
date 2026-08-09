@@ -148,7 +148,13 @@
     "renameFailed": "重命名失败",
     "deleteFailed": "删除失败",
     "loading": "加载中…",
-    "notFound": "未找到图片。"
+    "notFound": "未找到图片。",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "zoomReset": "重置缩放",
+    "zoomFit": "适应屏幕",
+    "zoomLevel": "缩放 {{percent}}%",
+    "openViewer": "查看图片"
   },
   "settings": {
     "profile": "个人资料",

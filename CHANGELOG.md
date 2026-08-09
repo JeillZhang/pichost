@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Versions before 0.7.0 are not documented here.
 
+## [0.20.0] - 2026-08-09
+
+### Added
+
+- Image detail zoom viewer: click the image to open a fullscreen lightbox with cursor-anchored wheel zoom, drag pan, double-click fit↔100% toggle, two-finger pinch / single-finger drag on touch devices, toolbar zoom in/out/reset buttons with percentage display, and keyboard `+`/`-`/`0` shortcuts.
+
 ## [0.19.1] - 2026-08-09
 
 ### Fixed

@@ -39,6 +39,38 @@ export class ImageDetailPage {
     return this.page.getByRole('button', { name: /back/i })
   }
 
+  /** Image preview card — clicking opens the zoom viewer. */
+  get imagePreview() {
+    return this.page.getByTestId('image-preview')
+  }
+
+  /** Fullscreen zoom viewer overlay. */
+  get viewerOverlay() {
+    return this.page.getByTestId('viewer-overlay')
+  }
+
+  /** The interactive zoom surface (gesture area). */
+  get viewerSurface() {
+    return this.page.getByTestId('viewer-surface')
+  }
+
+  /** Zoom percentage label button (click = reset to fit). */
+  get viewerZoomLevel() {
+    return this.page.getByTestId('viewer-zoom-level')
+  }
+
+  get viewerZoomIn() {
+    return this.page.getByTestId('viewer-zoom-in')
+  }
+
+  get viewerZoomOut() {
+    return this.page.getByTestId('viewer-zoom-out')
+  }
+
+  get viewerClose() {
+    return this.page.getByTestId('viewer-close')
+  }
+
   async goto(id: string) {
     await this.page.goto(`/images/${id}`)
   }
