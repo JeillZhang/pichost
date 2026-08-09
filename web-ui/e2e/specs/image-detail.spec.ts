@@ -128,10 +128,14 @@ test.describe.serial('image-detail', () => {
     await expect(detail.viewerZoomLevel).toHaveText('Zoom 110%')
 
     // Wheel zoom out below fit still responds (min 25%, not fit) — then back to fit
-    await page.mouse.wheel(0, 100)
-    await expect(detail.viewerZoomLevel).toHaveText('Zoom 91%')
-    await page.mouse.wheel(0, -100)
+    await page.mouse.wheel(0, 100) // 110% → 100% (fit)
     await expect(detail.viewerZoomLevel).toHaveText('Zoom 100%')
+    await page.mouse.wheel(0, 100) // 100% → 91% (below fit)
+    await expect(detail.viewerZoomLevel).toHaveText('Zoom 91%')
+    await page.mouse.wheel(0, -100) // 91% → 100% (back to fit)
+    await expect(detail.viewerZoomLevel).toHaveText('Zoom 100%')
+    await page.mouse.wheel(0, -100) // 100% → 110% (toolbar section continues from here)
+    await expect(detail.viewerZoomLevel).toHaveText('Zoom 110%')
 
     // Toolbar zoom in (×1.25) → 137.5 → 138%; zoom out returns
     await detail.viewerZoomIn.click()
