@@ -3156,6 +3156,38 @@ git commit -m "docs: add CHANGELOG 0.21.0 and update summary for sqlite lite mod
 - **无占位符**: 全部迁移 SQL、trait 签名、Sqlite 实现、脚本逻辑均为具体代码。
 - **类型一致性**: `DbPool`/`DatabaseMode`/`TaskPayload`/5 traits/`NackAction`/`RateLimitResult` 在各任务间签名一致；T15 TaskPayload → T16 traits 定义 → T17-T20 Redis 实现 → T21 装配 → T22-T24 SQLite 实现 → T26 轻量装配。
 
+---
+
+## 重新规划附录（A′ 架构，2026-08-09 执行期修订）
+
+**背景**: 原计划核心架构 `DbPool = sqlx::AnyPool` 经实测（sqlx 0.8.6 vendored 源码验证 + T8 编译证据，659 错误）不可行：
+
+1. `Type<Any>`/`Encode<Any>`/`Decode<Any>` 仅实现于基本类型（str/String/f32/f64/i16/i32/i64/bool/[u8]/Vec<u8>）——无 `Uuid`/`DateTime<Utc>`/`Json`，而全应用到处绑定/解码这三种类型。
+2. 即使外部补写 `Type<Any>` impl（`AnyTypeInfo { pub kind }` 可构造），PG→Any 驱动边界（`sqlx-postgres/src/any.rs:196-212`）仅映射 Bool/Void/Int2/Int4/Int8/Float4/Float8/Bytea/Text/Varchar/citext；uuid/timestamptz/jsonb 列在 `AnyRow::map_from` 逐值转换时直接 `AnyDriverError`，先于任何 `Decode`。
+3. PG 结果集为二进制线格式且 sqlx-postgres 0.8.6 无 text-mode 开关——救援 AnyPool 需 fork sqlx（改驱动映射 + 手写二进制→文本解码器），成本与风险均不可接受。
+4. 对比: sqlx-sqlite 对 `Uuid`/`DateTime<Utc>`/`Json<T>` 的 `Type<Sqlite>` 实现完整（TEXT 存储，与已提交的 migrations-sqlite 兼容）；sqlx-postgres 同理。两条 concrete 驱动路径均可行。
+
+**决策（用户批准）**: 采用 **A′ 架构** —— 通用 `AppState<DB: Database>` + 通用 router 装配（Oracle 验证）：
+
+- 无数据路径枚举：`run_with::<DB>()` 启动时选定具体驱动（Postgres/Sqlite 各实例化一次），handler 为泛型函数（编译期按驱动实例化，零运行时分发）。
+- `pichost_core::db` 重构（保留 T7 已提交的 Migrators/config/WAL 意图）：`create_pg_pool`/`create_sqlite_pool`（concrete pool，SqliteConnectOptions 原生支持 create_if_missing/WAL/busy_timeout/foreign_keys——删除 AnyConnectOptions 的 `sqlite_url()` URL 改写 hack 与 post-connect WAL pragma）、`run_pg_migrations`/`run_sqlite_migrations`（`Migrator.run` 按驱动特化）、删除 `any` sqlx feature。
+- 泛型化编辑面（Oracle 实测盘点）：3 处 `QueryBuilder<'_, Postgres>`、2 处 turbofish 钉死（admin.rs:378 `query_scalar::<_, bool>`、pipeline.rs:55 `query_scalar::<_, Option<Json>>`）、28 处 `&PgPool`/`&DbPool` helper 签名、`AppState`/`WorkerState` 字段、`Locale` extractor + `require_auth`/`rate_limit` 中间件、~40 个 handler 签名；21 处未类型化 `query()` + `query_as::<_, T>`（DB 推断）**零改动**。
+- **T10 ILIKE 规则修正**（原计划错误）: `ILIKE` → `LOWER(col) LIKE LOWER($n)`（PG LIKE 大小写敏感、SQLite LIKE 仅 ASCII 不敏感；LOWER 双端保证两端一致不敏感；0005 索引为普通 btree，前导通配 `%term%` 本就用不上索引，PG 无性能损失）。
+- 批处理 `ANY($1)` → 动态 `IN ($1,$2,…,$N)`（SQLite 接受 `$N`；单 bind 为 `Uuid`，双驱动均支持；100 id = 200 参数，低于 PG 65535 / SQLite 32766 上限）。
+- `now()` → `CURRENT_TIMESTAMP`（PG 等价于 transaction_timestamp）；`NOW() - INTERVAL` → Rust 侧计算 `DateTime<Utc>` 参数。
+- **T21 装配任务调整**: AppState 字段全部 trait object 化保持原样，但装配函数改为 `run_with::<DB>`（Postgres 分支本期装配 Redis 实现；Sqlite 分支在 T26 接入 SQLite 实现 + 内嵌 worker）。
+
+**任务边界修订（T8-T9）**:
+
+| 任务 | 变更 |
+|------|------|
+| T8（原: 接入 AnyPool） | **重定义**: 重构 `pichost-core/src/db.rs` 为 per-driver pools + 双 migrations helper；`pichost-api/src/db/mod.rs` 与 `pichost-worker/src/db.rs` 改为 re-export core；main.rs x2 + tests/common 调用点改 per-driver 函数（Postgres 路径行为不变）。Gate: `cargo check --workspace` + `cargo test --workspace` 全绿。 |
+| T9a（新，吸收原 T8 接线） | **泛型化清扫**: `AppState<DB>`、`configure_app<DB>`、全部 handler/中间件/`Locale` 泛型化、worker pipeline `process_task<DB>`/`WorkerState<DB>` 泛型化。单次提交原子完成（中间态不可编译）。Gate: 575 全绿。 |
+| T9（原 db_error_kind） | 不变（依赖 T8 重定义版）。 |
+| T10-T13 | 内容不变，ILIKE 规则按上表修正。 |
+| T14-T26 | 不变（T21 装配按上表调整）。 |
+| T27-T31 | 不变。 |
+
 
 
 
