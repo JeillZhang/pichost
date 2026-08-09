@@ -375,10 +375,10 @@ mod tests {
 
     async fn test_state() -> AppState {
         use pichost_core::StorageRouter;
-        let pool = crate::db::create_pool("postgres://pichost:pichost@localhost:5432/pichost", 2)
+        let pool = crate::db::create_pg_pool("postgres://pichost:pichost@localhost:5432/pichost", 2)
             .await
             .expect("pool should connect");
-        crate::db::run_migrations(&pool)
+        crate::db::run_pg_migrations(&pool)
             .await
             .expect("migrations should run");
         AppState {

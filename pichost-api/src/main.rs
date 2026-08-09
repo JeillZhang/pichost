@@ -20,8 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Language::from_str_opt(&config.i18n.language),
         config.i18n.locales_dir.clone(),
     );
-    let pool = db::create_pool(&config.database.url, config.database.max_connections).await?;
-    db::run_migrations(&pool).await?;
+    let pool = db::create_pg_pool(&config.database.url, config.database.max_connections).await?;
+    db::run_pg_migrations(&pool).await?;
     let cache_pool = cache::create_pool(&config.redis.url, config.redis.pool_size as usize);
 
     let router = Arc::new(init_storage_backends(&config).await);

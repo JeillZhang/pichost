@@ -79,13 +79,10 @@ impl TestApp {
 /// another test's runtime shutdown. max_connections is kept small so many
 /// parallel tests fit under the server's connection limit.
 async fn init_pool() -> sqlx::PgPool {
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(std::time::Duration::from_secs(30))
-        .connect(&test_db_url())
+    let pool = db::create_pg_pool(&test_db_url(), 5)
         .await
         .expect("failed to connect to test PostgreSQL (is it running?)");
-    db::run_migrations(&pool)
+    db::run_pg_migrations(&pool)
         .await
         .expect("failed to run migrations");
     pool

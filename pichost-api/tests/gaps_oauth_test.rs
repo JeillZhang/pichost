@@ -55,13 +55,10 @@ async fn oauth_app() -> OAuthApp {
     cfg.rate_limit.public_max = 1_000_000;
 
     let config = Arc::new(cfg);
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(std::time::Duration::from_secs(30))
-        .connect(&db_url())
+    let pool = db::create_pg_pool(&db_url(), 5)
         .await
         .expect("connect to test PostgreSQL");
-    db::run_migrations(&pool).await.expect("run migrations");
+    db::run_pg_migrations(&pool).await.expect("run migrations");
     let cache_pool = cache::create_pool(&redis_url(), 5);
     let cache = Arc::new(Cache::new(cache_pool));
 

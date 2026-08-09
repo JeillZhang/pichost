@@ -39,12 +39,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 2. Init DB pool
-    let pool = db::create_pool(
+    let pool = db::create_pg_pool(
         &app_config.database.url,
         app_config.database.max_connections,
     )
     .await?;
-    db::run_migrations(&pool).await?;
+    db::run_pg_migrations(&pool).await?;
     tracing::info!("database connected, migrations applied");
 
     // 3. Init Redis pool
@@ -255,8 +255,8 @@ mod tests {
     }
 
     async fn test_pg_pool() -> sqlx::PgPool {
-        let pool = db::create_pool(TEST_DB_URL, 4).await.unwrap();
-        db::run_migrations(&pool).await.unwrap();
+        let pool = db::create_pg_pool(TEST_DB_URL, 4).await.unwrap();
+        db::run_pg_migrations(&pool).await.unwrap();
         pool
     }
 
