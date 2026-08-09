@@ -116,8 +116,8 @@ where
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     let row = sqlx::query_as::<_, (i64, Option<i64>)>(
-        r#"SELECT COUNT(*)::BIGINT as total_images,
-                  COALESCE(SUM(file_size), 0)::BIGINT as total_size
+        r#"SELECT COUNT(*) as total_images,
+                  CAST(COALESCE(SUM(file_size), 0) AS BIGINT) as total_size
            FROM images WHERE user_id = $1"#,
     )
     .bind(user_id)
@@ -363,10 +363,10 @@ where
     sqlx::query(
         "UPDATE users SET \
          username = COALESCE($1, username), \
-         email = CASE WHEN $2::boolean THEN $3 ELSE email END, \
+         email = CASE WHEN $2 THEN $3 ELSE email END, \
          storage_backend = COALESCE($4, storage_backend), \
-         watermark_config = CASE WHEN $6::boolean THEN $7::jsonb ELSE watermark_config END, \
-         updated_at = now() \
+         watermark_config = CASE WHEN $6 THEN $7 ELSE watermark_config END, \
+         updated_at = CURRENT_TIMESTAMP \
          WHERE id = $5",
     )
     .bind(&payload.username)
@@ -379,16 +379,12 @@ where
     .execute(pool)
     .await
     .map_err(|e| {
-        if let sqlx::Error::Database(ref db_err) = e {
-            if let Some(code) = db_err.code() {
-                if code == "23505" {
-                    return error_json(
-                        locale,
-                        StatusCode::CONFLICT,
-                        "user.username_email_taken",
-                    );
-                }
-            }
+        if pichost_core::db::db_error_kind(&e) == pichost_core::db::DbErrorKind::UniqueViolation {
+            return error_json(
+                locale,
+                StatusCode::CONFLICT,
+                "user.username_email_taken",
+            );
         }
         tracing::warn!("Profile update failed: {e}");
         error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
@@ -503,7 +499,7 @@ where
     for<'q> &'q str: sqlx::Encode<'q, DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
-    sqlx::query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2")
+    sqlx::query("UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2")
         .bind(new_hash)
         .bind(user_id)
         .execute(pool)

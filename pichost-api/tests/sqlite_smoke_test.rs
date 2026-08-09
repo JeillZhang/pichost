@@ -37,3 +37,25 @@ async fn sqlite_quota_and_config_queries() {
         .bind(&cfg_id).bind(&cfg_id).bind(&uid).fetch_one(&pool).await.unwrap();
     assert_eq!(n, 1);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_stats_and_update_queries() {
+    let pool = sqlite_pool().await;
+    MIGRATOR.run(&pool).await.unwrap();
+    let uid: String = sqlx::query_scalar(
+        "INSERT INTO users (username, password_hash) VALUES ('stats','h') RETURNING id")
+        .fetch_one(&pool).await.unwrap();
+    // Dialect-neutral stats query: COUNT(*) is bigint on both drivers;
+    // PG SUM() is NUMERIC, so COALESCE(SUM(...)) needs the CAST AS BIGINT
+    let (count, total): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), CAST(COALESCE(SUM(file_size), 0) AS BIGINT) \
+         FROM images WHERE user_id = ?")
+        .bind(&uid).fetch_one(&pool).await.unwrap();
+    assert_eq!((count, total), (0, 0));
+    // Dialect-neutral update shape: bool/JSON binds via plain CASE WHEN,
+    // CURRENT_TIMESTAMP instead of now()
+    let res = sqlx::query(
+        "UPDATE users SET email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind("stats@example.com").bind(&uid).execute(&pool).await.unwrap();
+    assert_eq!(res.rows_affected(), 1);
+}

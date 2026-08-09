@@ -480,7 +480,7 @@ where
 
     let updated = sqlx::query_as::<_, UserStorageConfig>(
         "UPDATE user_storage_configs SET name = $1, config = $2, \
-         updated_at = now() \
+         updated_at = CURRENT_TIMESTAMP \
          WHERE id = $3 AND user_id = $4 \
          RETURNING id, user_id, name, provider, is_default, \
                    config, created_at, updated_at",
@@ -564,7 +564,7 @@ where
     unset_other_defaults(&state.pool, user.id, locale.0).await?;
 
     let config = sqlx::query_as::<_, UserStorageConfig>(
-        "UPDATE user_storage_configs SET is_default = true, updated_at = now() \
+        "UPDATE user_storage_configs SET is_default = true, updated_at = CURRENT_TIMESTAMP \
          WHERE id = $1 AND user_id = $2 \
          RETURNING id, user_id, name, provider, is_default, \
                    config, created_at, updated_at",
