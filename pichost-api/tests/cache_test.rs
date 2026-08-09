@@ -186,6 +186,20 @@ async fn user_stats_unknown_user_returns_empty_map() {
     assert!(stats.is_empty());
 }
 
+// ── Trait-object usage (pichost_core::state::Cache) ───────────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running Redis"]
+async fn redis_cache_trait_roundtrip() {
+    let cache = test_cache();
+    let c: &dyn pichost_core::state::Cache = &cache;
+    c.set_ex("t:1", "v", 60).await.unwrap();
+    assert_eq!(c.get("t:1").await.unwrap(), Some("v".into()));
+    assert!(c.exists("t:1").await.unwrap());
+    c.del("t:1").await.unwrap();
+    assert_eq!(c.get("t:1").await.unwrap(), None);
+}
+
 // ── Invite codes ──────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

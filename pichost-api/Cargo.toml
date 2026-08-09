@@ -33,6 +33,7 @@ url = "2"
 toml_edit = "0.22"
 regex = "1"
 thiserror.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
 serde_urlencoded = "0.7"

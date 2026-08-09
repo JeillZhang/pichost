@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::{Config, Pool, Runtime};
+use pichost_core::state::{CacheError, InviteError};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -234,6 +235,16 @@ impl Cache {
         ttl: u64,
     ) -> Result<String, deadpool_redis::redis::RedisError> {
         let code = Uuid::new_v4().to_string().replace('-', "");
+        self.write_invite_code(&code, admin_id, ttl).await?;
+        Ok(code)
+    }
+
+    async fn write_invite_code(
+        &self,
+        code: &str,
+        admin_id: &Uuid,
+        ttl: u64,
+    ) -> Result<(), deadpool_redis::redis::RedisError> {
         let key = format!("pichost:invite:{}", code);
         let now = chrono::Utc::now().timestamp();
         let expires_at = now + ttl as i64;
@@ -266,12 +277,12 @@ impl Cache {
             .ignore()
             .cmd("SADD")
             .arg("pichost:invites")
-            .arg(&code)
+            .arg(code)
             .ignore()
             .query_async::<_, ()>(&mut *conn)
             .await?;
 
-        Ok(code)
+        Ok(())
     }
 
     pub async fn verify_invite_code(
@@ -368,6 +379,96 @@ impl Cache {
         clean_stale_invites(&mut *conn, &stale).await?;
 
         Ok(codes)
+    }
+}
+
+#[async_trait::async_trait]
+impl pichost_core::state::Cache for Cache {
+    async fn get(&self, key: &str) -> Result<Option<String>, CacheError> {
+        self.get(key).await.map_err(|e| CacheError::Other(e.to_string()))
+    }
+
+    async fn set_ex(&self, key: &str, val: &str, ttl: u64) -> Result<(), CacheError> {
+        self.set_ex(key, val, ttl)
+            .await
+            .map_err(|e| CacheError::Other(e.to_string()))
+    }
+
+    async fn del(&self, key: &str) -> Result<(), CacheError> {
+        self.del(key).await.map_err(|e| CacheError::Other(e.to_string()))
+    }
+
+    async fn exists(&self, key: &str) -> Result<bool, CacheError> {
+        self.exists(key)
+            .await
+            .map_err(|e| CacheError::Other(e.to_string()))
+    }
+
+    async fn incr(&self, key: &str, ttl: u64) -> Result<u64, CacheError> {
+        self.incr(key, ttl)
+            .await
+            .map_err(|e| CacheError::Other(e.to_string()))
+    }
+}
+
+pub struct RedisInviteStore {
+    cache: Cache,
+}
+
+impl RedisInviteStore {
+    pub fn new(cache: Cache) -> Self {
+        Self { cache }
+    }
+}
+
+#[async_trait::async_trait]
+impl pichost_core::state::InviteStore for RedisInviteStore {
+    async fn create(&self, code: &str, created_by: Uuid, ttl_secs: u64) -> Result<(), InviteError> {
+        self.cache
+            .write_invite_code(code, &created_by, ttl_secs)
+            .await
+            .map_err(|e| InviteError::Other(e.to_string()))
+    }
+
+    async fn verify(&self, code: &str) -> Result<bool, InviteError> {
+        self.cache
+            .verify_invite_code(code)
+            .await
+            .map(|r| r == InviteVerifyResult::Valid)
+            .map_err(|e| InviteError::Other(e.to_string()))
+    }
+
+    async fn consume(&self, code: &str, used_by: Uuid) -> Result<(), InviteError> {
+        let consumed = self
+            .cache
+            .consume_invite_code(code, &used_by)
+            .await
+            .map_err(|e| InviteError::Other(e.to_string()))?;
+        if consumed {
+            Ok(())
+        } else {
+            Err(InviteError::Other(format!("invite code not found: {code}")))
+        }
+    }
+
+    async fn list(&self) -> Result<Vec<pichost_core::state::InviteCodeInfo>, InviteError> {
+        let codes = self
+            .cache
+            .list_invite_codes()
+            .await
+            .map_err(|e| InviteError::Other(e.to_string()))?;
+        Ok(codes.into_iter().map(to_core_invite_info).collect())
+    }
+}
+
+fn to_core_invite_info(info: InviteCodeInfo) -> pichost_core::state::InviteCodeInfo {
+    pichost_core::state::InviteCodeInfo {
+        code: info.code,
+        created_by: (info.created_by != Uuid::nil()).then_some(info.created_by),
+        created_at: chrono::DateTime::from_timestamp(info.created_at, 0).unwrap_or_default(),
+        expires_at: chrono::DateTime::from_timestamp(info.expires_at, 0)
+            .filter(|_| info.expires_at > 0),
+        used_by: info.used_by,
     }
 }
 

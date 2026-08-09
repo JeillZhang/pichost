@@ -3047,6 +3047,7 @@ name = "pichost-api"
 version = "0.20.0"
 dependencies = [
  "argon2",
+ "async-trait",
  "axum",
  "chrono",
  "deadpool-redis",
