@@ -354,6 +354,25 @@ mod tests {
     use super::*;
     use pichost_core::config::AppConfig;
 
+    /// AppState for unit tests that never touch the DB — lazy pool, no
+    /// PostgreSQL or Redis connection required.
+    fn unit_test_state() -> AppState {
+        use pichost_core::StorageRouter;
+        let pool = sqlx::PgPool::connect_lazy(
+            "postgres://pichost:pichost@localhost:5432/pichost",
+        )
+        .expect("lazy pool should build");
+        AppState {
+            pool,
+            cache: Arc::new(crate::cache::Cache::new(crate::cache::create_pool(
+                "redis://localhost:6379",
+                2,
+            ))),
+            config: Arc::new(AppConfig::default()),
+            router: Arc::new(StorageRouter::new(std::collections::HashMap::new(), "local".into())),
+        }
+    }
+
     async fn test_state() -> AppState {
         use pichost_core::StorageRouter;
         let pool = crate::db::create_pool("postgres://pichost:pichost@localhost:5432/pichost", 2)
@@ -375,14 +394,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_make_github_client_without_credentials() {
-        let state = test_state().await;
+        let state = unit_test_state();
         let err = make_github_client(&state).unwrap_err();
         assert!(matches!(err, OAuthClientError::MissingClientId("github")));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_make_google_client_without_credentials() {
-        let state = test_state().await;
+        let state = unit_test_state();
         let err = make_google_client(&state).unwrap_err();
         assert!(matches!(err, OAuthClientError::MissingClientId("google")));
     }
