@@ -1,4 +1,5 @@
-use crate::db::{create_pg_pool, create_sqlite_pool, db_error_kind, run_pg_migrations, run_sqlite_migrations, DbErrorKind};
+use crate::db::{create_pg_pool, create_sqlite_pool, run_pg_migrations, run_sqlite_migrations};
+use crate::db::{db_error_kind, DbErrorKind};
 use sqlx::SqlitePool;
 use std::sync::atomic::{AtomicU64, Ordering};
 
