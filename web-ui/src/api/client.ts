@@ -1,6 +1,6 @@
 import ky from 'ky'
 import type { HTTPError, KyInstance } from 'ky'
-import { getCurrentLocale } from '../i18n'
+import i18n, { getCurrentLocale } from '../i18n'
 
 export interface UserInfo {
   id: string
@@ -141,24 +141,29 @@ function createApi(): KyInstance {
         },
       ],
       beforeError: [
-        async (state) => {
+        (state) => {
           const error = state.error as HTTPError
-          try {
-            const body = (await error.response.clone().json()) as {
-              error?: unknown
-              code?: unknown
-            }
+          // ky v2 consumes the response body to populate `error.data` before
+          // `beforeError` hooks run, so `error.response.json()` no longer
+          // works — read the pre-parsed body from `error.data` instead.
+          const data = error.data as { error?: unknown; code?: unknown } | string | undefined
+          if (typeof data === 'object' && data !== null) {
+            const body = data
             // Existing toast.error(err.message) call sites then show the
             // backend-localized message without any per-call changes.
             if (typeof body.error === 'string') {
               error.message = body.error
+              return error
             }
             // Attach the behavior code for getErrorCode()/isErrorCode() consumers.
             if (typeof body.code === 'string') {
               ;(error as HTTPError & { code?: string }).code = body.code
             }
-          } catch {
-            // Non-JSON body — keep the original message.
+          }
+          // Unreadable body (HTML error page, empty body, ...) — never leak
+          // the request method/URL; show a generic localized message instead.
+          if (error.response instanceof Response) {
+            error.message = i18n.t('common.internalError')
           }
           return error
         },

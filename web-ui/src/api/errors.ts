@@ -4,9 +4,10 @@
  * Backend error responses follow the shape:
  *   { "error": <localized message>, "code": "<route_level.code>" }
  *
- * `getErrorCode` / `isErrorCode` duck-type on any error that carries a
- * `response.json()` body (ky's HTTPError and test doubles alike), so
- * call sites can react to behavior codes without knowing ky's types.
+ * `getErrorCode` / `isErrorCode` duck-type on any error that carries the
+ * pre-parsed `data` (ky v2 HTTPError) or a `response.json()` body (test
+ * doubles alike), so call sites can react to behavior codes without knowing
+ * ky's types.
  */
 
 export interface ApiError {
@@ -20,6 +21,7 @@ interface ErrorWithResponse {
     status: number
     json: () => Promise<unknown>
   }
+  data?: unknown
 }
 
 /** `code` attached by client.ts's beforeError hook, if any — avoids re-parsing the body. */
@@ -43,6 +45,15 @@ function hasResponse(err: unknown): err is ErrorWithResponse {
 async function parseCode(err: unknown): Promise<string | null> {
   const attached = attachedCode(err)
   if (attached !== null) return attached
+  if (typeof err === 'object' && err !== null) {
+    // ky v2 pre-parses the body into `error.data` and consumes it, so the
+    // `response.json()` fallback below throws — check `data` first.
+    const data = (err as { data?: unknown }).data
+    if (typeof data === 'object' && data !== null) {
+      const code = (data as { code?: unknown }).code
+      if (typeof code === 'string') return code
+    }
+  }
   if (!hasResponse(err)) return null
   try {
     const body = (await err.response!.json()) as { code?: unknown }
