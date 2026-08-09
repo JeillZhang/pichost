@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import '../i18n' // init i18next instance for useTranslation (component under test)
 import ImageViewer from './ImageViewer'
 
 function render(node: React.ReactNode): Root {
@@ -15,7 +16,7 @@ const PROPS = { src: 'http://localhost/u/abc', naturalWidth: 1000, naturalHeight
 
 const overlay = () => document.querySelector('[data-testid="viewer-overlay"]')
 const surface = () => document.querySelector('[data-testid="viewer-surface"]')!
-const level = () => document.querySelector('[data-testid="viewer-zoom-level"]')!
+const level = () => document.querySelector('[data-testid="viewer-zoom-level"]')! as HTMLElement
 
 describe('ImageViewer', () => {
   beforeEach(() => {
@@ -56,8 +57,8 @@ describe('ImageViewer', () => {
 
   it('toolbar buttons zoom in/out and percentage resets to fit', () => {
     const root = render(<ImageViewer open {...PROPS} onClose={vi.fn()} />)
-    const zoomIn = document.querySelector('[data-testid="viewer-zoom-in"]')!
-    const zoomOut = document.querySelector('[data-testid="viewer-zoom-out"]')!
+    const zoomIn = document.querySelector('[data-testid="viewer-zoom-in"]')! as HTMLElement
+    const zoomOut = document.querySelector('[data-testid="viewer-zoom-out"]')! as HTMLElement
     expect(zoomIn).toBeTruthy()
     expect(zoomOut).toBeTruthy()
     act(() => zoomIn.click())
@@ -106,8 +107,10 @@ describe('ImageViewer', () => {
     const root = render(<ImageViewer open {...PROPS} onClose={vi.fn()} />)
     const el = surface()
     const img = el.querySelector('img')!
-    act(() => el.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true })))
-    expect(level()!.textContent).toContain('91%') // 1 / 1.1
+    // Wheel-out below fit is clamped at fitScale (=1 in jsdom, per useImageZoom),
+    // so zoom IN first to get a state the double-click can toggle back from.
+    act(() => el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
+    expect(level()!.textContent).toContain('110%')
     act(() => img.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
     expect(level()!.textContent).toContain('100%') // back to fit
     act(() => el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
