@@ -1,5 +1,13 @@
 # PicHost 项目进度
 
+## 图片详情页缩放查看器 ✅ (本次完成)
+- **useImageZoom hook**: 纯 zoom/pan 状态管理 (scale/offset, 锚点缩放数学, 范围/平移钳制), 9 个 TDD 单元测试
+- **ImageViewer 组件**: 全屏灯箱 (useOverlay 遮罩 + Pointer Events 手势 — 滚轮/拖拽/双击/双指缩放 + 玻璃质感工具栏), 9 个测试
+- **i18n**: 新增 6 个翻译键 (en/zh-CN)
+- **E2E**: 新增 2 条 image-detail 测试 (e2e/specs/image-detail.spec.ts)
+- **版本**: 0.19.1 → 0.20.0
+- **验证**: `npx vitest run` ✅, `npm run build` ✅, `npx playwright test e2e/specs/image-detail.spec.ts` ✅
+
 ## 当前项目涉及特性
 
 参考 `docs/superpowers/specs/2026-07-11-pichost-design.md`，PicHost 是一个面向个人/团队自用的图床系统。

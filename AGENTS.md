@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.19.0` — responsive layout complete (mobile-first: hamburger nav, category sheet, touch menus, bottom-sheet dialogs, cardified admin tables) + i18n complete (en/zh-CN via i18next + LanguageSwitcher, localized API errors with error codes (`{"error","code"}` envelope + Accept-Language negotiation), deployment language config (`PICHOST_I18N_LANGUAGE` + admin config hot reload).
+- Version: `0.20.0` — image detail zoom viewer (fullscreen lightbox: wheel/drag/pinch zoom, toolbar + keyboard controls) + responsive layout complete (mobile-first: hamburger nav, category sheet, touch menus, bottom-sheet dialogs, cardified admin tables) + i18n complete (en/zh-CN via i18next + LanguageSwitcher, localized API errors with error codes (`{"error","code"}` envelope + Accept-Language negotiation), deployment language config (`PICHOST_I18N_LANGUAGE` + admin config hot reload).
 
 ## Key Commands
 
@@ -207,8 +207,8 @@ All paths below are relative to `/api/v1/` prefix unless otherwise noted. The `/
 - **CSS variables**: Design system uses `var(--color-*)` tokens for theming. Glass effects via `backdrop-blur-sm`, `bg-[var(--glass-bg)]`, `border-[var(--color-border)]`.
 - **Responsive strategy**: mobile-first Tailwind default breakpoints (sm=640/md=768/lg=1024/xl=1280). Global `overflow-x: clip` guard on html/body. `<md`: hamburger nav (MobileNav drawer), category filter via Sheet drawer, bottom-sheet dialogs, cardified admin tables; ≥md: desktop sidebar/nav/dialogs preserved.
 - **Shared overlay primitives**: `hooks/useOverlay(onClose, enabled)` (Escape close + body scroll lock + overlay click, gated on `enabled`), `ui/Modal` (bottom-sheet <sm / centered ≥sm, `role="dialog"`, panel keeps `.glass-modal` class — E2E locates dialogs by it), `ui/ConfirmDialog` (danger confirm), `ui/Sheet` (left slide-in drawer), `ui/DropdownMenu`/`ui/GlassSelect` (viewport-clamped via `clampLeft`).
-- **Hooks**: `useUploadQueue` (multi-file upload with concurrency pool), `useInfiniteQuery` (Gallery scroll), `useFormat` (locale-aware formatBytes/formatDate/formatNumber), `useOverlay` (overlay behavior).
-- **Components**: `CategoryTree` (sidebar with inline CRUD — context menu + touch ⋯ button, rename, delete confirmation, create modal), `MobileNav` (hamburger drawer), `ui/DropdownMenu` (NavBar user menu), `SystemConfig` (admin config management — test connections, save/restore), `LanguageSwitcher` (NavBar + Login/Register).
+- **Hooks**: `useUploadQueue` (multi-file upload with concurrency pool), `useInfiniteQuery` (Gallery scroll), `useFormat` (locale-aware formatBytes/formatDate/formatNumber), `useOverlay` (overlay behavior), `useImageZoom` (pure zoom/pan state — scale/offset, anchored zoom math, range/pan clamping).
+- **Components**: `CategoryTree` (sidebar with inline CRUD — context menu + touch ⋯ button, rename, delete confirmation, create modal), `MobileNav` (hamburger drawer), `ImageViewer` (fullscreen zoom viewer — click the image to open; wheel/button/keyboard/pinch zoom, drag pan, double-click fit↔100%), `ui/DropdownMenu` (NavBar user menu), `SystemConfig` (admin config management — test connections, save/restore), `LanguageSwitcher` (NavBar + Login/Register).
 - **Mobile E2E**: viewport 375×667 via `test.use({ viewport, hasTouch: true })` in specs (mobile-nav/mobile-gallery/mobile-admin/responsive). Note: `overflow-x: clip` masks `documentElement.scrollWidth` — overflow assertions must measure `Math.max(doc, body)`.
 
 ## Rules

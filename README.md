@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.19.0** — responsive layout. Mobile-first web UI (hamburger nav drawer, category sheet, touch-friendly menus, bottom-sheet dialogs, cardified admin tables), i18n complete (English/简体中文 switching, localized API errors).
+**v0.20.0** — image detail zoom viewer. Fullscreen lightbox with cursor-anchored wheel zoom, drag pan, pinch gestures, toolbar + keyboard controls. Responsive layout — Mobile-first web UI (hamburger nav drawer, category sheet, touch-friendly menus, bottom-sheet dialogs, cardified admin tables), i18n complete (English/简体中文 switching, localized API errors).
 
 ## Stack
 
@@ -227,6 +227,7 @@ All API error responses use `{"error": <localized message>, "code": <error key>}
 - [x] **Localized API errors** — all errors return `{"error": localized message, "code": error key}`, Accept-Language negotiation per request
 - [x] **Deployment language config** — `PICHOST_I18N_LANGUAGE` / `PICHOST_I18N_LOCALES_DIR`, admin config hot reload without restart
 - [x] **Responsive layout** — mobile-first adaptation: hamburger nav drawer (MobileNav), category filter drawer (Sheet), touch-friendly category ⋯ menu, shared Modal/ConfirmDialog with bottom-sheet on small screens, admin table card-ification, global horizontal-overflow guard, responsive gallery grid (2/3/3/4/5 columns), popover viewport clamping
+- [x] **Image detail zoom viewer** — fullscreen lightbox: wheel zoom (cursor-anchored), drag pan, double-click fit↔100%, touch pinch/drag, toolbar zoom controls, keyboard shortcuts
 
 ## Project Structure
 
@@ -243,7 +244,8 @@ All API error responses use `{"error": <localized message>, "code": <error key>}
 ├── web-ui/                  React SPA — Zustand, TanStack Query, i18next, Tailwind CSS 4
 │   ├── src/i18n/            i18next init + locale catalogs (en, zh-CN), typed t() keys
 │   ├── src/lib/format.ts    Locale-aware formatBytes/formatDate/formatNumber
-│   └── src/components/      Components (SystemConfig, CategoryTree, MobileNav, ...)
+│   ├── src/hooks/           useImageZoom (zoom viewer zoom/pan state), useUploadQueue, ...
+│   └── src/components/      Components (SystemConfig, CategoryTree, MobileNav, ImageViewer (zoom viewer), ...)
 │       └── ui/              UI primitives (Modal, Sheet, ConfirmDialog, ...)
 │       └── ui/              UI primitives (Button, Input, DropdownMenu)
 ├── nginx/
