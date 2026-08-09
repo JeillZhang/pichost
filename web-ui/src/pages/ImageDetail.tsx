@@ -15,6 +15,7 @@ import {
 import LinkCard from '../components/LinkCard'
 import GlassSelect from '../components/ui/GlassSelect'
 import { useFormat } from '../hooks/useFormat'
+import ImageViewer from '../components/ImageViewer'
 
 function flattenCategories(
   nodes: CategoryTreeNode[] | undefined,
@@ -62,6 +63,7 @@ export default function ImageDetail() {
   const [isRenaming, setIsRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState('')
   const [linkFormat, setLinkFormat] = useState<LinkFormat>('url')
+  const [viewerOpen, setViewerOpen] = useState(false)
 
   const { data: img, isLoading } = useQuery({
     queryKey: ['image', id],
@@ -161,7 +163,11 @@ export default function ImageDetail() {
       </button>
 
       {/* Image preview */}
-      <div className="glass-elevated mb-4 overflow-hidden rounded-xl">
+      <div
+        data-testid="image-preview"
+        onClick={() => setViewerOpen(true)}
+        className="glass-elevated mb-4 cursor-zoom-in overflow-hidden rounded-xl"
+      >
         <img
           src={img.url}
           alt={img.original_name}
@@ -342,6 +348,14 @@ export default function ImageDetail() {
           </button>
         )}
       </div>
+      <ImageViewer
+        open={viewerOpen}
+        src={img.url}
+        alt={img.original_name}
+        naturalWidth={img.width}
+        naturalHeight={img.height}
+        onClose={() => setViewerOpen(false)}
+      />
     </div>
   )
 }
