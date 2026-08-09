@@ -15,7 +15,7 @@ figment.workspace = true
 async-trait.workspace = true
 aws-config.workspace = true
 aws-sdk-s3.workspace = true
-sqlx = { workspace = true, features = ["derive"] }
+sqlx = { workspace = true, features = ["derive", "any", "sqlite", "migrate"] }
 toml = "0.8"
 aes-gcm = "0.10"
 base64 = "0.22"
