@@ -1,0 +1,27 @@
+use sqlx::migrate::Migrator;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
+use std::str::FromStr;
+
+static MIGRATOR: Migrator = sqlx::migrate!("../migrations-sqlite");
+
+async fn sqlite_pool() -> SqlitePool {
+    let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+        .unwrap()
+        .foreign_keys(true)
+        .journal_mode(SqliteJournalMode::Wal);
+    SqlitePoolOptions::new().max_connections(5).connect_with(opts).await.unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_migrations_apply_users_images() {
+    let pool = sqlite_pool().await;
+    MIGRATOR.run(&pool).await.expect("migrations apply");
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('users','images')")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(n, 2);
+    let cols: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pragma_table_info('users') WHERE name IN ('id','username','password_hash')")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(cols, 3);
+}
