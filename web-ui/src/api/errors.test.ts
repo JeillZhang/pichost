@@ -32,6 +32,31 @@ describe('getErrorCode', () => {
     err.response = { status: 400, json: async () => ({ error: 'msg', code: 'other.code' }) }
     expect(await getErrorCode(err)).toBe('other.code')
   })
+  it('extracts code from ky v2 pre-parsed `data` when the body is consumed', async () => {
+    const err = new Error('Request failed with status code 400 Bad Request: POST http://x') as any
+    err.response = { status: 400 } // ky v2 consumes the body, so json() is gone
+    err.data = { error: 'msg', code: 'auth.invalid_credentials' }
+    expect(await getErrorCode(err)).toBe('auth.invalid_credentials')
+  })
+  it('prefers `data` over the response body when both are present', async () => {
+    let parsed = false
+    const err = new Error('HTTP Error') as any
+    err.data = { error: 'msg', code: 'data.code' }
+    err.response = {
+      status: 400,
+      json: async () => {
+        parsed = true
+        return { error: 'msg', code: 'body.code' }
+      },
+    }
+    expect(await getErrorCode(err)).toBe('data.code')
+    expect(parsed).toBe(false)
+  })
+  it('returns null when `data` carries no usable code', async () => {
+    const err = new Error('HTTP Error') as any
+    err.data = { error: 'msg' }
+    expect(await getErrorCode(err)).toBeNull()
+  })
 })
 describe('isErrorCode', () => {
   it('matches behavior codes', async () => {

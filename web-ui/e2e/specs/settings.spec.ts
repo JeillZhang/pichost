@@ -45,11 +45,13 @@ test.describe.serial('settings', () => {
       'current password incorrect',
     )
 
-    // UI shows an error toast after submit
+    // UI shows the backend-localized error toast after submit
     const settings = new SettingsPage(page)
     await settings.goto('password')
     await settings.changePassword('definitely-wrong', 'NewPass123!')
-    await expect(page.getByText(/failed/i).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(/current password incorrect/i).first()).toBeVisible({
+      timeout: 15_000,
+    })
   })
 
   test('password change with short new password rejected client-side', async ({ page, request }) => {

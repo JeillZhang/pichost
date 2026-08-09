@@ -224,8 +224,8 @@ async fn update_image_record(
     webp_written: bool,
     public_url: &str,
 ) -> Result<(), PipelineError> {
-    let thumb_url = format!("{}/u/thumb-{}", public_url, task.image_id);
-    let webp_url = format!("{}/u/webp-{}", public_url, task.image_id);
+    let thumb_url = format!("{}/u/thumb/{}", public_url, task.image_id);
+    let webp_url = format!("{}/u/webp/{}", public_url, task.image_id);
     sqlx::query(
         r#"UPDATE images SET
             width = $1, height = $2,
@@ -686,9 +686,9 @@ mod tests {
         .unwrap();
         assert_eq!((row.0, row.1), (200, 100));
         assert_eq!(row.2.as_deref(), Some("t/thumb"));
-        assert!(row.3.as_deref().unwrap().starts_with("http://localhost/u/thumb-"));
+        assert!(row.3.as_deref().unwrap().starts_with("http://localhost/u/thumb/"));
         assert_eq!(row.4.as_deref(), Some("t/webp"));
-        assert!(row.5.as_deref().unwrap().starts_with("http://localhost/u/webp-"));
+        assert!(row.5.as_deref().unwrap().starts_with("http://localhost/u/webp/"));
         assert_eq!(row.6, "ready");
         cleanup_user(&pool, user_id).await;
     }
