@@ -39,3 +39,17 @@ async fn sqlite_migrations_processing_and_tasks() {
         .fetch_one(&pool).await.unwrap();
     assert_eq!(t, 1);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_migrations_quota_and_index() {
+    let pool = sqlite_pool().await;
+    MIGRATOR.run(&pool).await.unwrap();
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pragma_table_info('users') WHERE name='storage_quota'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(n, 1);
+    let idx: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_images_user_filename'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(idx, 1);
+}
