@@ -112,6 +112,36 @@ test.describe.serial('image-detail', () => {
     await expect(page).toHaveURL(/\/(dashboard|gallery)/)
   })
 
+  test('zoom viewer: open, wheel/buttons zoom, reset, close on Escape', async ({ page, request }) => {
+    await seedUserSession(page, request)
+    const detail = new ImageDetailPage(page)
+    await detail.goto(imageId)
+    await detail.imagePreview.click()
+    await expect(detail.viewerOverlay).toBeVisible()
+    await expect(detail.viewerZoomLevel).toHaveText('Zoom 100%')
+
+    // Wheel zoom in (×1.1 per notch) — hover the surface center first
+    const box = await detail.viewerSurface.boundingBox()
+    if (!box) throw new Error('viewer surface has no bounding box')
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.wheel(0, -100)
+    await expect(detail.viewerZoomLevel).toHaveText('Zoom 110%')
+
+    // Toolbar zoom in (×1.25) → 137.5 → 138%; zoom out returns
+    await detail.viewerZoomIn.click()
+    await expect(detail.viewerZoomLevel).toHaveText('Zoom 138%')
+    await detail.viewerZoomOut.click()
+    await expect(detail.viewerZoomLevel).toHaveText('Zoom 110%')
+
+    // Keyboard 0 resets to fit
+    await page.keyboard.press('0')
+    await expect(detail.viewerZoomLevel).toHaveText('Zoom 100%')
+
+    // Escape closes
+    await page.keyboard.press('Escape')
+    await expect(detail.viewerOverlay).toBeHidden()
+  })
+
   test('public serving works via public key', async ({ request }) => {
     expect(imagePublicKey).toBeTruthy()
     const res = await request.get(`/u/${imagePublicKey}`)
@@ -132,5 +162,18 @@ test.describe('image detail on mobile', () => {
     // Playwright ignores opacity for visibility — assert the computed value:
     // below md the pencil must be fully opaque without any hover.
     await expect(pencil).toHaveCSS('opacity', '1')
+  })
+
+  test('zoom viewer toolbar works on touch', async ({ page, request }) => {
+    await seedUserSession(page, request)
+    const detail = new ImageDetailPage(page)
+    await detail.goto(imageId)
+    await detail.imagePreview.tap()
+    await expect(detail.viewerOverlay).toBeVisible()
+    await expect(detail.viewerZoomLevel).toHaveText('Zoom 100%')
+    await detail.viewerZoomIn.click()
+    await expect(detail.viewerZoomLevel).toHaveText('Zoom 125%')
+    await detail.viewerClose.click()
+    await expect(detail.viewerOverlay).toBeHidden()
   })
 })
