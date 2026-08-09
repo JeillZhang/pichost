@@ -521,12 +521,14 @@ pub async fn public_get(
         .unwrap())
 }
 
-fn mime_for_thumb_key(key: &str) -> &'static str {
-    if key.ends_with(".png") {
-        "image/png"
-    } else {
-        "image/jpeg"
-    }
+/// Detect MIME type of a generated thumbnail from its bytes — the storage
+/// key carries no extension (e.g. `{user}/thumb.{image_id}`), so key-based
+/// guessing returns image/jpeg even for PNG thumbs, which browsers reject
+/// under `X-Content-Type-Options: nosniff`.
+fn mime_for_thumb_bytes(bytes: &[u8]) -> &'static str {
+    infer::get(bytes)
+        .map(|t| t.mime_type())
+        .unwrap_or("application/octet-stream")
 }
 
 /// GET /u/thumb/{image_id} — serve generated thumbnail (unauthenticated)
@@ -565,7 +567,7 @@ pub async fn public_get_thumb(
 
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, mime_for_thumb_key(&thumb_key))
+        .header(header::CONTENT_TYPE, mime_for_thumb_bytes(&bytes))
         .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
         .body(axum::body::Body::from(bytes))
         .unwrap())
@@ -622,7 +624,7 @@ pub async fn public_get_thumb_by_key(
 
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, mime_for_thumb_key(&thumb_key))
+        .header(header::CONTENT_TYPE, mime_for_thumb_bytes(&bytes))
         .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
         .body(axum::body::Body::from(bytes))
         .unwrap())
@@ -1070,10 +1072,13 @@ mod tests {
     }
 
     #[test]
-    fn test_mime_for_thumb_key() {
-        assert_eq!(mime_for_thumb_key("a/b.png"), "image/png");
-        assert_eq!(mime_for_thumb_key("a/b.jpg"), "image/jpeg");
-        assert_eq!(mime_for_thumb_key("a/b"), "image/jpeg");
+    fn test_mime_for_thumb_bytes() {
+        let png = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        let jpeg = [0xff, 0xd8, 0xff, 0xe0];
+        assert_eq!(mime_for_thumb_bytes(&png), "image/png");
+        assert_eq!(mime_for_thumb_bytes(&jpeg), "image/jpeg");
+        assert_eq!(mime_for_thumb_bytes(b"not an image"), "application/octet-stream");
+        assert_eq!(mime_for_thumb_bytes(&[]), "application/octet-stream");
     }
 
     #[test]
