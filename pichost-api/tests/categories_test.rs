@@ -366,14 +366,45 @@ async fn categories_depth_limit_rejects_third_level() {
     assert_eq!(status, StatusCode::CREATED, "second level should succeed: {resp}");
     let l2_id = resp["id"].as_str().unwrap().to_string();
 
+    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert!(resp["error"].is_string());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires running PostgreSQL"]
+async fn duplicate_category_returns_conflict() {
+    let app = test_app().await;
+    let (_, token, _) = create_user(&app, "cate_dup_conflict").await;
+
     let (status, resp) = send_json(
         &app,
         Method::POST,
         "/api/v1/categories",
         Some(&token),
-        &serde_json::json!({"name": "L3", "parent_id": l2_id}),
+        &serde_json::json!({"name": "Photos"}),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert_eq!(status, StatusCode::CREATED, "create category failed: {resp}");
+    let root_id = resp["id"].as_str().unwrap().to_string();
+
+    let (status, resp) = send_json(
+        &app,
+        Method::POST,
+        "/api/v1/categories",
+        Some(&token),
+        &serde_json::json!({"name": "Vacation", "parent_id": root_id}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "create child failed: {resp}");
+
+    let (status, resp) = send_json(
+        &app,
+        Method::POST,
+        "/api/v1/categories",
+        Some(&token),
+        &serde_json::json!({"name": "Vacation", "parent_id": root_id}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
     assert!(resp["error"].is_string());
 }

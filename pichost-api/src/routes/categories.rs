@@ -187,14 +187,12 @@ where
     .fetch_one(&state.pool)
     .await
     .map_err(|e| {
-        if let sqlx::Error::Database(ref db_err) = e {
-            if db_err.constraint() == Some("categories_user_id_name_parent_id_key") {
-                return error_json(
-                    locale,
-                    StatusCode::CONFLICT,
-                    "category.name_exists",
-                );
-            }
+        if pichost_core::db::db_error_kind(&e) == pichost_core::db::DbErrorKind::UniqueViolation {
+            return error_json(
+                locale,
+                StatusCode::CONFLICT,
+                "category.name_exists",
+            );
         }
         error_json_args(
             locale,

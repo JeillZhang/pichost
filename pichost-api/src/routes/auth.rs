@@ -247,16 +247,12 @@ where
     .fetch_one(&state.pool)
     .await
     .map_err(|e| {
-        if let sqlx::Error::Database(ref db_err) = e {
-            if let Some(code) = db_err.code() {
-                if code == "23505" {
-                    return error_json(
-                        locale,
-                        StatusCode::CONFLICT,
-                        "auth.username_exists",
-                    );
-                }
-            }
+        if pichost_core::db::db_error_kind(&e) == pichost_core::db::DbErrorKind::UniqueViolation {
+            return error_json(
+                locale,
+                StatusCode::CONFLICT,
+                "auth.username_exists",
+            );
         }
         tracing::warn!("User registration db error: {e}");
         error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
