@@ -31,7 +31,7 @@ pub enum PipelineError {
     BackendResolution(String),
 }
 
-use crate::queue::TaskPayload;
+use pichost_core::models::TaskPayload;
 
 async fn load_watermarked_image<DB: DbType>(
     pool: &Pool<DB>,

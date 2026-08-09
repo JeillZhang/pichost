@@ -1,22 +1,7 @@
 use chrono::Utc;
 use deadpool_redis::{redis::AsyncCommands, Pool};
-use serde::{Deserialize, Serialize};
+use pichost_core::models::TaskPayload;
 use uuid::Uuid;
-
-/// Task payload for async image processing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskPayload {
-    pub task_id: Uuid,
-    pub image_id: Uuid,
-    pub user_id: Uuid,
-    pub storage_backend: String,
-    pub storage_config_id: Option<Uuid>,
-    pub storage_backend_name: String,
-    pub source_key: String,
-    pub source_mime: String,
-    pub retry_count: i32,
-    pub max_retries: i32,
-}
 
 /// Errors from queue operations.
 #[derive(Debug, thiserror::Error)]

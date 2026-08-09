@@ -211,7 +211,7 @@ where
 /// Handle the result of a single task processing attempt.
 async fn handle_task_result<DB: DbType>(
     worker_id: usize, pool: &Pool<DB>, redis: &RedisPool,
-    task: queue::TaskPayload,
+    task: pichost_core::models::TaskPayload,
     result: Result<Result<(), pipeline::PipelineError>, tokio::time::error::Elapsed>,
     config: &pichost_core::config::AppConfig,
 )
@@ -321,8 +321,8 @@ mod tests {
         pool
     }
 
-    fn sample_task() -> queue::TaskPayload {
-        queue::TaskPayload {
+    fn sample_task() -> pichost_core::models::TaskPayload {
+        pichost_core::models::TaskPayload {
             task_id: uuid::Uuid::new_v4(),
             image_id: uuid::Uuid::new_v4(),
             user_id: uuid::Uuid::new_v4(),
@@ -342,8 +342,8 @@ mod tests {
 
     async fn enqueue_and_dequeue_own(
         redis: &RedisPool,
-        task: &queue::TaskPayload,
-    ) -> queue::TaskPayload {
+        task: &pichost_core::models::TaskPayload,
+    ) -> pichost_core::models::TaskPayload {
         loop {
             queue::enqueue_task(redis, task).await.unwrap();
             match queue::dequeue_task(redis, 1).await.unwrap() {
@@ -443,7 +443,7 @@ mod tests {
         let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
         assert_eq!(status.as_deref(), Some("pending"));
         let data: Option<String> = conn.hget(task_key(task.task_id), "data").await.unwrap();
-        let stored: queue::TaskPayload = serde_json::from_str(&data.unwrap()).unwrap();
+        let stored: pichost_core::models::TaskPayload = serde_json::from_str(&data.unwrap()).unwrap();
         assert_eq!(stored.retry_count, 1);
         drop(conn);
         drain_own(&redis, task.task_id).await;
@@ -591,7 +591,7 @@ mod tests {
         let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
         assert_eq!(status.as_deref(), Some("pending"));
         let data: Option<String> = conn.hget(task_key(task.task_id), "data").await.unwrap();
-        let stored: queue::TaskPayload = serde_json::from_str(&data.unwrap()).unwrap();
+        let stored: pichost_core::models::TaskPayload = serde_json::from_str(&data.unwrap()).unwrap();
         assert_eq!(stored.retry_count, 1);
         drop(conn);
         drain_own(&redis, task.task_id).await;

@@ -216,6 +216,21 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
 }
 
+/// Payload for async image processing tasks (worker queue).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TaskPayload {
+    pub task_id: uuid::Uuid,
+    pub image_id: uuid::Uuid,
+    pub user_id: uuid::Uuid,
+    pub storage_backend: String,
+    pub storage_config_id: Option<uuid::Uuid>,
+    pub storage_backend_name: String,
+    pub source_key: String,
+    pub source_mime: String,
+    pub retry_count: i32,
+    pub max_retries: i32,
+}
+
 #[cfg(test)]
 mod watermark_tests {
     use super::*;
