@@ -3112,6 +3112,7 @@ name = "pichost-worker"
 version = "0.20.0"
 dependencies = [
  "ab_glyph",
+ "async-trait",
  "chrono",
  "deadpool-redis",
  "figment",
