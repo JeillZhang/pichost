@@ -149,3 +149,11 @@ it('responsive feature keys exist in both locales', async () => {
   expect(en.adminUsers.deleteTitle).toBeTruthy()
   expect(zh.adminUsers.deleteTitle).toBeTruthy()
 })
+it('imageDetail zoom viewer keys exist in both locales', async () => {
+  const en = (await import('./locales/en.json')).default as any
+  const zh = (await import('./locales/zh-CN.json')).default as any
+  for (const key of ['zoomIn', 'zoomOut', 'zoomReset', 'zoomFit', 'zoomLevel', 'openViewer']) {
+    expect(en.imageDetail[key]).toBeTruthy()
+    expect(zh.imageDetail[key]).toBeTruthy()
+  }
+})
