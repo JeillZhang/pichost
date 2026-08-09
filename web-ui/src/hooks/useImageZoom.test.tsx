@@ -3,20 +3,42 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { useImageZoom, MAX_ZOOM } from './useImageZoom'
 
+// React 19 requires this for act() to flush updates synchronously.
+;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
 type ZoomApi = ReturnType<typeof useImageZoom>
 
 function Harness({ onReady }: { onReady: (api: ZoomApi) => void }) {
   const api = useImageZoom()
-  onReady(api) // reassigned on every render → latest state after act()
+  onReady(api)
   return null
 }
 
 function mount(): { api: ZoomApi; root: Root } {
-  let api: ZoomApi = null as unknown as ZoomApi
+  // `api` is a live proxy: its members delegate to the hook api of the
+  // most recent render, so state changes inside act() are observable.
+  let current: ZoomApi = null as unknown as ZoomApi
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
-  act(() => root.render(<Harness onReady={(a) => { api = a }} />))
+  act(() => root.render(<Harness onReady={(a) => { current = a }} />))
+  const api: ZoomApi = {
+    get zoom() {
+      return current.zoom
+    },
+    get isFit() {
+      return current.isFit
+    },
+    get displayPercent() {
+      return current.displayPercent
+    },
+    open: (...args: Parameters<ZoomApi['open']>) => current.open(...args),
+    zoomAt: (...args: Parameters<ZoomApi['zoomAt']>) => current.zoomAt(...args),
+    zoomBy: (...args: Parameters<ZoomApi['zoomBy']>) => current.zoomBy(...args),
+    panBy: (...args: Parameters<ZoomApi['panBy']>) => current.panBy(...args),
+    toggleFit: () => current.toggleFit(),
+    reset: () => current.reset(),
+  }
   return { api, root }
 }
 
@@ -76,7 +98,7 @@ describe('useImageZoom', () => {
     expect(api.zoom.offsetX).toBe(0) // at fit: naturalW*scale == viewportW → maxX = 0
     act(() => api.zoomBy(4)) // 0.5 → 2.0
     expect(api.zoom.scale).toBe(2)
-    act(() => api.panBy(10000, -10000))
+    act(() => api.panBy(10000, 10000))
     expect(api.zoom.offsetX).toBe(750) // (1000*2 - 500) / 2
     expect(api.zoom.offsetY).toBe(750)
     act(() => api.panBy(-10000, -10000))
