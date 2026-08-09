@@ -513,7 +513,7 @@ where
     usize: sqlx::ColumnIndex<DB::Row>,
 {
     sqlx::query_scalar(
-        "SELECT SUM(storage_quota)::BIGINT FROM users WHERE storage_quota IS NOT NULL",
+        "SELECT CAST(SUM(storage_quota) AS BIGINT) FROM users WHERE storage_quota IS NOT NULL",
     )
     .fetch_one(pool)
     .await
@@ -530,7 +530,7 @@ where
     (i64, i64): crate::db::DbRow<DB>,
 {
     sqlx::query_as::<_, (i64, i64)>(
-        r#"SELECT COUNT(*)::BIGINT as total_images, COALESCE(SUM(file_size), 0)::BIGINT as total_size
+        r#"SELECT COUNT(*) as total_images, CAST(COALESCE(SUM(file_size), 0) AS BIGINT) as total_size
            FROM images"#,
     )
     .fetch_one(pool)
@@ -547,11 +547,14 @@ where
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
     (i64,): crate::db::DbRow<DB>,
+    chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'q> sqlx::Encode<'q, DB>,
 {
+    let cutoff = chrono::Utc::now() - chrono::Duration::hours(24);
     sqlx::query_scalar(
         r#"SELECT COUNT(DISTINCT user_id) FROM images
-           WHERE created_at > NOW() - INTERVAL '24 hours'"#,
+           WHERE created_at >= $1"#,
     )
+    .bind(cutoff)
     .fetch_one(pool)
     .await
     .unwrap_or(0)
@@ -570,7 +573,7 @@ where
     for<'q> &'q str: sqlx::Encode<'q, DB>,
 {
     sqlx::query_as::<_, (i64, i64)>(
-        "SELECT COUNT(*)::BIGINT, COALESCE(SUM(file_size), 0)::BIGINT FROM images WHERE storage_backend = $1",
+        "SELECT COUNT(*), CAST(COALESCE(SUM(file_size), 0) AS BIGINT) FROM images WHERE storage_backend = $1",
     )
     .bind(backend_name)
     .fetch_one(pool)
@@ -862,6 +865,7 @@ where
     (Option<i64>,): crate::db::DbRow<DB>,
     (i64,): crate::db::DbRow<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
+    chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'q> sqlx::Encode<'q, DB>,
 {
     // Try cache first using nil UUID as admin stats key
     if let Ok(Some(stats_map)) = state.cache.get_user_stats(&uuid::Uuid::nil()).await {

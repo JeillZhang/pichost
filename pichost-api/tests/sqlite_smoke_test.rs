@@ -59,3 +59,30 @@ async fn sqlite_stats_and_update_queries() {
         .bind("stats@example.com").bind(&uid).execute(&pool).await.unwrap();
     assert_eq!(res.rows_affected(), 1);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_admin_stats_queries() {
+    let pool = sqlite_pool().await;
+    MIGRATOR.run(&pool).await.unwrap();
+    let uid: String = sqlx::query_scalar(
+        "INSERT INTO users (username, password_hash) VALUES ('admin-stats','h') RETURNING id")
+        .fetch_one(&pool).await.unwrap();
+    // Admin system stats (dialect-neutral: no ::BIGINT; PG SUM() is NUMERIC,
+    // so COALESCE(SUM(...)) must be CAST AS BIGINT to decode i64)
+    let q: (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), CAST(COALESCE(SUM(file_size), 0) AS BIGINT) FROM images")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(q, (0, 0));
+    // Admin active-users-24h (Rust-computed cutoff instead of NOW() - INTERVAL)
+    let cutoff = chrono::Utc::now() - chrono::Duration::hours(24);
+    let n: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT user_id) FROM images WHERE created_at >= ?")
+        .bind(cutoff).fetch_one(&pool).await.unwrap();
+    assert_eq!(n, 0);
+    // Admin storage-quota SUM over nullable column (CAST keeps NULL semantics)
+    let quota: Option<i64> = sqlx::query_scalar(
+        "SELECT CAST(SUM(storage_quota) AS BIGINT) FROM users WHERE storage_quota IS NOT NULL")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(quota, None);
+    let _ = &uid;
+}
