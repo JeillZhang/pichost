@@ -40,6 +40,8 @@ describe('ImageViewer', () => {
     expect(document.querySelector('[data-testid="viewer-zoom-in"]')).toBeTruthy()
     expect(document.querySelector('[data-testid="viewer-zoom-out"]')).toBeTruthy()
     expect(document.querySelector('[data-testid="viewer-close"]')).toBeTruthy()
+    // surface must center the image so the zoom hook's center-origin math holds
+    expect(surface().className).toContain('flex items-center justify-center')
     act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
     expect(onClose).toHaveBeenCalledTimes(1)
     act(() => root.unmount())

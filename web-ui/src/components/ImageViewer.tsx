@@ -93,7 +93,7 @@ export default function ImageViewer({
       <div
         ref={surfaceRef}
         data-testid="viewer-surface"
-        className="absolute inset-0 overflow-hidden"
+        className="absolute inset-0 flex items-center justify-center overflow-hidden"
         style={{ touchAction: 'none', cursor: dragging.current ? 'grabbing' : 'grab' }}
         onPointerDown={(e) => {
           if (e.target === e.currentTarget) tapStart.current = true
