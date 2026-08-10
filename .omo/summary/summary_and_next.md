@@ -20,7 +20,7 @@
 - **install.sh 交互化**: `--yes` 无人值守 / `--mode postgres|sqlite`（apt 依赖引导）；sqlite 模式跳过 postgresql/redis 依赖检查、不安装 `pichost-worker.service`、`.env` 写入 `sqlite://` URL
 - **.env.example 补全**: i18n 部署变量 `PICHOST_I18N_LANGUAGE` / `PICHOST_I18N_LOCALES_DIR`
 - **版本**: 0.20.0 → 0.21.0（Cargo.toml workspace + web-ui/package.json + Cargo.lock 对齐）
-- **验证**: `cargo test --workspace` ✅ (405 pass, 0 fail，无 infra；新增 `sqlite_e2e_test`/`sqlite_smoke_test` 入默认套件)，`cargo test --workspace -- --include-ignored` ✅ (674 pass + 1 known env 敏感失败 — `config_test` env 隔离问题见待实施)，`cargo clippy --workspace -- -D warnings` ✅，`bash scripts/verify-release.sh` ✅（sqlite 模式冒烟），`bash scripts/tests/docs_check_test.sh` ✅
+- **验证**: `cargo test --workspace` ✅ (405 pass, 0 fail，无 infra；新增 `sqlite_e2e_test`/`sqlite_smoke_test` 入默认套件)，`cargo test --workspace -- --include-ignored` ✅ (677 pass, 0 fail — `config_test` env 隔离已用 `PichostEnvGuard` 修复，rustfs 测试跑在实时 MinIO + `PICHOST_STORAGE_RUSTFS_*` 环境)，`cargo clippy --workspace -- -D warnings` ✅，`bash scripts/verify-release.sh` ✅（sqlite 模式冒烟），`bash scripts/tests/docs_check_test.sh` ✅
 
 ## 当前项目涉及特性
 
@@ -485,6 +485,6 @@
 |------|------|------|
 | i18n 扩展 | 新增语言 (ja/ko/...) — 后端 `locales/{lang}/messages.toml` + `Language` 枚举扩展，前端 `src/i18n/locales/{lang}.json` + LanguageSwitcher 枚举，键集相等性测试 | i18n 已落地 |
 | 触屏增强 | CategoryTree 长按手势（当前 ⋯ 按钮已覆盖触屏，长按列为后续增强） | 响应式已落地 |
-| 测试基建 | `config_test::database_mode_parses_sqlite_from_env` env 隔离修复 — CI 设置了 `PICHOST_STORAGE_RUSTFS_*` 时 figment 单下划线映射部分填充 `storage.rustfs` 导致 `MissingField("access_key")`（`PichostEnvGuard` 补 rustfs 变量快照/恢复） | 轻量模式已落地 |
+| 测试基建 | ~~`config_test::database_mode_parses_sqlite_from_env` env 隔离修复~~ — 已完成 (0433326): `PichostEnvGuard` 全量快照/恢复 `PICHOST_*`，677 pass / 0 fail | 轻量模式已落地 |
 
 当前计划内阶段（P0–P4-I）+ i18n + 响应式布局 + 轻量模式 (SQLite lite mode) 已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划）。

@@ -153,6 +153,8 @@ generate_env() {
         printf 'PICHOST_DATABASE_MODE=postgres\n' >> "$env_file"
         echo ">> PostgreSQL mode configured (edit $env_file for credentials)"
     fi
+    # .env holds secrets (JWT secret, DB credentials) — restrict to owner
+    chmod 600 "$env_file"
 }
 
 # --- JWT 校验：缺失或 <32 字符 → 生成随机 secret 并写入 ---
@@ -178,6 +180,7 @@ ensure_jwt_secret() {
     fi
     sed -i -e '/^PICHOST_AUTH_JWT_SECRET=/d' -e '/^PICHOST_AUTH__JWT_SECRET=/d' "$env_file"
     printf 'PICHOST_AUTH_JWT_SECRET=%s\n' "$new_secret" >> "$env_file"
+    chmod 600 "$env_file"
     echo ">> Generated PICHOST_AUTH_JWT_SECRET written to $env_file"
 }
 

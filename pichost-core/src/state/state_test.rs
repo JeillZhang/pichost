@@ -57,6 +57,29 @@ async fn sqlite_queue_claim_ack_cycle() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_queue_reclaim_stale_processing() {
+    let pool = create_sqlite_pool("sqlite::memory:", 5).await.unwrap();
+    run_sqlite_migrations(&pool).await.unwrap();
+    let q = SqliteQueue::new(pool.clone());
+    let p = sample_task();
+    q.enqueue(&p).await.unwrap();
+    // Claim the task (status -> processing), simulating a crash before ack.
+    let got = q.dequeue(Duration::from_millis(50)).await.unwrap().unwrap();
+    assert_eq!(got.task_id, p.task_id);
+    // Fresh handle (as after a restart) reclaims the stuck task.
+    SqliteQueue::new(pool.clone())
+        .reclaim_stale()
+        .await
+        .unwrap();
+    let requeued = SqliteQueue::new(pool)
+        .dequeue(Duration::from_millis(50))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(requeued.task_id, p.task_id);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_blacklist_and_rate_limiter() {
     let pool = create_sqlite_pool("sqlite::memory:", 5).await.unwrap();
     run_sqlite_migrations(&pool).await.unwrap();
@@ -98,6 +121,9 @@ async fn sqlite_invite_store_and_noop_cache() {
     );
     inv.consume("CODE1", Uuid::new_v4()).await.unwrap();
     assert!(!inv.verify("CODE1").await.unwrap());
+    // Parity with RedisInviteStore: consuming a missing/used code errors.
+    assert!(inv.consume("NOPE", Uuid::new_v4()).await.is_err());
+    assert!(inv.consume("CODE1", Uuid::new_v4()).await.is_err());
     assert_eq!(
         inv.verify_detail("CODE1").await.unwrap(),
         InviteVerifyStatus::Used

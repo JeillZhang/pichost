@@ -121,6 +121,14 @@ pub fn build_lite_state_components(pool: SqlitePool) -> StateComponents {
 /// Build a lite-mode `AppState`: SQLite pool + SQLite trait-object components
 /// + storage router, with the embedded worker spawned in-process.
 pub async fn build_lite_app_state(config: AppConfig, pool: SqlitePool) -> Arc<AppState<Sqlite>> {
+    // Reclaim tasks left in 'processing' by a crashed previous run; must run
+    // before the embedded worker starts so it can re-pick them up.
+    if let Err(e) = pichost_core::state::sqlite_queue::SqliteQueue::new(pool.clone())
+        .reclaim_stale()
+        .await
+    {
+        tracing::warn!(error = %e, "lite queue stale-task reclaim failed");
+    }
     let router = Arc::new(init_storage_backends(&config).await);
     let components = build_lite_state_components(pool.clone());
     let state = Arc::new(AppState {
@@ -855,8 +863,10 @@ mod tests {
     async fn test_route_builders_construct() {
         let state = test_state().await;
         let _ = auth_routes(state.clone());
-        // upload/image routes bind &[Uuid] (ANY($1)) — PostgreSQL-only;
-        // exercised by the PG integration harness (tests/common).
+        // upload/image routes use dynamic IN ({}) placeholders (dialect-neutral
+        // since T26), so they construct fine on the Sqlite state too.
+        let _ = upload_routes(state.clone());
+        let _ = image_routes(state.clone());
         let _ = user_routes(state.clone());
         let _ = category_routes(state.clone());
         let _ = admin_routes(state.clone());

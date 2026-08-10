@@ -16,4 +16,16 @@ grep -q 'PICHOST_DATABASE_MODE=sqlite' "$TMP/pc/.env"
 grep -q 'sqlite://' "$TMP/pc/.env"
 ! grep -q 'Wants=.*postgresql' "$TMP/pc/pichost-api.service"
 # 单元由 install.sh 无条件写入 $CONFIG_DIR，故此处为硬断言（生成单元必须无 postgresql 依赖）
+
+# JWT secret：安装器生成的 secret 必须 >= 32 字符（.env.example 占位符 <32 会被替换）
+jwt_line="$(grep -E '^PICHOST_AUTH(_|__)JWT_SECRET=' "$TMP/pc/.env" | tail -n 1)"
+jwt_secret="${jwt_line#*=}"
+jwt_secret="${jwt_secret%\"}"; jwt_secret="${jwt_secret#\"}"
+[ "${#jwt_secret}" -ge 32 ] || { echo "FAIL: PICHOST_AUTH_JWT_SECRET too short (${#jwt_secret} chars)"; exit 1; }
+echo "install_test.sh: JWT secret length ${#jwt_secret} (>=32) OK"
+
+# .env 权限：包含密钥，必须 600
+[ "$(stat -c '%a' "$TMP/pc/.env")" = "600" ] || { echo "FAIL: .env perms not 600"; exit 1; }
+echo "install_test.sh: .env perms 600 OK"
+
 echo "install_test.sh PASS"

@@ -41,12 +41,20 @@ impl InviteStore for SqliteInviteStore {
     }
 
     async fn consume(&self, code: &str, used_by: Uuid) -> Result<(), InviteError> {
-        sqlx::query("UPDATE invite_codes SET used_by = ? WHERE code = ? AND used_by IS NULL")
-            .bind(used_by.to_string())
-            .bind(code)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| InviteError::Other(e.to_string()))?;
+        let result = sqlx::query(
+            "UPDATE invite_codes SET used_by = ? WHERE code = ? AND used_by IS NULL",
+        )
+        .bind(used_by.to_string())
+        .bind(code)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| InviteError::Other(e.to_string()))?;
+        // Parity with RedisInviteStore: consuming a missing/used code errors.
+        if result.rows_affected() == 0 {
+            return Err(InviteError::Other(format!(
+                "invite code not found: {code}"
+            )));
+        }
         Ok(())
     }
 
