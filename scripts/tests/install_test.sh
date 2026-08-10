@@ -14,6 +14,6 @@ trap 'rm -rf "$TMP"' EXIT
 
 grep -q 'PICHOST_DATABASE_MODE=sqlite' "$TMP/pc/.env"
 grep -q 'sqlite://' "$TMP/pc/.env"
-! grep -q 'Wants=.*postgresql' "$TMP/pc/pichost-api.service" 2>/dev/null || true
-# systemd 不可用时跳过单元断言；核心断言为 .env 生成
+! grep -q 'Wants=.*postgresql' "$TMP/pc/pichost-api.service"
+# 单元由 install.sh 无条件写入 $CONFIG_DIR，故此处为硬断言（生成单元必须无 postgresql 依赖）
 echo "install_test.sh PASS"
