@@ -133,12 +133,8 @@ if ldd "$PKG_DIR/pichost-api" "$PKG_DIR/pichost-worker" 2>&1 | grep -q "not foun
 fi
 # 用不可达的数据库/Redis 地址启动：二进制应能加载并快速报连接错误，
 # 而非段错误（139）或无法执行（126/127）。
-check_binary() {
-    local bin="$1" url="$2" label="$3"
-    set +e
-    PICHOST_DATABASE_URL="$url" PICHOST_REDIS_URL="$url" timeout 8 "$bin" >/dev/null 2>&1
-    local rc=$?
-    set -e
+check_rc() {
+    local rc="$1" label="$2"
     case "$rc" in
         124) echo "OK  : $label started and kept running (killed by timeout)" ;;
         0)   echo "OK  : $label exited cleanly" ;;
@@ -149,8 +145,30 @@ check_binary() {
              echo "OK  : $label exited with expected startup error (exit $rc)" ;;
     esac
 }
+check_binary() {
+    local bin="$1" url="$2" label="$3"
+    set +e
+    PICHOST_DATABASE_URL="$url" PICHOST_REDIS_URL="$url" timeout 8 "$bin" >/dev/null 2>&1
+    local rc=$?
+    set -e
+    check_rc "$rc" "$label"
+}
+# sqlite 模式冒烟（T28）: PICHOST_DATABASE_MODE=sqlite + 临时文件 URL，无需 Redis
+# （PICHOST_REDIS_URL 置空）。预期: 迁移自动应用后进入 serve，进程保持运行（rc=124 OK）。
+check_binary_sqlite() {
+    local bin="$1" label="$2"
+    set +e
+    PICHOST_DATABASE_MODE=sqlite \
+        PICHOST_DATABASE_URL="sqlite://$(mktemp -d)/smoke.db" \
+        PICHOST_REDIS_URL= \
+        timeout 8 "$bin" >/dev/null 2>&1
+    local rc=$?
+    set -e
+    check_rc "$rc" "$label"
+}
 check_binary "$PKG_DIR/pichost-api" "postgres://127.0.0.1:9/pichost" "pichost-api"
 check_binary "$PKG_DIR/pichost-worker" "redis://127.0.0.1:9/" "pichost-worker"
+check_binary_sqlite "$PKG_DIR/pichost-api" "pichost-api (sqlite lite mode)"
 
 # --- [7/7] install.sh dry-run（优先在无 systemd 的容器中模拟裸机安装） ---
 if [ "$SKIP_INSTALL" -eq 0 ]; then
