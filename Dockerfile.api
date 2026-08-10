@@ -14,6 +14,7 @@ COPY pichost-core/ ./pichost-core/
 COPY pichost-api/ ./pichost-api/
 COPY pichost-worker/ ./pichost-worker/
 COPY migrations/ ./migrations/
+COPY migrations-sqlite/ ./migrations-sqlite/
 
 # Build the API binary only
 RUN cargo build --release -p pichost-api

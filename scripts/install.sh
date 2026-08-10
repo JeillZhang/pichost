@@ -246,6 +246,7 @@ chmod +x "$INSTALL_DIR"/pichost-api "$INSTALL_DIR"/pichost-worker
 # 3. Copy static assets
 cp -r web-ui/dist "$INSTALL_DIR/"
 cp -r migrations "$INSTALL_DIR/"
+cp -r migrations-sqlite "$INSTALL_DIR/"
 if [ -d nginx ]; then cp -r nginx "$INSTALL_DIR/"; fi
 
 # 4. Initialize .env (mode-aware) + validate JWT secret
