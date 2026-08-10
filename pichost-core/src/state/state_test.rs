@@ -1,5 +1,7 @@
 use crate::db::{create_sqlite_pool, run_sqlite_migrations};
+use crate::state::noop_cache::NoopCache;
 use crate::state::sqlite_blacklist::SqliteBlacklist;
+use crate::state::sqlite_invite::SqliteInviteStore;
 use crate::state::sqlite_queue::SqliteQueue;
 use crate::state::sqlite_rate_limiter::SqliteRateLimiter;
 use crate::state::*;
@@ -80,4 +82,34 @@ async fn sqlite_blacklist_and_rate_limiter() {
         .unwrap();
     assert!(!r3.allowed);
     assert!(r3.retry_after > 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_invite_store_and_noop_cache() {
+    let pool = create_sqlite_pool("sqlite::memory:", 5).await.unwrap();
+    run_sqlite_migrations(&pool).await.unwrap();
+    let inv = SqliteInviteStore::new(pool);
+    let admin = Uuid::new_v4();
+    inv.create("CODE1", admin, 3600).await.unwrap();
+    assert!(inv.verify("CODE1").await.unwrap());
+    assert_eq!(
+        inv.verify_detail("CODE1").await.unwrap(),
+        InviteVerifyStatus::Valid
+    );
+    inv.consume("CODE1", Uuid::new_v4()).await.unwrap();
+    assert!(!inv.verify("CODE1").await.unwrap());
+    assert_eq!(
+        inv.verify_detail("CODE1").await.unwrap(),
+        InviteVerifyStatus::Used
+    );
+    assert_eq!(
+        inv.verify_detail("NOPE").await.unwrap(),
+        InviteVerifyStatus::NotFound
+    );
+
+    let noop = NoopCache;
+    assert_eq!(noop.get("x").await.unwrap(), None);
+    noop.set_ex("x", "v", 60).await.unwrap();
+    assert_eq!(noop.get("x").await.unwrap(), None); // noop 恒 miss
+    assert_eq!(noop.incr("c", 60).await.unwrap(), 1); // 恒返回 1（brief 语义）
 }

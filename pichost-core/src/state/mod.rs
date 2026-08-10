@@ -143,7 +143,9 @@ pub trait Cache: Send + Sync {
     ) -> Result<Option<std::collections::HashMap<String, String>>, CacheError>;
 }
 
+pub mod noop_cache;
 pub mod sqlite_blacklist;
+pub mod sqlite_invite;
 pub mod sqlite_queue;
 pub mod sqlite_rate_limiter;
 
