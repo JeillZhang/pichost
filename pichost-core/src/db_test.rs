@@ -13,7 +13,7 @@ async fn create_sqlite_pool_in_memory_runs_migrations() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(v, 10);
+    assert_eq!(v, 11);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

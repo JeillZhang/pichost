@@ -143,6 +143,8 @@ pub trait Cache: Send + Sync {
     ) -> Result<Option<std::collections::HashMap<String, String>>, CacheError>;
 }
 
+pub mod sqlite_queue;
+
 // 测试用 Mock 实现（state_test.rs 及后续任务测试使用）
 pub struct MockQueue;
 #[async_trait::async_trait]

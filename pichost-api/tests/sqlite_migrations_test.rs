@@ -99,7 +99,7 @@ async fn sqlite_migrations_all_ten() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(ver, 10);
+    assert_eq!(ver, 11);
     let n: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM pragma_table_info('users') WHERE name='watermark_config'",
     )
