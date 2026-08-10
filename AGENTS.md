@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.20.0` — image detail zoom viewer (fullscreen lightbox: wheel/drag/pinch zoom, toolbar + keyboard controls) + responsive layout complete (mobile-first: hamburger nav, category sheet, touch menus, bottom-sheet dialogs, cardified admin tables) + i18n complete (en/zh-CN via i18next + LanguageSwitcher, localized API errors with error codes (`{"error","code"}` envelope + Accept-Language negotiation), deployment language config (`PICHOST_I18N_LANGUAGE` + admin config hot reload).
+- Version: `0.21.0` — SQLite lite mode (dual DB modes: standard PostgreSQL+Redis / lightweight SQLite with embedded in-process worker, zero external dependencies) + image detail zoom viewer (fullscreen lightbox: wheel/drag/pinch zoom, toolbar + keyboard controls) + responsive layout complete (mobile-first: hamburger nav, category sheet, touch menus, bottom-sheet dialogs, cardified admin tables) + i18n complete (en/zh-CN via i18next + LanguageSwitcher, localized API errors with error codes (`{"error","code"}` envelope + Accept-Language negotiation), deployment language config (`PICHOST_I18N_LANGUAGE` + admin config hot reload).
 
 ## Key Commands
 
@@ -13,9 +13,9 @@
 |---|---|---|
 | Build all | `cargo build --workspace` | |
 | Check only api | `cargo check -p pichost-api` | Fast compile-check |
-| Test all | `cargo test --workspace` | 324 pass without infra; 575 pass + 0 fail with `-- --include-ignored` (Docker PG+Redis+MinIO) |
+| Test all | `cargo test --workspace` | 405 pass without infra; 674 pass + 1 known env-sensitive failure with `-- --include-ignored` (Docker PG+Redis+MinIO, see Testing) |
 | Lint | `cargo clippy --workspace -- -D warnings` | Zero warnings required |
-| Run API server | `cargo run -p pichost-api` | Requires PostgreSQL + Redis |
+| Run API server | `cargo run -p pichost-api` | Standard mode requires PostgreSQL + Redis; lite mode: `PICHOST_DATABASE_MODE=sqlite` + `PICHOST_DATABASE_URL=sqlite:///path/pichost.db` (embedded worker, no Redis) |
 | Frontend dev | `cd web-ui && npm run dev` | Vite proxies `/api`, `/u` → `localhost:3000` |
 | Frontend build | `cd web-ui && npm run build` | `tsc -b && vite build` |
 | Verify release pkg | `bash scripts/verify-release.sh` | Local simulation of release.yml build→package→install dry-run; run before tagging `v*` |
@@ -27,16 +27,17 @@
 - **Copy `.env.example` → `.env`, edit `PICHOST_AUTH_JWT_SECRET`** (min 32 chars).
 - **Two DB URL vars**: `DATABASE_URL` (sqlx CLI helper, not consumed by app) and `PICHOST_DATABASE_URL` (consumed by figment config). For local dev only `PICHOST_DATABASE_URL` matters.
 - **sqlx queries are runtime-only** (uses `query_as`, `query_scalar` — no `query!` macro). No compile-time DB needed, no `sqlx prepare`.
-- **Migrations auto-apply** at API startup via `sqlx::migrate!()`. 10 migrations: `0001`-`0010`.
+- **Migrations auto-apply** at API startup via `sqlx::migrate!()`. Two dirs: `migrations/` (PostgreSQL, 10 files `0001`-`0010`) and `migrations-sqlite/` (SQLite, 11 files `0001`-`0011` — `0011` adds lite state tables `pending_tasks`/`token_blacklist`/`rate_limits`/`invite_codes`). Driver-specific `run_pg_migrations`/`run_sqlite_migrations` pick the right dir.
 - `storage-local/` is gitignored, created at runtime by LocalStorage.
-- Prerequisites: Rust 1.96+, Node.js 22+, PostgreSQL 18, Redis 8.
+- Prerequisites: Rust 1.96+, Node.js 22+. Standard mode: PostgreSQL 18 + Redis 8. Lite mode needs neither.
 
 ## Config System
 
 - Uses `figment` crate: defaults → `config.toml` (optional) → `PICHOST_*` env vars.
 - Config struct in `pichost-core/src/config.rs` — has `Default` impl with dev defaults.
 - All env vars use `PICHOST_` prefix. Key vars:
-  - `PICHOST_DATABASE_URL`, `PICHOST_REDIS_URL` — runtime connections
+  - `PICHOST_DATABASE_MODE` — `postgres` (default) | `sqlite`; sqlite selects lite mode: single-process API with embedded worker, no Redis
+  - `PICHOST_DATABASE_URL`, `PICHOST_REDIS_URL` — runtime connections (lite mode URL example: `sqlite:///path/pichost.db`; `PICHOST_REDIS_URL` unused in sqlite mode)
   - `PICHOST_AUTH_JWT_SECRET` — JWT signing key
   - `PICHOST_SERVER_PUBLIC_URL` — for OAuth callbacks and link generation
   - OAuth: `PICHOST_AUTH_OAUTH_GITHUB_CLIENT_ID`, `..._SECRET`, same for Google
@@ -51,11 +52,18 @@
 
 ## CRATE BOUNDARIES
 
-- **pichost-core** (`pichost_core`): Domain models, config, error types, `StorageBackend` trait + `LocalStorage`/`RustfsStorage`/`GitStorage` impls + `StorageRouter`. No web/framework deps.
-- **pichost-api** (`pichost_api`): Axum server — routes, middleware, services, DB pool, Redis cache, system config service (config.toml read/write, backups, connection tests). Depends on `pichost-core`. Extra deps: `toml_edit` (0.22), `regex` (1), `thiserror`, `tempfile` (dev).
-- **pichost-worker**: Background image processing binary — thumbnail/WebP generation via Redis queue. Depends on `pichost-core`.
+- **pichost-core** (`pichost_core`): Domain models, config, error types, `StorageBackend` trait + `LocalStorage`/`RustfsStorage`/`GitStorage` impls + `StorageRouter`. Also `db` module (per-driver `create_pg_pool`/`create_sqlite_pool`, `run_pg_migrations`/`run_sqlite_migrations`, `DbType`/`DbRow`/`DbQueryResult` markers, `db_error_kind` mapping) and `state` module (5 state traits — `Queue`/`Blacklist`/`RateLimiter`/`InviteStore`/`Cache` — with SQLite impls `SqliteQueue`/`SqliteBlacklist`/`SqliteRateLimiter`/`SqliteInviteStore` + `NoopCache`). No web/framework deps.
+- **pichost-api** (`pichost_api`): Axum server — routes, middleware, services, DB pool, Redis cache, system config service (config.toml read/write, backups, connection tests). Generic `AppState<DB: DbType>` + `configure_app<DB>` router assembly; `run_with::<DB>()` (standard, Redis state components) / `run_with_sqlite` (lite mode, SQLite components + embedded worker). Redis trait impls (`RedisBlacklist`/`RedisRateLimiter`/`RedisInviteStore`/`Cache`) live here. Depends on `pichost-core`. Extra deps: `toml_edit` (0.22), `regex` (1), `thiserror`, `tempfile` (dev).
+- **pichost-worker**: Background image processing — thumbnail/WebP generation via Redis queue. Library + binary: `pichost_worker::process_task` is exposed so lite mode can run the worker embedded in the API process (`RedisQueue` lives here). Depends on `pichost-core`.
 
 ## Architecture Notes
+
+### Dual DB modes (standard / lite)
+- **Standard mode** (default): PostgreSQL + Redis + separate worker binary (2 replicas via Docker). State (queue/blacklist/rate limiter/invites/cache) lives in Redis, images in PG, processing in `pichost-worker`.
+- **Lite mode** (`PICHOST_DATABASE_MODE=sqlite`): single-process API with an **embedded in-process worker** (`tokio::spawn(lite_worker_task)` dequeues → `pichost_worker::process_task` → ack/nack). Zero external dependencies — no Redis, no PG, no separate worker binary. State tables come from migration `0011` (`pending_tasks`/`token_blacklist`/`rate_limits`/`invite_codes`); the cache is a no-op (`NoopCache`, fail-open reads).
+- **A′ generic architecture**: no `AnyPool` (sqlx Any driver lacks `Uuid`/`DateTime`/`Json` support) — instead concrete per-driver pools: `create_pg_pool`/`create_sqlite_pool` (`pichost-core/src/db.rs`), generic `AppState<DB: DbType>` + `configure_app<DB>` router assembly, and `run_with::<DB>()` (standard, Redis components) / `run_with_sqlite` (lite, SQLite components). Handlers are generic functions instantiated per driver at compile time (zero runtime dispatch). `DbType`/`DbRow`/`DbQueryResult` markers carry the generic bounds; `db_error_kind` maps driver errors.
+- **5 state traits**: `Queue`/`Blacklist`/`RateLimiter`/`InviteStore`/`Cache` in `pichost-core/src/state/mod.rs` with dual implementations — Redis (`RedisQueue` in pichost-worker, `RedisBlacklist`/`RedisRateLimiter`/`RedisInviteStore`/`Cache` in pichost-api) and SQLite (`SqliteQueue`/`SqliteBlacklist`/`SqliteRateLimiter`/`SqliteInviteStore` in pichost-core) — assembled as trait objects via `build_state_components` (standard) / `build_lite_state_components` (lite).
+- **Dialect-neutral SQL**: no `ILIKE` (uses `LOWER(col) LIKE LOWER($n)`), no `ANY($1)` (dynamic `IN`), no `now()` (Rust-side `DateTime<Utc>` params / `CURRENT_TIMESTAMP`).
 
 ### Auth
 - JWT HS256 via `jsonwebtoken`. Access TTL = 900s, refresh TTL = 30 days.
@@ -108,7 +116,7 @@
 - DB default is `'pending'`, but upload INSERT hardcodes `'active'`. The `ImageStatus` enum has `Pending/Processing/Ready/Failed` but code checks string `"active"`. If adding status transitions, reconcile this.
 
 ### Rate limiting
-- 4 strategies in Redis middleware: auth (5/min/IP), upload (30/min/user), general (60/min/user), public images (200/min/IP).
+- 4 strategies in middleware (auth: 5/min/IP, upload: 30/min/user, general: 60/min/user, public images: 200/min/IP) — backed by Redis (`RedisRateLimiter`) in standard mode, SQLite `rate_limits` table (`SqliteRateLimiter`) in lite mode.
 - Nginx layer: additional `limit_req` zones (60r/m API, 200r/m public).
 
 ### Settings UI
@@ -140,8 +148,8 @@
 - API is stateless (state in PostgreSQL + Redis) — scale horizontally.
 - Postgres/Redis ports not exposed to host — internal Docker network only.
 - Two compose files: `docker-compose.yml` (local dev/S3) and `docker-compose.prod.yml` (production S3, `.env`-driven).
-- Bare-metal packaging: `scripts/pichost-api.service` + `scripts/pichost-worker.service` (systemd, `User=pichost`, `EnvironmentFile=/etc/pichost/.env`), install/uninstall via `scripts/install.sh` / `scripts/uninstall.sh`. Pre-tag verification: `scripts/verify-release.sh` (local mirror of release.yml build→package→install dry-run).
-- CI: `.github/workflows/smoke-test.yml` — PR to `main` → full API integration suite (`cargo test --workspace -- --include-ignored`, ~575 tests) against PG+Redis+MinIO service containers + clippy gate. `.github/workflows/release.yml` — `v*` tags → build x86_64-unknown-linux-gnu, test + clippy, package `.tar.gz`; `-rc/-beta/-alpha/-pre` tag suffixes or manual dispatch mark the release as draft/pre-release. `.github/workflows/e2e.yml` — Playwright E2E (73 specs), PG+Redis service containers. Release body links `CHANGELOG.md` (Keep a Changelog format, updated per release).
+- Bare-metal packaging: `scripts/pichost-api.service` + `scripts/pichost-worker.service` (systemd, `User=pichost`, `EnvironmentFile=/etc/pichost/.env`), install/uninstall via `scripts/install.sh` / `scripts/uninstall.sh`. `install.sh` is interactive (`--yes` unattended / `--mode postgres|sqlite`): sqlite mode skips the postgresql/redis dependency checks, installs no `pichost-worker.service`, and writes `sqlite://` into `.env` — zero external deps. Pre-tag verification: `scripts/verify-release.sh` (local mirror of release.yml build→package→install dry-run; also smoke-tests sqlite mode).
+- CI: `.github/workflows/smoke-test.yml` — PR to `main` → full API integration suite (`cargo test --workspace -- --include-ignored`, ~675 tests) against PG+Redis+MinIO service containers + clippy gate. `.github/workflows/release.yml` — `v*` tags → build x86_64-unknown-linux-gnu, test + clippy, package `.tar.gz`; `-rc/-beta/-alpha/-pre` tag suffixes or manual dispatch mark the release as draft/pre-release. `.github/workflows/e2e.yml` — Playwright E2E (73 specs), PG+Redis service containers. Release body links `CHANGELOG.md` (Keep a Changelog format, updated per release).
 
 ## API Endpoints Summary
 
@@ -189,7 +197,7 @@ All paths below are relative to `/api/v1/` prefix unless otherwise noted. The `/
 
 ## Testing
 
-- **Full suite**: `cargo test --workspace` → **324 pass, 0 fail** without infra (242 DB/Redis/S3 tests `#[ignore]`-gated). With Docker PG+Redis+MinIO running: `cargo test --workspace -- --include-ignored` → **575 pass, 0 fail**.
+- **Full suite**: `cargo test --workspace` → **405 pass, 0 fail** without infra (270 DB/Redis/S3 tests `#[ignore]`-gated). With Docker PG+Redis+MinIO running: `cargo test --workspace -- --include-ignored` → **674 pass + 1 known failure** on this branch: `config_test::database_mode_parses_sqlite_from_env` breaks when `PICHOST_STORAGE_RUSTFS_*` env vars are set (figment's legacy single-underscore env mapping partially fills `storage.rustfs` from `..._ENDPOINT`/`..._BUCKET`/`..._REGION` but cannot map the 4-segment `..._ACCESS_KEY`/`..._SECRET_KEY` → `MissingField("access_key")`). The CI smoke-test env sets these vars, so CI is red until the test's env isolation is fixed.
 - **CI**: every PR to `main` runs the full suite automatically via `.github/workflows/smoke-test.yml` (see the smoke test design guide `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md`). New API features must add a smoke test before coding (TDD).
 - **Coverage**: `cargo llvm-cov --workspace --ignore-filename-regex 'tests/|test_' -- --include-ignored` → **91.56% line coverage**. `cargo-llvm-cov` must be installed (`cargo install cargo-llvm-cov`).
 - **Test infrastructure**: `pichost-api/tests/common/mod.rs` harness builds a real `AppState` (PG+Redis) + production router (`configure_app`) and drives it via `tower::ServiceExt::oneshot`. The router-assembly functions live in `pichost-api/src/app.rs` (moved from `main.rs`) so integration tests exercise the exact production routing.

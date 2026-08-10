@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.20.0** — image detail zoom viewer. Fullscreen lightbox with cursor-anchored wheel zoom, drag pan, pinch gestures, toolbar + keyboard controls. Responsive layout — Mobile-first web UI (hamburger nav drawer, category sheet, touch-friendly menus, bottom-sheet dialogs, cardified admin tables), i18n complete (English/简体中文 switching, localized API errors).
+**v0.21.0** — SQLite lite mode (dual DB modes: standard PostgreSQL+Redis / lightweight SQLite single-instance with embedded worker, zero external dependencies). Image detail zoom viewer — fullscreen lightbox with cursor-anchored wheel zoom, drag pan, pinch gestures, toolbar + keyboard controls. Responsive layout — Mobile-first web UI (hamburger nav drawer, category sheet, touch-friendly menus, bottom-sheet dialogs, cardified admin tables), i18n complete (English/简体中文 switching, localized API errors).
 
 ## Stack
 
@@ -10,8 +10,8 @@ Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S
 |-------|-----------|
 | Backend | Rust 1.96+ (Axum 0.8, Tokio, sqlx) |
 | Frontend | React 19, Vite 8, TypeScript 7, Tailwind CSS 4, i18next |
-| Database | PostgreSQL 18 |
-| Cache / Queue | Redis 8 |
+| Database | PostgreSQL 18 (standard) / SQLite (lite mode, optional) |
+| Cache / Queue | Redis 8 (standard) / SQLite tables (lite mode) |
 | Proxy / CDN | Nginx 1.27 (reverse proxy, cache, rate limiting) |
 | Deployment | Docker Compose (API×2, Worker×2, stateless) |
 
@@ -75,7 +75,7 @@ Browser / Client
 
 ### Prerequisites
 
-- Rust 1.96+ (`rustup`), Node.js 22+, PostgreSQL 18, Redis 8
+- Rust 1.96+ (`rustup`), Node.js 22+, PostgreSQL 18, Redis 8 (lite mode needs only Rust + Node.js — no PG/Redis)
 - Or: use Docker for PG + Redis (`docker compose up postgres redis`)
 
 ### Setup & Run
@@ -93,14 +93,14 @@ cd web-ui && npm install && npm run dev  # → http://localhost:5173
 ### Test & Lint
 
 ```bash
-cargo test --workspace                      # 324 pass without infra (DB tests #[ignore]-gated)
-cargo test --workspace -- --include-ignored  # 575 pass with Docker PG+Redis+MinIO
+cargo test --workspace                      # 405 pass without infra (DB tests #[ignore]-gated)
+cargo test --workspace -- --include-ignored  # 674 pass + 1 known env-sensitive failure with Docker PG+Redis+MinIO (see AGENTS.md Testing)
 cargo clippy --workspace -- -D warnings      # zero warnings required
 cargo llvm-cov --workspace -- --include-ignored  # 91.56% line coverage (needs Docker PG+Redis+MinIO)
 cd web-ui && npm run build                   # tsc -b && vite build
 ```
 
-The full 575-test suite runs automatically on every PR to `main` via `.github/workflows/smoke-test.yml` (PG+Redis+MinIO service containers + clippy gate). See `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md` for the smoke test design guide.
+The full 674+1-test suite runs automatically on every PR to `main` via `.github/workflows/smoke-test.yml` (PG+Redis+MinIO service containers + clippy gate). See `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md` for the smoke test design guide.
 
 Run a single test: `cargo test -p pichost-api test_image_list`
 
@@ -110,8 +110,9 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `PICHOST_DATABASE_URL` | Yes | — | PostgreSQL connection string |
-| `PICHOST_REDIS_URL` | Yes | — | Redis connection string |
+| `PICHOST_DATABASE_MODE` | — | `postgres` | `postgres` (standard: PG+Redis+external worker) or `sqlite` (lite mode: single process, embedded worker, no Redis) |
+| `PICHOST_DATABASE_URL` | Yes | — | Connection string — PostgreSQL (`postgresql://...`) in standard mode, SQLite (`sqlite:///path/pichost.db`) in lite mode |
+| `PICHOST_REDIS_URL` | Standard mode | — | Redis connection string (not used in sqlite lite mode) |
 | `PICHOST_AUTH_JWT_SECRET` | **Yes** | — | HS256 signing key (min 32 chars) |
 | `PICHOST_SERVER_PUBLIC_URL` | Production | `http://localhost` | For OAuth callbacks and share links |
 | `PICHOST_AUTH_OAUTH_GITHUB_CLIENT_ID` | OAuth | — | GitHub OAuth App client ID |
@@ -228,13 +229,16 @@ All API error responses use `{"error": <localized message>, "code": <error key>}
 - [x] **Deployment language config** — `PICHOST_I18N_LANGUAGE` / `PICHOST_I18N_LOCALES_DIR`, admin config hot reload without restart
 - [x] **Responsive layout** — mobile-first adaptation: hamburger nav drawer (MobileNav), category filter drawer (Sheet), touch-friendly category ⋯ menu, shared Modal/ConfirmDialog with bottom-sheet on small screens, admin table card-ification, global horizontal-overflow guard, responsive gallery grid (2/3/3/4/5 columns), popover viewport clamping
 - [x] **Image detail zoom viewer** — fullscreen lightbox: wheel zoom (cursor-anchored), drag pan, double-click fit↔100%, touch pinch/drag, toolbar zoom controls, keyboard shortcuts
+- [x] **SQLite lite mode** — zero-external-dependency single-instance deployment (embedded worker), `PICHOST_DATABASE_MODE=sqlite`
 
 ## Project Structure
 
 ```
 ├── pichost-core/            Domain models, config, StorageBackend trait,
 │                            LocalStorage, RustfsStorage, GitStorage,
-│                            StorageRouter, AES-256-GCM crypto, i18n module
+│                            StorageRouter, AES-256-GCM crypto, i18n module,
+│                            db module (per-driver pools + migrations),
+│                            state module (5 state traits + SQLite impls)
 │   └── src/i18n/locales/    Message catalogs (en, zh-CN), 110 keys
 ├── pichost-api/             Axum server — routes, middleware, services,
 │                            DB pool, Redis, rate limiting, storage config CRUD,
@@ -250,10 +254,11 @@ All API error responses use `{"error": <localized message>, "code": <error key>}
 │       └── ui/              UI primitives (Button, Input, DropdownMenu)
 ├── nginx/
 │   └── nginx.conf           Reverse proxy + cache + rate limiting
-├── migrations/              10 SQL migrations (0001–0010)
+├── migrations/              10 SQL migrations (0001–0010), PostgreSQL
+├── migrations-sqlite/       11 SQL migrations (0001–0011, 0011 = lite state tables), SQLite
 ├── scripts/                 systemd services + install/uninstall + verify-release scripts
 ├── CHANGELOG.md             Keep a Changelog, linked from every GitHub Release
-├── .github/workflows/       Smoke tests (PR → 575-test suite), Release CI (v* tags → build, test, package .tar.gz)
+├── .github/workflows/       Smoke tests (PR → full suite), Release CI (v* tags → build, test, package .tar.gz)
 ├── Dockerfile.api           Multi-stage Rust build for API
 ├── Dockerfile.worker        Multi-stage Rust build for Worker
 ├── docker-compose.yml       Full stack: Nginx, API×2, Worker×2, PostgreSQL, Redis
@@ -283,11 +288,13 @@ Default compute layout: 2 API replicas (least_conn), 2 worker replicas (independ
 ### systemd (bare metal)
 
 ```bash
-sudo ./scripts/install.sh          # installs binaries to /opt/pichost, configures systemd units
+sudo ./scripts/install.sh          # interactive; installs binaries to /opt/pichost, configures systemd units
 sudo ./scripts/uninstall.sh        # removes installation and services
 ```
 
-Units: `pichost-api.service` (API) + `pichost-worker.service` (worker), run as user `pichost` with `EnvironmentFile=/etc/pichost/.env`. Release artifacts (`.tar.gz`) are built by GitHub Actions on `v*` tags. Run `bash scripts/verify-release.sh` locally before tagging — it mirrors the release build→package steps and dry-runs `install.sh` in a systemd-free container.
+`install.sh` is interactive: `--yes` for unattended install, `--mode postgres|sqlite` to force a DB mode (auto-detected otherwise). **SQLite mode needs no PostgreSQL/Redis** — `.env` gets a `sqlite://` URL, no `pichost-worker.service` is installed, and the worker runs embedded in the API process (zero external dependencies).
+
+Units: `pichost-api.service` (API) + `pichost-worker.service` (worker, standard mode only), run as user `pichost` with `EnvironmentFile=/etc/pichost/.env`. Release artifacts (`.tar.gz`) are built by GitHub Actions on `v*` tags. Run `bash scripts/verify-release.sh` locally before tagging — it mirrors the release build→package steps, dry-runs `install.sh` in a systemd-free container, and smoke-tests sqlite mode.
 
 ### Production checklist
 
