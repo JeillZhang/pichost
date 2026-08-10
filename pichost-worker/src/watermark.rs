@@ -67,8 +67,7 @@ fn load_font_arc(name: &str) -> Result<FontArc, String> {
             ))
         }
     };
-    FontArc::try_from_vec(bytes.to_vec())
-        .map_err(|_| format!("Failed to parse font: {}", name))
+    FontArc::try_from_vec(bytes.to_vec()).map_err(|_| format!("Failed to parse font: {}", name))
 }
 
 fn parse_rgba(color_str: &str) -> Result<Rgba<u8>, String> {
@@ -78,10 +77,18 @@ fn parse_rgba(color_str: &str) -> Result<Rgba<u8>, String> {
         let inner = &s[5..s.len() - 1];
         let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
         if parts.len() == 4 {
-            let r: u8 = parts[0].parse().map_err(|_| "Invalid R in rgba()".to_string())?;
-            let g: u8 = parts[1].parse().map_err(|_| "Invalid G in rgba()".to_string())?;
-            let b: u8 = parts[2].parse().map_err(|_| "Invalid B in rgba()".to_string())?;
-            let a: f64 = parts[3].parse().map_err(|_| "Invalid A in rgba()".to_string())?;
+            let r: u8 = parts[0]
+                .parse()
+                .map_err(|_| "Invalid R in rgba()".to_string())?;
+            let g: u8 = parts[1]
+                .parse()
+                .map_err(|_| "Invalid G in rgba()".to_string())?;
+            let b: u8 = parts[2]
+                .parse()
+                .map_err(|_| "Invalid B in rgba()".to_string())?;
+            let a: f64 = parts[3]
+                .parse()
+                .map_err(|_| "Invalid A in rgba()".to_string())?;
             let a_u8 = (a.clamp(0.0, 1.0) * 255.0) as u8;
             return Ok(Rgba([r, g, b, a_u8]));
         }
@@ -89,16 +96,23 @@ fn parse_rgba(color_str: &str) -> Result<Rgba<u8>, String> {
     // #RRGGBB or #RRGGBBAA
     if let Some(hex) = s.strip_prefix('#') {
         if hex.len() == 6 {
-            let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| "Invalid hex color".to_string())?;
-            let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| "Invalid hex color".to_string())?;
-            let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| "Invalid hex color".to_string())?;
+            let r =
+                u8::from_str_radix(&hex[0..2], 16).map_err(|_| "Invalid hex color".to_string())?;
+            let g =
+                u8::from_str_radix(&hex[2..4], 16).map_err(|_| "Invalid hex color".to_string())?;
+            let b =
+                u8::from_str_radix(&hex[4..6], 16).map_err(|_| "Invalid hex color".to_string())?;
             return Ok(Rgba([r, g, b, 255]));
         }
         if hex.len() == 8 {
-            let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| "Invalid hex color".to_string())?;
-            let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| "Invalid hex color".to_string())?;
-            let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| "Invalid hex color".to_string())?;
-            let a = u8::from_str_radix(&hex[6..8], 16).map_err(|_| "Invalid hex color".to_string())?;
+            let r =
+                u8::from_str_radix(&hex[0..2], 16).map_err(|_| "Invalid hex color".to_string())?;
+            let g =
+                u8::from_str_radix(&hex[2..4], 16).map_err(|_| "Invalid hex color".to_string())?;
+            let b =
+                u8::from_str_radix(&hex[4..6], 16).map_err(|_| "Invalid hex color".to_string())?;
+            let a =
+                u8::from_str_radix(&hex[6..8], 16).map_err(|_| "Invalid hex color".to_string())?;
             return Ok(Rgba([r, g, b, a]));
         }
     }
@@ -128,23 +142,19 @@ fn calculate_position(
         WatermarkPosition::TopLeft => (mx, my),
         WatermarkPosition::TopRight => (img_w as i32 - text_w as i32 - mx, my),
         WatermarkPosition::BottomLeft => (mx, img_h as i32 - text_h as i32 - my),
-        WatermarkPosition::BottomRight => {
-            (img_w as i32 - text_w as i32 - mx, img_h as i32 - text_h as i32 - my)
-        }
-        WatermarkPosition::Center => {
-            ((img_w as i32 - text_w as i32) / 2, (img_h as i32 - text_h as i32) / 2)
-        }
+        WatermarkPosition::BottomRight => (
+            img_w as i32 - text_w as i32 - mx,
+            img_h as i32 - text_h as i32 - my,
+        ),
+        WatermarkPosition::Center => (
+            (img_w as i32 - text_w as i32) / 2,
+            (img_h as i32 - text_h as i32) / 2,
+        ),
         WatermarkPosition::Tile => unreachable!(),
     }
 }
 
-fn draw_tiled(
-    canvas: &mut RgbaImage,
-    font: &FontArc,
-    text: &str,
-    font_size: f32,
-    color: Rgba<u8>,
-) {
+fn draw_tiled(canvas: &mut RgbaImage, font: &FontArc, text: &str, font_size: f32, color: Rgba<u8>) {
     let (text_w, _) = text_size(font_size, font, text);
     let text_h = font_size.ceil() as u32;
 
@@ -170,7 +180,10 @@ mod tests {
 
     #[test]
     fn test_parse_rgba_functional() {
-        assert_eq!(parse_rgba("rgba(255,0,0,0.5)").unwrap(), Rgba([255, 0, 0, 127]));
+        assert_eq!(
+            parse_rgba("rgba(255,0,0,0.5)").unwrap(),
+            Rgba([255, 0, 0, 127])
+        );
     }
 
     #[test]
@@ -223,10 +236,9 @@ mod tests {
     #[test]
     fn test_invalid_font_returns_err() {
         let img = DynamicImage::ImageRgba8(RgbaImage::new(100, 100));
-        let config: WatermarkConfig = serde_json::from_str(
-            r#"{"enabled":true,"text":"hello","font":"NonExistentFont"}"#,
-        )
-        .unwrap();
+        let config: WatermarkConfig =
+            serde_json::from_str(r#"{"enabled":true,"text":"hello","font":"NonExistentFont"}"#)
+                .unwrap();
         let result = apply_watermark(&img, &config);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown font"));
@@ -235,13 +247,15 @@ mod tests {
     #[test]
     fn test_all_positions_produce_output() {
         let positions = [
-            "top-left", "top-right", "bottom-left", "bottom-right", "center", "tile",
+            "top-left",
+            "top-right",
+            "bottom-left",
+            "bottom-right",
+            "center",
+            "tile",
         ];
         for pos in &positions {
-            let json = format!(
-                r#"{{"enabled":true,"text":"pos","position":"{}"}}"#,
-                pos
-            );
+            let json = format!(r#"{{"enabled":true,"text":"pos","position":"{}"}}"#, pos);
             let config: WatermarkConfig = serde_json::from_str(&json).unwrap();
             let img = DynamicImage::ImageRgba8(RgbaImage::new(100, 100));
             let result = apply_watermark(&img, &config);
@@ -259,7 +273,14 @@ mod tests {
     fn test_calculate_position_bottom_right() {
         let font = load_font_arc("NotoSansSC-Regular").unwrap();
         let (x, y) = calculate_position(
-            200, 100, "hello", 24.0, &font, &WatermarkPosition::BottomRight, 10, 10,
+            200,
+            100,
+            "hello",
+            24.0,
+            &font,
+            &WatermarkPosition::BottomRight,
+            10,
+            10,
         );
         assert!(x >= 0);
         assert!(y >= 0);
@@ -269,7 +290,14 @@ mod tests {
     fn test_calculate_position_center() {
         let font = load_font_arc("NotoSansSC-Regular").unwrap();
         let (x, y) = calculate_position(
-            200, 100, "center", 24.0, &font, &WatermarkPosition::Center, 0, 0,
+            200,
+            100,
+            "center",
+            24.0,
+            &font,
+            &WatermarkPosition::Center,
+            0,
+            0,
         );
         assert!(x >= 0);
         assert!(y >= 0);
@@ -324,7 +352,10 @@ mod tests {
 
     #[test]
     fn test_parse_rgba_with_whitespace() {
-        assert_eq!(parse_rgba("rgba( 1, 2 , 3, 0.5 )").unwrap(), Rgba([1, 2, 3, 127]));
+        assert_eq!(
+            parse_rgba("rgba( 1, 2 , 3, 0.5 )").unwrap(),
+            Rgba([1, 2, 3, 127])
+        );
     }
 
     #[test]

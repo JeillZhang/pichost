@@ -61,10 +61,7 @@ impl pichost_core::state::Queue for RedisQueue {
             .map_err(to_state_error)
     }
 
-    async fn dequeue(
-        &self,
-        timeout: Duration,
-    ) -> Result<Option<TaskPayload>, StateQueueError> {
+    async fn dequeue(&self, timeout: Duration) -> Result<Option<TaskPayload>, StateQueueError> {
         dequeue_task(&self.pool, timeout.as_secs())
             .await
             .map_err(to_state_error)
@@ -169,7 +166,8 @@ pub async fn dequeue_task(redis: &Pool, timeout: u64) -> Result<Option<TaskPaylo
         None => {
             // Orphaned task — data hash was never written. Clean up and skip.
             conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, task_id.to_string())
-                .await.map_err(QueueError::Redis)?;
+                .await
+                .map_err(QueueError::Redis)?;
             tracing::warn!(%task_id, "cleaned up orphaned task (no data hash)");
             return Err(QueueError::MissingData(task_id));
         }
@@ -319,18 +317,11 @@ pub async fn recover_stale_tasks(
 /// Parse a RFC 3339 timestamp string from Redis into a UTC DateTime.
 ///
 /// Returns `None` (and logs a warning) if the string is not a valid timestamp.
-fn parse_task_updated_at(
-    updated_at_str: &str,
-    task_id: Uuid,
-) -> Option<chrono::DateTime<Utc>> {
+fn parse_task_updated_at(updated_at_str: &str, task_id: Uuid) -> Option<chrono::DateTime<Utc>> {
     match chrono::DateTime::parse_from_rfc3339(updated_at_str) {
         Ok(dt) => Some(dt.with_timezone(&Utc)),
         Err(_) => {
-            tracing::warn!(
-                "invalid timestamp for task {}: {}",
-                task_id,
-                updated_at_str
-            );
+            tracing::warn!("invalid timestamp for task {}: {}", task_id, updated_at_str);
             None
         }
     }
@@ -506,14 +497,18 @@ mod tests {
         let _guard = REDIS_LOCK.lock().await;
         let pool = test_pool();
         let mut conn = pool.get().await.unwrap();
-        conn.lpush::<_, _, ()>(KEY_PENDING, "not-a-uuid").await.unwrap();
+        conn.lpush::<_, _, ()>(KEY_PENDING, "not-a-uuid")
+            .await
+            .unwrap();
         drop(conn);
         assert!(matches!(
             dequeue_task(&pool, 0).await,
             Err(QueueError::InvalidUuid(_))
         ));
         let mut conn = pool.get().await.unwrap();
-        conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, "not-a-uuid").await.unwrap();
+        conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, "not-a-uuid")
+            .await
+            .unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -523,7 +518,9 @@ mod tests {
         let pool = test_pool();
         let orphan_id = Uuid::new_v4();
         let mut conn = pool.get().await.unwrap();
-        conn.lpush::<_, _, ()>(KEY_PENDING, orphan_id.to_string()).await.unwrap();
+        conn.lpush::<_, _, ()>(KEY_PENDING, orphan_id.to_string())
+            .await
+            .unwrap();
         drop(conn);
         assert!(matches!(
             dequeue_task(&pool, 0).await,
@@ -541,7 +538,10 @@ mod tests {
         let pool = test_pool();
         let task = sample_task();
         let got = enqueue_and_dequeue_own(&pool, &task).await;
-        assert_eq!(nack_task(&pool, &got, "boom").await.unwrap(), NackAction::Retry);
+        assert_eq!(
+            nack_task(&pool, &got, "boom").await.unwrap(),
+            NackAction::Retry
+        );
         let mut conn = pool.get().await.unwrap();
         let key = task_key(task.task_id);
         let status: Option<String> = conn.hget(&key, "status").await.unwrap();
@@ -566,13 +566,18 @@ mod tests {
         task.retry_count = 3;
         task.max_retries = 3;
         let got = enqueue_and_dequeue_own(&pool, &task).await;
-        assert_eq!(nack_task(&pool, &got, "fatal").await.unwrap(), NackAction::DeadLetter);
+        assert_eq!(
+            nack_task(&pool, &got, "fatal").await.unwrap(),
+            NackAction::DeadLetter
+        );
         let mut conn = pool.get().await.unwrap();
         let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
         assert_eq!(status.as_deref(), Some("dead"));
         let dead: Vec<String> = conn.lrange(KEY_DEAD, 0, -1).await.unwrap();
         assert!(dead.contains(&task.task_id.to_string()));
-        conn.lrem::<_, _, ()>(KEY_DEAD, 1, task.task_id.to_string()).await.unwrap();
+        conn.lrem::<_, _, ()>(KEY_DEAD, 1, task.task_id.to_string())
+            .await
+            .unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -594,13 +599,17 @@ mod tests {
         conn.lpush::<_, _, ()>(KEY_PROCESSING, Uuid::new_v4().to_string())
             .await
             .unwrap();
-        conn.lpush::<_, _, ()>(KEY_PROCESSING, "garbage").await.unwrap();
+        conn.lpush::<_, _, ()>(KEY_PROCESSING, "garbage")
+            .await
+            .unwrap();
         drop(conn);
         let recovered = recover_stale_tasks(&pool, 10).await.unwrap();
         assert!(recovered.iter().any(|t| t.task_id == task.task_id));
         drain_own(&pool, task.task_id).await;
         let mut conn = pool.get().await.unwrap();
-        conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, "garbage").await.unwrap();
+        conn.lrem::<_, _, ()>(KEY_PROCESSING, 1, "garbage")
+            .await
+            .unwrap();
         let orphan: Vec<String> = conn.lrange(KEY_PROCESSING, 0, -1).await.unwrap();
         for id in orphan {
             if Uuid::parse_str(&id).is_ok() {

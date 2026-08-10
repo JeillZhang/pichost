@@ -106,7 +106,9 @@ mod tests {
 
     impl MockBackend {
         fn new() -> Self {
-            Self { items: Mutex::new(Vec::new()) }
+            Self {
+                items: Mutex::new(Vec::new()),
+            }
         }
         fn stored(&self, key: &str) -> Option<(Vec<u8>, String)> {
             self.items
@@ -149,9 +151,7 @@ mod tests {
             'l1: 'a,
             Self: 'a,
         {
-            Box::pin(async move {
-                Ok(self.stored(key).map(|(d, _)| d).unwrap_or_default())
-            })
+            Box::pin(async move { Ok(self.stored(key).map(|(d, _)| d).unwrap_or_default()) })
         }
         fn delete<'l0, 'l1, 'a>(
             &'l0 self,
@@ -176,9 +176,7 @@ mod tests {
             'l1: 'a,
             Self: 'a,
         {
-            Box::pin(async move {
-                Ok(self.items.lock().unwrap().iter().any(|(k, _, _)| k == key))
-            })
+            Box::pin(async move { Ok(self.items.lock().unwrap().iter().any(|(k, _, _)| k == key)) })
         }
         fn public_url(&self, key: &str) -> String {
             format!("/u/{key}")
@@ -229,7 +227,12 @@ mod tests {
 
     #[test]
     fn test_should_webp() {
-        for fmt in [ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::Avif, ImageFormat::Bmp] {
+        for fmt in [
+            ImageFormat::Png,
+            ImageFormat::Jpeg,
+            ImageFormat::Avif,
+            ImageFormat::Bmp,
+        ] {
             assert!(should_webp(fmt), "{fmt:?}");
         }
         for fmt in [ImageFormat::Gif, ImageFormat::WebP] {
@@ -241,8 +244,9 @@ mod tests {
     async fn test_generate_thumbnail_gif_skipped() {
         let backend = MockBackend::new();
         let img = DynamicImage::new_rgba8(10, 10);
-        let (written, mime) =
-            generate_thumbnail(&img, ImageFormat::Gif, &backend, "t", 64, 80).await.unwrap();
+        let (written, mime) = generate_thumbnail(&img, ImageFormat::Gif, &backend, "t", 64, 80)
+            .await
+            .unwrap();
         assert_eq!((written, mime.as_str()), (false, ""));
         assert!(backend.stored("t").is_none());
     }
@@ -251,8 +255,9 @@ mod tests {
     async fn test_generate_thumbnail_png_alpha() {
         let backend = MockBackend::new();
         let img = DynamicImage::new_rgba8(100, 200);
-        let (written, mime) =
-            generate_thumbnail(&img, ImageFormat::Png, &backend, "t", 64, 80).await.unwrap();
+        let (written, mime) = generate_thumbnail(&img, ImageFormat::Png, &backend, "t", 64, 80)
+            .await
+            .unwrap();
         assert_eq!((written, mime.as_str()), (true, "image/png"));
         let (bytes, ct) = backend.stored("t").expect("thumb stored");
         assert_eq!(ct, "image/png");
@@ -265,8 +270,9 @@ mod tests {
     async fn test_generate_thumbnail_png_no_alpha_jpeg() {
         let backend = MockBackend::new();
         let img = DynamicImage::new_rgb8(100, 100);
-        let (written, mime) =
-            generate_thumbnail(&img, ImageFormat::Png, &backend, "t", 50, 80).await.unwrap();
+        let (written, mime) = generate_thumbnail(&img, ImageFormat::Png, &backend, "t", 50, 80)
+            .await
+            .unwrap();
         assert_eq!((written, mime.as_str()), (true, "image/jpeg"));
         let (bytes, ct) = backend.stored("t").expect("thumb stored");
         assert_eq!(ct, "image/jpeg");
@@ -277,8 +283,9 @@ mod tests {
     async fn test_convert_to_webp_unsupported() {
         let backend = MockBackend::new();
         let img = DynamicImage::new_rgba8(10, 10);
-        let (written, mime) =
-            convert_to_webp(&img, ImageFormat::Gif, &backend, "w", 82.0).await.unwrap();
+        let (written, mime) = convert_to_webp(&img, ImageFormat::Gif, &backend, "w", 82.0)
+            .await
+            .unwrap();
         assert_eq!((written, mime.as_str()), (false, ""));
         assert!(backend.stored("w").is_none());
     }
@@ -287,8 +294,9 @@ mod tests {
     async fn test_convert_to_webp_png() {
         let backend = MockBackend::new();
         let img = DynamicImage::new_rgba8(8, 8);
-        let (written, mime) =
-            convert_to_webp(&img, ImageFormat::Png, &backend, "w", 82.0).await.unwrap();
+        let (written, mime) = convert_to_webp(&img, ImageFormat::Png, &backend, "w", 82.0)
+            .await
+            .unwrap();
         assert_eq!((written, mime.as_str()), (true, "image/webp"));
         let (bytes, ct) = backend.stored("w").expect("webp stored");
         assert_eq!(ct, "image/webp");
@@ -302,8 +310,9 @@ mod tests {
         for fmt in [ImageFormat::Avif, ImageFormat::Bmp] {
             let backend = MockBackend::new();
             let img = DynamicImage::new_rgba8(6, 6);
-            let (written, mime) =
-                convert_to_webp(&img, fmt, &backend, "w", 82.0).await.unwrap();
+            let (written, mime) = convert_to_webp(&img, fmt, &backend, "w", 82.0)
+                .await
+                .unwrap();
             assert_eq!((written, mime.as_str()), (true, "image/webp"), "{fmt:?}");
             let (bytes, ct) = backend.stored("w").unwrap();
             assert_eq!(ct, "image/webp");
@@ -374,8 +383,9 @@ mod tests {
     async fn test_generate_thumbnail_jpeg_source() {
         let backend = MockBackend::new();
         let img = DynamicImage::new_rgb8(80, 40);
-        let (written, mime) =
-            generate_thumbnail(&img, ImageFormat::Jpeg, &backend, "tj", 32, 90).await.unwrap();
+        let (written, mime) = generate_thumbnail(&img, ImageFormat::Jpeg, &backend, "tj", 32, 90)
+            .await
+            .unwrap();
         assert_eq!((written, mime.as_str()), (true, "image/jpeg"));
         let (bytes, ct) = backend.stored("tj").expect("thumb stored");
         assert_eq!(ct, "image/jpeg");
@@ -388,8 +398,9 @@ mod tests {
     async fn test_generate_thumbnail_upscale() {
         let backend = MockBackend::new();
         let img = DynamicImage::new_rgb8(100, 50);
-        let (written, mime) =
-            generate_thumbnail(&img, ImageFormat::Jpeg, &backend, "tu", 200, 80).await.unwrap();
+        let (written, mime) = generate_thumbnail(&img, ImageFormat::Jpeg, &backend, "tu", 200, 80)
+            .await
+            .unwrap();
         assert_eq!((written, mime.as_str()), (true, "image/jpeg"));
         let (bytes, _) = backend.stored("tu").expect("thumb stored");
         let out = image::load_from_memory(&bytes).unwrap();

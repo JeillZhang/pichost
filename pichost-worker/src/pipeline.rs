@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use pichost_core::DbType;
+use std::sync::Arc;
 
 use pichost_core::config::AppConfig;
 use pichost_core::crypto::decode_key;
@@ -41,7 +41,8 @@ async fn load_watermarked_image<DB: DbType>(
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
@@ -49,8 +50,7 @@ where
     let watermark_config = fetch_watermark_config(pool, task).await?;
     match watermark_config {
         Some(ref wm_cfg) if wm_cfg.enabled && !wm_cfg.text.is_empty() => {
-            crate::watermark::apply_watermark(&raw_img, wm_cfg)
-                .map_err(PipelineError::Watermark)
+            crate::watermark::apply_watermark(&raw_img, wm_cfg).map_err(PipelineError::Watermark)
         }
         _ => Ok(raw_img),
     }
@@ -64,7 +64,8 @@ where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     (Option<serde_json::Value>,): crate::db::DbRow<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
@@ -97,8 +98,10 @@ where
     pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
     usize: sqlx::ColumnIndex<DB::Row>,
@@ -115,15 +118,20 @@ where
     let thumb_key = format!("{}/thumb.{}", task.user_id, task.image_id);
     let webp_key = format!("{}/webp.{}", task.user_id, task.image_id);
 
-    let (thumb_written, webp_written) = process_image_variants(
-        &img, fmt, backend.as_ref(), &thumb_key, &webp_key, config,
-    )
-    .await?;
+    let (thumb_written, webp_written) =
+        process_image_variants(&img, fmt, backend.as_ref(), &thumb_key, &webp_key, config).await?;
 
     let public_url = config.server.public_url.trim_end_matches('/');
     update_image_record(
-        pool, task, width, height, &thumb_key, &webp_key,
-        thumb_written, webp_written, public_url,
+        pool,
+        task,
+        width,
+        height,
+        &thumb_key,
+        &webp_key,
+        thumb_written,
+        webp_written,
+        public_url,
     )
     .await?;
 
@@ -154,8 +162,10 @@ where
     pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
@@ -182,8 +192,10 @@ where
     pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
@@ -196,14 +208,9 @@ where
     .bind(config_id)
     .fetch_optional(pool)
     .await
-    .map_err(|e| {
-        PipelineError::BackendResolution(format!("config db query failed: {e}"))
-    })?
+    .map_err(|e| PipelineError::BackendResolution(format!("config db query failed: {e}")))?
     .ok_or_else(|| {
-        PipelineError::BackendResolution(format!(
-            "storage config {} not found",
-            config_id
-        ))
+        PipelineError::BackendResolution(format!("storage config {} not found", config_id))
     })
 }
 
@@ -316,7 +323,11 @@ where
 }
 
 fn some_if(flag: bool, val: &str) -> Option<&str> {
-    if flag { Some(val) } else { None }
+    if flag {
+        Some(val)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -336,7 +347,9 @@ mod tests {
 
     impl MockBackend {
         fn new() -> Self {
-            Self { items: Mutex::new(Vec::new()) }
+            Self {
+                items: Mutex::new(Vec::new()),
+            }
         }
         fn stored(&self, key: &str) -> Option<Vec<u8>> {
             self.items
@@ -363,7 +376,10 @@ mod tests {
             Self: 'a,
         {
             Box::pin(async move {
-                self.items.lock().unwrap().push((key.to_string(), data.to_vec()));
+                self.items
+                    .lock()
+                    .unwrap()
+                    .push((key.to_string(), data.to_vec()));
                 Ok(key.to_string())
             })
         }
@@ -376,9 +392,7 @@ mod tests {
             'l1: 'a,
             Self: 'a,
         {
-            Box::pin(async move {
-                Ok(self.stored(key).unwrap_or_default())
-            })
+            Box::pin(async move { Ok(self.stored(key).unwrap_or_default()) })
         }
         fn delete<'l0, 'l1, 'a>(
             &'l0 self,
@@ -403,9 +417,7 @@ mod tests {
             'l1: 'a,
             Self: 'a,
         {
-            Box::pin(async move {
-                Ok(self.items.lock().unwrap().iter().any(|(k, _)| k == key))
-            })
+            Box::pin(async move { Ok(self.items.lock().unwrap().iter().any(|(k, _)| k == key)) })
         }
         fn public_url(&self, key: &str) -> String {
             format!("/u/{key}")
@@ -472,7 +484,10 @@ mod tests {
     #[tokio::test]
     async fn test_read_source_image_ok() {
         let backend = MockBackend::new();
-        backend.put("source.png", &png_bytes(), "image/png").await.unwrap();
+        backend
+            .put("source.png", &png_bytes(), "image/png")
+            .await
+            .unwrap();
         let task = sample_task();
         let (img, fmt, bytes) = read_source_image(&backend, &task).await.unwrap();
         assert_eq!(fmt, image::ImageFormat::Png);
@@ -483,7 +498,10 @@ mod tests {
     #[tokio::test]
     async fn test_read_source_image_decode_error() {
         let backend = MockBackend::new();
-        backend.put("bad", b"not an image at all", "image/png").await.unwrap();
+        backend
+            .put("bad", b"not an image at all", "image/png")
+            .await
+            .unwrap();
         let task = sample_task();
         let err = read_source_image(&backend, &task).await.unwrap_err();
         assert!(matches!(err, PipelineError::Decode(_)));
@@ -531,14 +549,38 @@ mod tests {
 
     #[test]
     fn test_pipeline_error_display() {
-        assert_eq!(PipelineError::StorageRead("r".into()).to_string(), "storage read failed: r");
-        assert_eq!(PipelineError::StorageWrite("w".into()).to_string(), "storage write failed: w");
-        assert_eq!(PipelineError::Decode("d".into()).to_string(), "image decode failed: d");
-        assert_eq!(PipelineError::Thumbnail("t".into()).to_string(), "thumbnail generation failed: t");
-        assert_eq!(PipelineError::Webp("v".into()).to_string(), "webp conversion failed: v");
-        assert_eq!(PipelineError::Watermark("m".into()).to_string(), "watermark error: m");
-        assert_eq!(PipelineError::Database("b".into()).to_string(), "database update failed: b");
-        assert_eq!(PipelineError::BackendResolution("z".into()).to_string(), "backend resolution failed: z");
+        assert_eq!(
+            PipelineError::StorageRead("r".into()).to_string(),
+            "storage read failed: r"
+        );
+        assert_eq!(
+            PipelineError::StorageWrite("w".into()).to_string(),
+            "storage write failed: w"
+        );
+        assert_eq!(
+            PipelineError::Decode("d".into()).to_string(),
+            "image decode failed: d"
+        );
+        assert_eq!(
+            PipelineError::Thumbnail("t".into()).to_string(),
+            "thumbnail generation failed: t"
+        );
+        assert_eq!(
+            PipelineError::Webp("v".into()).to_string(),
+            "webp conversion failed: v"
+        );
+        assert_eq!(
+            PipelineError::Watermark("m".into()).to_string(),
+            "watermark error: m"
+        );
+        assert_eq!(
+            PipelineError::Database("b".into()).to_string(),
+            "database update failed: b"
+        );
+        assert_eq!(
+            PipelineError::BackendResolution("z".into()).to_string(),
+            "backend resolution failed: z"
+        );
     }
 
     #[tokio::test]
@@ -576,14 +618,16 @@ mod tests {
         watermark: Option<serde_json::Value>,
     ) -> uuid::Uuid
     where
-    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
-    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
-    Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
-    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-{
+        for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+        for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+        Option<serde_json::Value>:
+            for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+        String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+        sqlx::types::Json<serde_json::Value>:
+            for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+        for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+        uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    {
         let user_id = uuid::Uuid::new_v4();
         sqlx::query(
             "INSERT INTO users (id, username, password_hash, watermark_config) \
@@ -600,11 +644,11 @@ mod tests {
 
     async fn insert_image<DB: DbType>(pool: &Pool<DB>, user_id: uuid::Uuid) -> uuid::Uuid
     where
-    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
-    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
-    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-{
+        for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+        for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+        String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+        uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    {
         let image_id = uuid::Uuid::new_v4();
         let pk = format!("{:x}", image_id)[..16].to_string();
         sqlx::query(
@@ -624,10 +668,10 @@ mod tests {
 
     async fn cleanup_user<DB: DbType>(pool: &Pool<DB>, user_id: uuid::Uuid)
     where
-    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
-    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
-    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-{
+        for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+        for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+        uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    {
         sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(user_id)
             .execute(pool)
@@ -702,11 +746,9 @@ mod tests {
     async fn test_fetch_watermark_config_none_and_invalid() {
         let pool = test_pg_pool().await;
         let plain = insert_user_with_watermark(&pool, None).await;
-        let bad = insert_user_with_watermark(
-            &pool,
-            Some(serde_json::json!({"enabled": "not-a-bool"})),
-        )
-        .await;
+        let bad =
+            insert_user_with_watermark(&pool, Some(serde_json::json!({"enabled": "not-a-bool"})))
+                .await;
         let t1 = task_for(plain, uuid::Uuid::new_v4());
         let t2 = task_for(bad, uuid::Uuid::new_v4());
         assert!(fetch_watermark_config(&pool, &t1).await.unwrap().is_none());
@@ -726,7 +768,9 @@ mod tests {
         .await;
         let task = task_for(user_id, uuid::Uuid::new_v4());
         let raw = canvas(200, 100);
-        let out = load_watermarked_image(&pool, &task, raw.clone()).await.unwrap();
+        let out = load_watermarked_image(&pool, &task, raw.clone())
+            .await
+            .unwrap();
         assert_ne!(out.to_rgba8().into_raw(), raw.to_rgba8().into_raw());
         cleanup_user(&pool, user_id).await;
     }
@@ -742,7 +786,9 @@ mod tests {
         .await;
         let task = task_for(user_id, uuid::Uuid::new_v4());
         let raw = canvas(64, 64);
-        let out = load_watermarked_image(&pool, &task, raw.clone()).await.unwrap();
+        let out = load_watermarked_image(&pool, &task, raw.clone())
+            .await
+            .unwrap();
         assert_eq!(out.to_rgba8().into_raw(), raw.to_rgba8().into_raw());
         cleanup_user(&pool, user_id).await;
     }
@@ -755,7 +801,14 @@ mod tests {
         let image_id = insert_image(&pool, user_id).await;
         let task = task_for(user_id, image_id);
         update_image_record(
-            &pool, &task, 200, 100, "t/thumb", "t/webp", true, true,
+            &pool,
+            &task,
+            200,
+            100,
+            "t/thumb",
+            "t/webp",
+            true,
+            true,
             "http://localhost",
         )
         .await
@@ -770,9 +823,17 @@ mod tests {
         .unwrap();
         assert_eq!((row.0, row.1), (200, 100));
         assert_eq!(row.2.as_deref(), Some("t/thumb"));
-        assert!(row.3.as_deref().unwrap().starts_with("http://localhost/u/thumb/"));
+        assert!(row
+            .3
+            .as_deref()
+            .unwrap()
+            .starts_with("http://localhost/u/thumb/"));
         assert_eq!(row.4.as_deref(), Some("t/webp"));
-        assert!(row.5.as_deref().unwrap().starts_with("http://localhost/u/webp/"));
+        assert!(row
+            .5
+            .as_deref()
+            .unwrap()
+            .starts_with("http://localhost/u/webp/"));
         assert_eq!(row.6, "ready");
         cleanup_user(&pool, user_id).await;
     }
@@ -784,31 +845,37 @@ mod tests {
         let user_id = insert_user_with_watermark(&pool, None).await;
         let image_id = insert_image(&pool, user_id).await;
         let task = task_for(user_id, image_id);
-        update_image_record(&pool, &task, 10, 20, "t", "w", false, false, "http://localhost")
-            .await
-            .unwrap();
-        let row: (Option<String>, Option<String>, String) = sqlx::query_as(
-            "SELECT thumbnail_key, webp_key, status FROM images WHERE id = $1",
+        update_image_record(
+            &pool,
+            &task,
+            10,
+            20,
+            "t",
+            "w",
+            false,
+            false,
+            "http://localhost",
         )
-        .bind(image_id)
-        .fetch_one(&pool)
         .await
         .unwrap();
+        let row: (Option<String>, Option<String>, String) =
+            sqlx::query_as("SELECT thumbnail_key, webp_key, status FROM images WHERE id = $1")
+                .bind(image_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert!(row.0.is_none());
         assert!(row.1.is_none());
         assert_eq!(row.2, "ready");
         cleanup_user(&pool, user_id).await;
     }
 
-    async fn insert_storage_config<DB: DbType>(
-        pool: &Pool<DB>,
-        user_id: uuid::Uuid,
-    ) -> uuid::Uuid
+    async fn insert_storage_config<DB: DbType>(pool: &Pool<DB>, user_id: uuid::Uuid) -> uuid::Uuid
     where
-    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
-    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
-    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-{
+        for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+        for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+        uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    {
         let config_id = uuid::Uuid::new_v4();
         sqlx::query(
             "INSERT INTO user_storage_configs (id, user_id, name, provider, config) \
@@ -831,7 +898,9 @@ mod tests {
         let cfg = fetch_storage_config(&pool, &config_id).await.unwrap();
         assert_eq!(cfg.id, config_id);
         assert_eq!(cfg.provider, "local");
-        let err = fetch_storage_config(&pool, &uuid::Uuid::new_v4()).await.unwrap_err();
+        let err = fetch_storage_config(&pool, &uuid::Uuid::new_v4())
+            .await
+            .unwrap_err();
         assert!(matches!(err, PipelineError::BackendResolution(_)));
         cleanup_user(&pool, user_id).await;
     }
@@ -852,7 +921,9 @@ mod tests {
 
         let mut with_cfg = task_for(user_id, uuid::Uuid::new_v4());
         with_cfg.storage_config_id = Some(config_id);
-        let backend = resolve_backend(&pool, &router, &cfg, &with_cfg).await.unwrap();
+        let backend = resolve_backend(&pool, &router, &cfg, &with_cfg)
+            .await
+            .unwrap();
         assert_eq!(backend.backend_name(), "local");
         cleanup_user(&pool, user_id).await;
     }
