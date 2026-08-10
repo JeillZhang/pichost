@@ -1,5 +1,7 @@
 use crate::db::{create_sqlite_pool, run_sqlite_migrations};
+use crate::state::sqlite_blacklist::SqliteBlacklist;
 use crate::state::sqlite_queue::SqliteQueue;
+use crate::state::sqlite_rate_limiter::SqliteRateLimiter;
 use crate::state::*;
 use std::time::Duration;
 
@@ -50,4 +52,32 @@ async fn sqlite_queue_claim_ack_cycle() {
     q.ack(p.task_id).await.unwrap();
     let third = q.dequeue(Duration::from_millis(50)).await.unwrap();
     assert!(third.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_blacklist_and_rate_limiter() {
+    let pool = create_sqlite_pool("sqlite::memory:", 5).await.unwrap();
+    run_sqlite_migrations(&pool).await.unwrap();
+
+    let bl = SqliteBlacklist::new(pool.clone());
+    assert!(!bl.check("jti-1").await.unwrap());
+    bl.revoke("jti-1", Duration::from_secs(60)).await.unwrap();
+    assert!(bl.check("jti-1").await.unwrap());
+
+    let rl = SqliteRateLimiter::new(pool);
+    let r1 = rl
+        .check("auth", "1.2.3.4", 2, Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert!(r1.allowed);
+    let _r2 = rl
+        .check("auth", "1.2.3.4", 2, Duration::from_secs(60))
+        .await
+        .unwrap();
+    let r3 = rl
+        .check("auth", "1.2.3.4", 2, Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert!(!r3.allowed);
+    assert!(r3.retry_after > 0);
 }
