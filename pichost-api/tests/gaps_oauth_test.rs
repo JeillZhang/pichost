@@ -76,6 +76,11 @@ async fn oauth_app() -> OAuthApp {
         blacklist: Arc::new(pichost_api::middleware::auth::RedisBlacklist::new(
             Cache::new(cache.get_pool()),
         )),
+        rate_limiter: Arc::new(
+            pichost_api::middleware::rate_limit::RedisRateLimiter::new(Cache::new(
+                cache.get_pool(),
+            )),
+        ),
         cache,
         config,
         router: storage_router,

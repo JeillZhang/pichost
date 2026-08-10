@@ -411,8 +411,13 @@ mod tests {
             pool,
             cache: Arc::new(crate::cache::Cache::new(cache_pool.clone())),
             blacklist: Arc::new(crate::middleware::auth::RedisBlacklist::new(
-                crate::cache::Cache::new(cache_pool),
+                crate::cache::Cache::new(cache_pool.clone()),
             )),
+            rate_limiter: Arc::new(
+                crate::middleware::rate_limit::RedisRateLimiter::new(crate::cache::Cache::new(
+                    cache_pool,
+                )),
+            ),
             config: Arc::new(AppConfig::default()),
             router: Arc::new(StorageRouter::new(std::collections::HashMap::new(), "local".into())),
         }
@@ -431,8 +436,13 @@ mod tests {
             pool,
             cache: Arc::new(crate::cache::Cache::new(cache_pool.clone())),
             blacklist: Arc::new(crate::middleware::auth::RedisBlacklist::new(
-                crate::cache::Cache::new(cache_pool),
+                crate::cache::Cache::new(cache_pool.clone()),
             )),
+            rate_limiter: Arc::new(
+                crate::middleware::rate_limit::RedisRateLimiter::new(crate::cache::Cache::new(
+                    cache_pool,
+                )),
+            ),
             config: Arc::new(AppConfig::default()),
             router: Arc::new(StorageRouter::new(std::collections::HashMap::new(), "local".into())),
         }

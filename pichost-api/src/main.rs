@@ -30,8 +30,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pool,
         cache,
         blacklist: Arc::new(pichost_api::middleware::auth::RedisBlacklist::new(
-            cache::Cache::new(cache_pool),
+            cache::Cache::new(cache_pool.clone()),
         )),
+        rate_limiter: Arc::new(
+            pichost_api::middleware::rate_limit::RedisRateLimiter::new(cache::Cache::new(
+                cache_pool,
+            )),
+        ),
         config: Arc::new(config),
         router,
     });

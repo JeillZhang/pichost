@@ -307,7 +307,10 @@ mod tests {
                 .await
                 .unwrap(),
             cache: Arc::new(Cache::new(cache_pool.clone())),
-            blacklist: Arc::new(RedisBlacklist::new(Cache::new(cache_pool))),
+            blacklist: Arc::new(RedisBlacklist::new(Cache::new(cache_pool.clone()))),
+            rate_limiter: Arc::new(crate::middleware::rate_limit::RedisRateLimiter::new(
+                Cache::new(cache_pool),
+            )),
             config: Arc::new(cfg),
             router: Arc::new(StorageRouter::new(
                 std::collections::HashMap::new(),

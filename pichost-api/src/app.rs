@@ -26,6 +26,7 @@ pub struct AppState<DB: DbType> {
     pub pool: Pool<DB>,
     pub cache: Arc<Cache>,
     pub blacklist: Arc<dyn pichost_core::state::Blacklist>,
+    pub rate_limiter: Arc<dyn pichost_core::state::RateLimiter>,
     pub config: Arc<AppConfig>,
     pub router: Arc<StorageRouter>,
 }
@@ -503,8 +504,11 @@ mod tests {
                 .unwrap(),
             cache: Arc::new(Cache::new(cache_pool.clone())),
             blacklist: Arc::new(crate::middleware::auth::RedisBlacklist::new(Cache::new(
-                cache_pool,
+                cache_pool.clone(),
             ))),
+            rate_limiter: Arc::new(crate::middleware::rate_limit::RedisRateLimiter::new(
+                Cache::new(cache_pool),
+            )),
             config: Arc::new(AppConfig::default()),
             router: Arc::new(StorageRouter::new(HashMap::new(), "local".into())),
         })
