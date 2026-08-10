@@ -18,12 +18,14 @@ impl SqliteQueue {
 impl Queue for SqliteQueue {
     async fn enqueue(&self, p: &TaskPayload) -> Result<(), QueueError> {
         let json = serde_json::to_string(p).map_err(|e| QueueError::Other(e.to_string()))?;
-        sqlx::query("INSERT INTO pending_tasks (task_id, payload_json, status) VALUES (?, ?, 'pending')")
-            .bind(p.task_id.to_string())
-            .bind(json)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| QueueError::Other(e.to_string()))?;
+        sqlx::query(
+            "INSERT INTO pending_tasks (task_id, payload_json, status) VALUES (?, ?, 'pending')",
+        )
+        .bind(p.task_id.to_string())
+        .bind(json)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| QueueError::Other(e.to_string()))?;
         Ok(())
     }
 

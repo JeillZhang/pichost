@@ -14,24 +14,17 @@ impl SqliteInviteStore {
 
 #[async_trait::async_trait]
 impl InviteStore for SqliteInviteStore {
-    async fn create(
-        &self,
-        code: &str,
-        created_by: Uuid,
-        ttl_secs: u64,
-    ) -> Result<(), InviteError> {
+    async fn create(&self, code: &str, created_by: Uuid, ttl_secs: u64) -> Result<(), InviteError> {
         let expires = (chrono::Utc::now() + chrono::Duration::seconds(ttl_secs as i64))
             .format("%Y-%m-%dT%H:%M:%fZ")
             .to_string();
-        sqlx::query(
-            "INSERT INTO invite_codes (code, created_by, expires_at) VALUES (?, ?, ?)",
-        )
-        .bind(code)
-        .bind(created_by.to_string())
-        .bind(expires)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| InviteError::Other(e.to_string()))?;
+        sqlx::query("INSERT INTO invite_codes (code, created_by, expires_at) VALUES (?, ?, ?)")
+            .bind(code)
+            .bind(created_by.to_string())
+            .bind(expires)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| InviteError::Other(e.to_string()))?;
         Ok(())
     }
 
@@ -73,28 +66,29 @@ impl InviteStore for SqliteInviteStore {
         .await
         .map(|rows| {
             rows.into_iter()
-                .map(|(code, created_by, created_at, expires_at, used_by)| InviteCodeInfo {
-                    code,
-                    created_by: created_by
-                        .and_then(|s| Uuid::parse_str(&s).ok())
-                        .filter(|u| !u.is_nil()),
-                    created_at,
-                    expires_at,
-                    used_by: used_by.and_then(|s| Uuid::parse_str(&s).ok()),
-                })
+                .map(
+                    |(code, created_by, created_at, expires_at, used_by)| InviteCodeInfo {
+                        code,
+                        created_by: created_by
+                            .and_then(|s| Uuid::parse_str(&s).ok())
+                            .filter(|u| !u.is_nil()),
+                        created_at,
+                        expires_at,
+                        used_by: used_by.and_then(|s| Uuid::parse_str(&s).ok()),
+                    },
+                )
                 .collect()
         })
         .map_err(|e| InviteError::Other(e.to_string()))
     }
 
     async fn verify_detail(&self, code: &str) -> Result<InviteVerifyStatus, InviteError> {
-        let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT used_by, expires_at FROM invite_codes WHERE code = ?",
-        )
-        .bind(code)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| InviteError::Other(e.to_string()))?;
+        let row: Option<(Option<String>, Option<String>)> =
+            sqlx::query_as("SELECT used_by, expires_at FROM invite_codes WHERE code = ?")
+                .bind(code)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| InviteError::Other(e.to_string()))?;
         let (used_by, expires_at) = match row {
             None => return Ok(InviteVerifyStatus::NotFound),
             Some(r) => r,

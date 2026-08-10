@@ -1,4 +1,4 @@
-use crate::state::{RateLimiter, RateLimiterError, RateLimitResult};
+use crate::state::{RateLimitResult, RateLimiter, RateLimiterError};
 use sqlx::SqlitePool;
 use std::time::Duration;
 
