@@ -28,10 +28,8 @@ async fn create_pg_pool_url_runs_migrations() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn create_sqlite_pool_file_enables_wal() {
     let seq = WAL_TEST_SEQ.fetch_add(1, Ordering::Relaxed);
-    let db_path = std::env::temp_dir().join(format!(
-        "pichost-wal-test-{}-{seq}.db",
-        std::process::id()
-    ));
+    let db_path =
+        std::env::temp_dir().join(format!("pichost-wal-test-{}-{seq}.db", std::process::id()));
     let url = format!("sqlite://{}", db_path.display());
     {
         let pool = create_sqlite_pool(&url, 1).await.unwrap();

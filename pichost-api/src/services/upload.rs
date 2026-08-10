@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use pichost_core::DbType;
+use std::sync::Arc;
 
 use axum::extract::Multipart;
 use axum::http::StatusCode;
@@ -11,11 +11,9 @@ use sqlx::{Pool, Row};
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::cache::CachePool;
 use crate::i18n_ext::{error_json, error_json_args, error_json_extra};
 use crate::middleware::auth::AuthUser;
 use crate::services::html_escape;
-use deadpool_redis::redis::AsyncCommands;
 use pichost_core::crypto::decode_key;
 use pichost_core::i18n::{I18n, Language};
 use pichost_core::models::UserStorageConfig;
@@ -170,7 +168,7 @@ pub struct ImageListResponse {
 
 #[allow(clippy::too_many_arguments)]
 async fn enqueue_processing_task(
-    redis_pool: &CachePool,
+    queue: &dyn pichost_core::state::Queue,
     image_id: Uuid,
     user_id: Uuid,
     storage_key: &str,
@@ -179,55 +177,26 @@ async fn enqueue_processing_task(
     storage_config_id: Option<Uuid>,
     storage_backend_name: &str,
 ) {
-    let task_id = Uuid::new_v4();
-    let mut payload = serde_json::json!({
-        "task_id": task_id.to_string(),
-        "image_id": image_id.to_string(),
-        "user_id": user_id.to_string(),
-        "storage_backend": storage_backend,
-        "source_key": storage_key,
-        "source_mime": mime_type,
-        "retry_count": 0,
-        "max_retries": 3,
-        "storage_backend_name": storage_backend_name,
-    });
-    if let Some(cid) = storage_config_id {
-        payload["storage_config_id"] = serde_json::Value::String(cid.to_string());
-    }
-
-    let mut conn = match redis_pool.get().await {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("redis pool error during enqueue: {e}");
-            return;
-        }
+    let payload = pichost_core::models::TaskPayload {
+        task_id: Uuid::new_v4(),
+        image_id,
+        user_id,
+        storage_backend: storage_backend.to_string(),
+        storage_config_id,
+        storage_backend_name: storage_backend_name.to_string(),
+        source_key: storage_key.to_string(),
+        source_mime: mime_type.to_string(),
+        retry_count: 0,
+        max_retries: 3,
     };
-
-    let payload_json = serde_json::to_string(&payload).unwrap_or_default();
-    let task_key = format!("pichost:task:{task_id}");
-    push_task_to_redis(&mut conn, &task_key, task_id, &payload_json).await;
-
-    tracing::info!(%task_id, %image_id, "enqueued processing task");
-}
-
-/// Stores task metadata as a Redis hash and pushes the task id onto the
-/// pending queue. Redis errors are logged and swallowed (non-fatal).
-async fn push_task_to_redis(
-    conn: &mut deadpool_redis::Connection,
-    task_key: &str,
-    task_id: Uuid,
-    payload_json: &str,
-) {
-    let now = chrono::Utc::now().to_rfc3339();
-    // Store task data hash — field names must match queue.rs convention
-    let _: Result<(), _> = conn.hset(task_key, "data", payload_json).await;
-    let _: Result<(), _> = conn.hset(task_key, "status", "pending").await;
-    let _: Result<(), _> = conn.hset(task_key, "created_at", &now).await;
-    let _: Result<(), _> = conn.hset(task_key, "updated_at", &now).await;
-    // Push to pending queue
-    let _: Result<(), _> = conn
-        .lpush("pichost:tasks:pending", task_id.to_string())
-        .await;
+    match queue.enqueue(&payload).await {
+        Ok(()) => {
+            tracing::info!(task_id = %payload.task_id, %image_id, "enqueued processing task");
+        }
+        Err(e) => {
+            tracing::warn!("failed to enqueue processing task: {e}");
+        }
+    }
 }
 
 // ── Private helpers ────────────────────────────────────────────────────────
@@ -300,7 +269,11 @@ where
         .await
         .map_err(|e| {
             tracing::warn!("Quota usage query failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })?;
 
         let new_file_size = file_size as i64;
@@ -338,9 +311,11 @@ where
     (bool,): crate::db::DbRow<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -368,7 +343,8 @@ where
     (bool,): crate::db::DbRow<DB>,
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     sqlx::query_scalar(
@@ -383,7 +359,11 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("Dedup query failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })
 }
 
@@ -401,9 +381,11 @@ where
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -425,12 +407,19 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("Failed to fetch existing image: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })
 }
 
 /// Generates a collision-free 6-char hex public key.
-async fn generate_public_key<DB: DbType>(state: &AppState<DB>, locale: Language) -> Result<String, ApiError>
+async fn generate_public_key<DB: DbType>(
+    state: &AppState<DB>,
+    locale: Language,
+) -> Result<String, ApiError>
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
@@ -522,7 +511,8 @@ where
     pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
     str: sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
     [uuid::Uuid]: sqlx::Type<DB>,
 {
@@ -553,7 +543,8 @@ where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     str: sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
@@ -573,14 +564,14 @@ where
     for id in ids {
         q = q.bind(id);
     }
-    let configs = q
-        .bind(user_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Failed to resolve upload configs: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
-        })?;
+    let configs = q.bind(user_id).fetch_all(pool).await.map_err(|e| {
+        tracing::warn!("Failed to resolve upload configs: {e}");
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
+    })?;
 
     if configs.is_empty() {
         return Err(error_json(
@@ -615,7 +606,11 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("Failed to fetch default config: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })
 }
 
@@ -729,7 +724,8 @@ where
     str: sqlx::Type<DB>,
     for<'q> &'q str: sqlx::Encode<'q, DB>,
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -791,7 +787,8 @@ where
     (bool,): crate::db::DbRow<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -937,9 +934,11 @@ where
     usize: sqlx::ColumnIndex<DB::Row>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -971,7 +970,7 @@ where
     .await?;
 
     enqueue_processing_task(
-        &state.cache.get_pool(),
+        state.queue.as_ref(),
         image_id,
         user.id,
         &storage_key,
@@ -1022,12 +1021,15 @@ where
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
     [uuid::Uuid]: sqlx::Type<DB>,
 {
@@ -1042,8 +1044,7 @@ where
     check_upload_quotas(state, user, bytes.len() as u64, locale).await?;
 
     let sha256 = format!("{:x}", sha2::Sha256::digest(&bytes));
-    let configs =
-        resolve_upload_configs(&state.pool, user.id, storage_config_ids, locale).await?;
+    let configs = resolve_upload_configs(&state.pool, user.id, storage_config_ids, locale).await?;
     validate_upload_configs(&configs, locale)?;
 
     let encryption_key = resolve_encryption_key(&state.config, locale)?;
@@ -1095,9 +1096,11 @@ where
     usize: sqlx::ColumnIndex<DB::Row>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -1164,8 +1167,10 @@ where
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
@@ -1250,7 +1255,8 @@ where
     (i64,): crate::db::DbRow<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
 {
@@ -1301,8 +1307,10 @@ where
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
@@ -1399,7 +1407,8 @@ where
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -1468,7 +1477,11 @@ mod tests {
         assert_eq!(sql.matches('$').count(), 6);
     }
 
-    fn sample_row(storage_config_id: Option<Uuid>, name: Option<String>, provider: Option<String>) -> ImageRow {
+    fn sample_row(
+        storage_config_id: Option<Uuid>,
+        name: Option<String>,
+        provider: Option<String>,
+    ) -> ImageRow {
         ImageRow {
             id: Uuid::new_v4(),
             public_key: "abc123".into(),
@@ -1506,8 +1519,11 @@ mod tests {
     fn png_bytes() -> Vec<u8> {
         let img = image::RgbImage::new(2, 3);
         let mut bytes = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
-            .unwrap();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
         bytes
     }
 
@@ -1522,10 +1538,17 @@ mod tests {
     #[test]
     fn test_from_row_with_storage_config() {
         let config_id = Uuid::new_v4();
-        let row = sample_row(Some(config_id), Some("my git".into()), Some("github".into()));
+        let row = sample_row(
+            Some(config_id),
+            Some("my git".into()),
+            Some("github".into()),
+        );
         let result = UploadResult::from_row(row);
         assert_eq!(result.markdown, "![photo.png](http://x/u/abc123)");
-        assert_eq!(result.html, "<img src=\"http://x/u/abc123\" alt=\"photo.png\" />");
+        assert_eq!(
+            result.html,
+            "<img src=\"http://x/u/abc123\" alt=\"photo.png\" />"
+        );
         assert_eq!(result.bbcode, "[img]http://x/u/abc123[/img]");
         assert_eq!(result.file_size, 1024);
         assert_eq!(result.width, Some(10));
@@ -1589,16 +1612,21 @@ mod tests {
     fn test_validate_upload_configs() {
         assert!(validate_upload_configs(&[], Language::En).is_err());
         assert!(validate_upload_configs(&[git_config("local")], Language::En).is_ok());
-        let three = vec![git_config("local"), git_config("github"), git_config("gitcode")];
+        let three = vec![
+            git_config("local"),
+            git_config("github"),
+            git_config("gitcode"),
+        ];
         let err = validate_upload_configs(&three, Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
         let no_local = vec![git_config("github"), git_config("gitcode")];
         let err = validate_upload_configs(&no_local, Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        assert!(
-            validate_upload_configs(&[git_config("local"), git_config("github")], Language::En)
-                .is_ok()
-        );
+        assert!(validate_upload_configs(
+            &[git_config("local"), git_config("github")],
+            Language::En
+        )
+        .is_ok());
     }
 
     #[test]
@@ -1616,10 +1644,16 @@ mod tests {
     #[test]
     fn test_resolve_encryption_key() {
         let config = pichost_core::config::AppConfig::default();
-        assert_eq!(resolve_encryption_key(&config, Language::En).unwrap(), [0u8; 32]);
+        assert_eq!(
+            resolve_encryption_key(&config, Language::En).unwrap(),
+            [0u8; 32]
+        );
         let mut config = config;
         config.token_encryption_key = Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".into());
-        assert_eq!(resolve_encryption_key(&config, Language::En).unwrap(), [1u8; 32]);
+        assert_eq!(
+            resolve_encryption_key(&config, Language::En).unwrap(),
+            [1u8; 32]
+        );
         config.token_encryption_key = Some("not-base64!!".into());
         let err = resolve_encryption_key(&config, Language::En).unwrap_err();
         assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);

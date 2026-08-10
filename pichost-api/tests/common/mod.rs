@@ -11,8 +11,8 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Method, Request, StatusCode};
 use axum::Router;
-use pichost_api::app::{configure_app, AppState};
-use pichost_api::cache::{self, Cache};
+use pichost_api::app::{build_state_components, configure_app, AppState};
+use pichost_api::cache;
 use pichost_api::db;
 use pichost_core::config::AppConfig;
 use pichost_core::storage::local::LocalStorage;
@@ -61,6 +61,8 @@ pub fn test_config(tempdir: &TempDir) -> AppConfig {
 pub struct TestApp {
     pub router: Router,
     pub state: Arc<AppState<sqlx::Postgres>>,
+    /// Raw Redis pool for test helpers that bypass the trait objects.
+    redis_pool: cache::CachePool,
     /// Keeps the local-storage tempdir alive.
     _tempdir: TempDir,
 }
@@ -68,6 +70,11 @@ pub struct TestApp {
 impl TestApp {
     pub fn pool(&self) -> &sqlx::PgPool {
         &self.state.pool
+    }
+
+    /// Raw Redis pool for test helpers that bypass the trait objects.
+    pub fn redis_pool(&self) -> cache::CachePool {
+        self.redis_pool.clone()
     }
 }
 
@@ -98,7 +105,8 @@ pub async fn test_app_with_config(mut config: AppConfig) -> TestApp {
 
     let pool = init_pool().await;
     let cache_pool = cache::create_pool(&test_redis_url(), 5);
-    let cache = Arc::new(Cache::new(cache_pool));
+    let queue_pool = cache::create_pool(&test_redis_url(), 5);
+    let components = build_state_components(cache_pool.clone(), queue_pool);
 
     let local = Arc::new(LocalStorage::new(
         config.storage.local_base_path.clone(),
@@ -113,15 +121,11 @@ pub async fn test_app_with_config(mut config: AppConfig) -> TestApp {
 
     let state = Arc::new(AppState {
         pool,
-        blacklist: Arc::new(pichost_api::middleware::auth::RedisBlacklist::new(
-            Cache::new(cache.get_pool()),
-        )),
-        rate_limiter: Arc::new(
-            pichost_api::middleware::rate_limit::RedisRateLimiter::new(Cache::new(
-                cache.get_pool(),
-            )),
-        ),
-        cache,
+        queue: components.queue,
+        blacklist: components.blacklist,
+        rate_limiter: components.rate_limiter,
+        invites: components.invites,
+        cache: components.cache,
         config,
         router: storage_router,
     });
@@ -129,6 +133,7 @@ pub async fn test_app_with_config(mut config: AppConfig) -> TestApp {
     TestApp {
         router,
         state,
+        redis_pool: cache_pool,
         _tempdir: tempdir,
     }
 }
@@ -360,11 +365,13 @@ fn short_username(kind: &str, tag: &str) -> String {
     format!("{}_{}_{}", kind, tag, &uid[..8])
 }
 
-/// Create a valid invite code via the cache (returns the code string).
+/// Create a valid invite code via the InviteStore (returns the code string).
 pub async fn create_invite(app: &TestApp, ttl_secs: u64) -> String {
+    let code = Uuid::new_v4().to_string().replace('-', "");
     app.state
-        .cache
-        .create_invite_code(&Uuid::nil(), ttl_secs)
+        .invites
+        .create(&code, Uuid::nil(), ttl_secs)
         .await
-        .expect("create invite code")
+        .expect("create invite code");
+    code
 }

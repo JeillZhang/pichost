@@ -6,8 +6,8 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Method, Request, StatusCode};
 use axum::Router;
-use pichost_api::app::{configure_app, AppState};
-use pichost_api::cache::{self, Cache};
+use pichost_api::app::{build_state_components, configure_app, AppState};
+use pichost_api::cache;
 use pichost_api::db;
 use pichost_core::config::AppConfig;
 use pichost_core::storage::local::LocalStorage;
@@ -60,7 +60,8 @@ async fn oauth_app() -> OAuthApp {
         .expect("connect to test PostgreSQL");
     db::run_pg_migrations(&pool).await.expect("run migrations");
     let cache_pool = cache::create_pool(&redis_url(), 5);
-    let cache = Arc::new(Cache::new(cache_pool));
+    let queue_pool = cache::create_pool(&redis_url(), 5);
+    let components = build_state_components(cache_pool, queue_pool);
 
     let local = Arc::new(LocalStorage::new(
         config.storage.local_base_path.clone(),
@@ -68,20 +69,18 @@ async fn oauth_app() -> OAuthApp {
     )) as Arc<dyn StorageBackend>;
     let mut backends: HashMap<String, Arc<dyn StorageBackend>> = HashMap::new();
     backends.insert("local".into(), local);
-    let storage_router =
-        Arc::new(StorageRouter::new(backends, config.storage.default_backend.clone()));
+    let storage_router = Arc::new(StorageRouter::new(
+        backends,
+        config.storage.default_backend.clone(),
+    ));
 
     let state = Arc::new(AppState {
         pool,
-        blacklist: Arc::new(pichost_api::middleware::auth::RedisBlacklist::new(
-            Cache::new(cache.get_pool()),
-        )),
-        rate_limiter: Arc::new(
-            pichost_api::middleware::rate_limit::RedisRateLimiter::new(Cache::new(
-                cache.get_pool(),
-            )),
-        ),
-        cache,
+        queue: components.queue,
+        blacklist: components.blacklist,
+        rate_limiter: components.rate_limiter,
+        invites: components.invites,
+        cache: components.cache,
         config,
         router: storage_router,
     });
@@ -109,7 +108,10 @@ async fn request(
         builder = builder.header(header::AUTHORIZATION, format!("Bearer {t}"));
     }
     let req = builder
-        .body(body.map(|v| Body::from(v.to_string())).unwrap_or_else(Body::empty))
+        .body(
+            body.map(|v| Body::from(v.to_string()))
+                .unwrap_or_else(Body::empty),
+        )
         .expect("build request");
     let resp = app.router.clone().oneshot(req).await.expect("oneshot");
     let status = resp.status();
@@ -159,7 +161,10 @@ async fn create_test_user(app: &OAuthApp) -> String {
         Some(serde_json::json!({"username": username, "password": "user123456"})),
     )
     .await;
-    json_of(&bytes)["access_token"].as_str().unwrap().to_string()
+    json_of(&bytes)["access_token"]
+        .as_str()
+        .unwrap()
+        .to_string()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -218,8 +223,14 @@ async fn oauth_link_bad_code_rejected() {
     let app = oauth_app().await;
     let token = create_test_user(&app).await;
     let body = serde_json::json!({"provider": "github", "code": "badcode"});
-    let (status, _, bytes) =
-        request(&app, Method::POST, "/api/v1/users/oauth/link", Some(&token), Some(body)).await;
+    let (status, _, bytes) = request(
+        &app,
+        Method::POST,
+        "/api/v1/users/oauth/link",
+        Some(&token),
+        Some(body),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json_of(&bytes)["error"], "invalid authorization code");
 }
@@ -230,8 +241,14 @@ async fn oauth_link_google_bad_code_rejected() {
     let app = oauth_app().await;
     let token = create_test_user(&app).await;
     let body = serde_json::json!({"provider": "google", "code": "badcode"});
-    let (status, _, bytes) =
-        request(&app, Method::POST, "/api/v1/users/oauth/link", Some(&token), Some(body)).await;
+    let (status, _, bytes) = request(
+        &app,
+        Method::POST,
+        "/api/v1/users/oauth/link",
+        Some(&token),
+        Some(body),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json_of(&bytes)["error"], "invalid authorization code");
 }

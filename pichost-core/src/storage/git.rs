@@ -282,8 +282,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    type Responder =
-        Arc<dyn Fn(&str, &str) -> (u16, Vec<(String, String)>, String) + Send + Sync>;
+    type Responder = Arc<dyn Fn(&str, &str) -> (u16, Vec<(String, String)>, String) + Send + Sync>;
 
     fn test_storage(api_base: &str, provider: GitProvider) -> GitStorage {
         GitStorage {
@@ -486,7 +485,11 @@ mod tests {
     async fn put_success_status_200() {
         let base = spawn_mock(Arc::new(|_, _| (200, vec![], "{}".into()))).await;
         let s = test_storage(&base, GitProvider::GitHub);
-        assert!(s.put("k2", b"d", "image/jpeg").await.unwrap().ends_with(".jpg"));
+        assert!(s
+            .put("k2", b"d", "image/jpeg")
+            .await
+            .unwrap()
+            .ends_with(".jpg"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -551,8 +554,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_gitcode_oversized_rejected() {
-        let base =
-            spawn_mock(Arc::new(|_, _| unreachable!("no request expected"))).await;
+        let base = spawn_mock(Arc::new(|_, _| unreachable!("no request expected"))).await;
         let s = test_storage(&base, GitProvider::GitCode);
         let big = vec![0u8; 20 * 1024 * 1024 + 1];
         let err = s.put("big", &big, "image/png").await.unwrap_err();

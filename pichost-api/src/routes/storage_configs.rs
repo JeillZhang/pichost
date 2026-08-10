@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use pichost_core::DbType;
+use std::sync::Arc;
 
 use axum::{
     extract::{Path, State},
@@ -85,16 +85,19 @@ where
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     let max = max_configs.unwrap_or(5) as i64;
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM user_storage_configs WHERE user_id = $1",
-    )
-    .bind(user_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("storage config count query failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
-    })?;
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM user_storage_configs WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!("storage config count query failed: {e}");
+                error_json(
+                    locale,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "common.internal_error",
+                )
+            })?;
 
     if count >= max {
         return Err(error_json_args(
@@ -132,7 +135,11 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("storage config name check failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
 
     if exists {
@@ -161,7 +168,11 @@ where
         .await
         .map_err(|e| {
             tracing::warn!("unset storage config defaults failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })?;
     Ok(())
 }
@@ -189,15 +200,16 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("storage config fetch failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?
     .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "storage_config.not_found"))
 }
 
-fn encrypt_token_from_config(
-    token: &str,
-    encryption_key: &str,
-) -> Result<String, AppError> {
+fn encrypt_token_from_config(token: &str, encryption_key: &str) -> Result<String, AppError> {
     let key_bytes = decode_key(encryption_key)?;
     Ok(encrypt_token(token, &key_bytes)?)
 }
@@ -246,8 +258,13 @@ async fn verify_repo_access(
     repo: &str,
     locale: Language,
 ) -> Result<(), ApiError> {
-    let api_base = api_base_for_provider(provider)
-        .ok_or_else(|| error_json(locale, StatusCode::BAD_REQUEST, "storage_config.unsupported_type"))?;
+    let api_base = api_base_for_provider(provider).ok_or_else(|| {
+        error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "storage_config.unsupported_type",
+        )
+    })?;
     let url = format!("{}/repos/{}", api_base, repo);
     let client = reqwest::Client::new();
     let resp = client
@@ -313,11 +330,14 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("storage config list failed: {e}");
-        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
 
-    let responses: Vec<UserStorageConfigResponse> =
-        configs.iter().map(build_response).collect();
+    let responses: Vec<UserStorageConfigResponse> = configs.iter().map(build_response).collect();
 
     Ok(Json(responses))
 }
@@ -341,7 +361,8 @@ where
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
 {
@@ -364,21 +385,21 @@ where
 
     verify_repo_access(&req.provider, &req.token, &req.repo, locale.0).await?;
 
-    let encryption_key = state
-        .config
-        .token_encryption_key
-        .as_ref()
-        .ok_or_else(|| {
-            error_json(
-                locale.0,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "storage_config.encryption_key_missing",
-            )
-        })?;
+    let encryption_key = state.config.token_encryption_key.as_ref().ok_or_else(|| {
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage_config.encryption_key_missing",
+        )
+    })?;
 
     let encrypted = encrypt_token_from_config(&req.token, encryption_key).map_err(|e| {
         tracing::warn!("storage config token encryption failed: {e}");
-        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
     let config_json = build_config_json(&req, encrypted);
     let is_default = req.is_default.unwrap_or(false);
@@ -403,7 +424,11 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("storage config insert failed: {e}");
-        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
 
     Ok((StatusCode::CREATED, Json(build_response(&config))))
@@ -444,34 +469,40 @@ where
     (bool,): crate::db::DbRow<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
 {
     let existing = fetch_user_config(&state.pool, id, user.id, locale.0).await?;
 
-    let new_name = req.name.as_ref().cloned()
+    let new_name = req
+        .name
+        .as_ref()
+        .cloned()
         .unwrap_or_else(|| existing.name.clone());
     if new_name != existing.name {
         check_name_unique(&state.pool, user.id, &new_name, locale.0).await?;
     }
 
     let encrypted_token = if let Some(token) = &req.token {
-        let encryption_key = state
-            .config
-            .token_encryption_key
-            .as_ref()
-            .ok_or_else(|| {
+        let encryption_key = state.config.token_encryption_key.as_ref().ok_or_else(|| {
+            error_json(
+                locale.0,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "storage_config.encryption_key_missing",
+            )
+        })?;
+        Some(
+            encrypt_token_from_config(token, encryption_key).map_err(|e| {
+                tracing::warn!("storage config token encryption failed: {e}");
                 error_json(
                     locale.0,
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "storage_config.encryption_key_missing",
+                    "common.internal_error",
                 )
-            })?;
-        Some(encrypt_token_from_config(token, encryption_key).map_err(|e| {
-            tracing::warn!("storage config token encryption failed: {e}");
-            error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
-        })?)
+            })?,
+        )
     } else {
         None
     };
@@ -493,7 +524,11 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("storage config update failed: {e}");
-        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
 
     Ok(Json(build_response(&updated)))
@@ -526,11 +561,19 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("storage config reference count failed: {e}");
-        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
 
     if ref_count > 0 {
-        return Err(error_json(locale.0, StatusCode::CONFLICT, "storage_config.in_use"));
+        return Err(error_json(
+            locale.0,
+            StatusCode::CONFLICT,
+            "storage_config.in_use",
+        ));
     }
 
     sqlx::query("DELETE FROM user_storage_configs WHERE id = $1 AND user_id = $2")
@@ -540,7 +583,11 @@ where
         .await
         .map_err(|e| {
             tracing::warn!("storage config delete failed: {e}");
-            error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale.0,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -575,7 +622,11 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("storage config set default failed: {e}");
-        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
 
     Ok(Json(build_response(&config)))
@@ -652,7 +703,11 @@ mod tests {
         assert_eq!(json["path_prefix"], "pic");
     }
 
-    fn update_req(repo: Option<&str>, branch: Option<&str>, path_prefix: Option<&str>) -> UpdateConfigRequest {
+    fn update_req(
+        repo: Option<&str>,
+        branch: Option<&str>,
+        path_prefix: Option<&str>,
+    ) -> UpdateConfigRequest {
         UpdateConfigRequest {
             name: None,
             token: None,
@@ -675,7 +730,11 @@ mod tests {
     #[test]
     fn test_merge_config_detail_with_token() {
         let detail = serde_json::json!({"repo": "a/b"});
-        let merged = merge_config_detail(detail, &update_req(None, Some("dev"), None), Some("enc".into()));
+        let merged = merge_config_detail(
+            detail,
+            &update_req(None, Some("dev"), None),
+            Some("enc".into()),
+        );
         assert_eq!(merged["branch"], "dev");
         assert_eq!(merged["repo"], "a/b");
         assert_eq!(merged["token_encrypted"], "enc");
@@ -683,7 +742,10 @@ mod tests {
 
     #[test]
     fn test_api_base_for_provider() {
-        assert_eq!(api_base_for_provider("github"), Some("https://api.github.com"));
+        assert_eq!(
+            api_base_for_provider("github"),
+            Some("https://api.github.com")
+        );
         assert_eq!(
             api_base_for_provider("gitcode"),
             Some("https://api.gitcode.com/api/v5")

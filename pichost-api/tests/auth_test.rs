@@ -19,8 +19,14 @@ async fn register_and_login_roundtrip() {
     assert!(!token.is_empty());
 
     // GET /users/me should return the profile
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/users/me", Some(&token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/users/me",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(resp["id"].as_str().unwrap(), user_id.to_string().as_str());
 }
@@ -136,8 +142,14 @@ async fn logout_blacklists_token() {
     assert_eq!(status, StatusCode::OK, "logout failed: {resp}");
 
     // Token should now be revoked → protected endpoint returns 401.
-    let (status, _) =
-        send_json(&app, Method::GET, "/api/v1/users/me", Some(&token), &Value::Null).await;
+    let (status, _) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/users/me",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
@@ -145,8 +157,7 @@ async fn logout_blacklists_token() {
 #[ignore = "requires running PostgreSQL and Redis"]
 async fn protected_route_requires_auth() {
     let app = test_app().await;
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/users/me", None, &Value::Null).await;
+    let (status, resp) = send_json(&app, Method::GET, "/api/v1/users/me", None, &Value::Null).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert!(resp["error"].is_string());
 }
@@ -155,9 +166,14 @@ async fn protected_route_requires_auth() {
 #[ignore = "requires running PostgreSQL and Redis"]
 async fn protected_route_rejects_garbage_token() {
     let app = test_app().await;
-    let (status, _) =
-        send_json(&app, Method::GET, "/api/v1/users/me", Some("garbage.token.here"), &Value::Null)
-            .await;
+    let (status, _) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/users/me",
+        Some("garbage.token.here"),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
@@ -176,19 +192,28 @@ async fn register_duplicate_username_conflicts() {
         "invite_code": code,
     });
     let (status, resp) = send_json(&app, Method::POST, "/api/v1/auth/register", None, &body).await;
-    assert_eq!(status, StatusCode::CONFLICT, "expected conflict, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "expected conflict, got {status}: {resp}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires running PostgreSQL and Redis"]
 async fn health_endpoint_returns_healthy() {
     let app = test_app().await;
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/health", None, &Value::Null).await;
+    let (status, resp) = send_json(&app, Method::GET, "/api/health", None, &Value::Null).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(resp["status"].as_str().unwrap(), "healthy");
-    assert_eq!(resp["components"]["postgres"]["status"].as_str().unwrap(), "ok");
-    assert_eq!(resp["components"]["redis"]["status"].as_str().unwrap(), "ok");
+    assert_eq!(
+        resp["components"]["postgres"]["status"].as_str().unwrap(),
+        "ok"
+    );
+    assert_eq!(
+        resp["components"]["redis"]["status"].as_str().unwrap(),
+        "ok"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -201,21 +226,23 @@ async fn metrics_endpoint_returns_text() {
         send_raw(&app, Method::GET, "/metrics", None, None, Vec::new()).await;
     assert_eq!(status, StatusCode::OK);
     let text = String::from_utf8_lossy(&body);
-    assert!(text.contains("pichost_http_requests_total"), "metrics missing counter: {text}");
+    assert!(
+        text.contains("pichost_http_requests_total"),
+        "metrics missing counter: {text}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires running PostgreSQL and Redis"]
 async fn security_headers_present() {
     let app = test_app().await;
-    let (_, headers, _) =
-        send_raw(&app, Method::GET, "/api/health", None, None, Vec::new()).await;
-    assert_eq!(
-        headers.get("x-content-type-options").unwrap(),
-        "nosniff"
-    );
+    let (_, headers, _) = send_raw(&app, Method::GET, "/api/health", None, None, Vec::new()).await;
+    assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff");
     assert_eq!(headers.get("x-frame-options").unwrap(), "DENY");
-    assert_eq!(headers.get("referrer-policy").unwrap(), "strict-origin-when-cross-origin");
+    assert_eq!(
+        headers.get("referrer-policy").unwrap(),
+        "strict-origin-when-cross-origin"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -252,7 +279,9 @@ async fn test_login_failure_zh_negotiation() {
         )
         .await
         .unwrap();
-    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(body["error"], "用户名或密码错误");
     assert_eq!(body["code"], "auth.invalid_credentials");
@@ -263,8 +292,14 @@ async fn test_login_failure_zh_negotiation() {
 async fn test_admin_endpoint_forbidden_code() {
     let app = test_app().await;
     let (_, token, _) = create_user(&app, "forbidden").await; // non-admin
-    let (status, body) =
-        send_json(&app, Method::GET, "/api/v1/admin/stats", Some(&token), &Value::Null).await;
+    let (status, body) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/admin/stats",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["code"], "auth.admin_required");
 }
@@ -291,8 +326,8 @@ async fn test_app_with_rate_limits(auth_max: u32) -> TestApp {
 }
 
 fn test_cache() -> pichost_api::cache::Cache {
-    let url = std::env::var("PICHOST_REDIS_URL")
-        .unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let url =
+        std::env::var("PICHOST_REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
     pichost_api::cache::Cache::new(pichost_api::cache::create_pool(&url, 5))
 }
 
@@ -304,6 +339,8 @@ async fn redis_blacklist_revoke_blocks_jti() {
     let bl = pichost_api::middleware::auth::RedisBlacklist::new(cache);
     let jti = format!("jti-{}", uuid::Uuid::new_v4());
     assert!(!bl.check(&jti).await.unwrap());
-    bl.revoke(&jti, std::time::Duration::from_secs(60)).await.unwrap();
+    bl.revoke(&jti, std::time::Duration::from_secs(60))
+        .await
+        .unwrap();
     assert!(bl.check(&jti).await.unwrap());
 }

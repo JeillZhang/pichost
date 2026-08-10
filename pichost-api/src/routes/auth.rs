@@ -1,6 +1,8 @@
-use std::sync::Arc;
+use pichost_core::state::InviteVerifyStatus;
 use pichost_core::DbType;
 use sqlx::Pool;
+use std::sync::Arc;
+use std::time::Duration;
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -18,7 +20,6 @@ use tracing;
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::cache::{self, Cache};
 use crate::i18n_ext::{error_json, JsonBody, Locale};
 use pichost_core::config::AppConfig;
 use pichost_core::i18n::Language;
@@ -141,19 +142,31 @@ async fn check_invite_code<DB: DbType>(
         let code = invite_code
             .ok_or_else(|| error_json(locale, StatusCode::BAD_REQUEST, "invite.required"))?;
 
-        match state.cache.verify_invite_code(code).await.map_err(|e| {
+        match state.invites.verify_detail(code).await.map_err(|e| {
             tracing::warn!("Invite code verification failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })? {
-            cache::InviteVerifyResult::Valid => {}
-            cache::InviteVerifyResult::Used => {
+            InviteVerifyStatus::Valid => {}
+            InviteVerifyStatus::Used => {
                 return Err(error_json(locale, StatusCode::BAD_REQUEST, "invite.used"));
             }
-            cache::InviteVerifyResult::Expired => {
-                return Err(error_json(locale, StatusCode::BAD_REQUEST, "invite.expired"));
+            InviteVerifyStatus::Expired => {
+                return Err(error_json(
+                    locale,
+                    StatusCode::BAD_REQUEST,
+                    "invite.expired",
+                ));
             }
-            cache::InviteVerifyResult::NotFound => {
-                return Err(error_json(locale, StatusCode::BAD_REQUEST, "invite.invalid"));
+            InviteVerifyStatus::NotFound => {
+                return Err(error_json(
+                    locale,
+                    StatusCode::BAD_REQUEST,
+                    "invite.invalid",
+                ));
             }
         }
     }
@@ -170,24 +183,28 @@ fn hash_password(
         .map(|h| h.to_string())
         .map_err(|e| {
             tracing::warn!("Password hashing failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })
 }
 
-async fn revoke_old_tokens(cache: &Cache, claims: &RefreshTokenClaims, now: usize) {
+async fn revoke_old_tokens(
+    blacklist: &dyn pichost_core::state::Blacklist,
+    claims: &RefreshTokenClaims,
+    now: usize,
+) {
     let refresh_ttl = claims.exp.saturating_sub(now);
-    let _ = cache
-        .set_ex(&format!("bl:{}", claims.jti), "revoked", refresh_ttl as u64)
+    let _ = blacklist
+        .revoke(&claims.jti, Duration::from_secs(refresh_ttl as u64))
         .await;
 
     let access_ttl = claims.access_exp.saturating_sub(now);
     if access_ttl > 0 {
-        let _ = cache
-            .set_ex(
-                &format!("bl:{}", claims.access_jti),
-                "revoked",
-                access_ttl as u64,
-            )
+        let _ = blacklist
+            .revoke(&claims.access_jti, Duration::from_secs(access_ttl as u64))
             .await;
     }
 }
@@ -209,7 +226,11 @@ where
         .await
         .map_err(|e| {
             tracing::warn!("User count query failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })
 }
 
@@ -248,14 +269,14 @@ where
     .await
     .map_err(|e| {
         if pichost_core::db::db_error_kind(&e) == pichost_core::db::DbErrorKind::UniqueViolation {
-            return error_json(
-                locale,
-                StatusCode::CONFLICT,
-                "auth.username_exists",
-            );
+            return error_json(locale, StatusCode::CONFLICT, "auth.username_exists");
         }
         tracing::warn!("User registration db error: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })
 }
 
@@ -282,7 +303,13 @@ where
     validate_register_payload(&payload, locale.0)?;
     let user_count = count_existing_users(&state.pool, locale.0).await?;
     let is_first_user = user_count == 0;
-    check_invite_code(&state, payload.invite_code.as_deref(), is_first_user, locale.0).await?;
+    check_invite_code(
+        &state,
+        payload.invite_code.as_deref(),
+        is_first_user,
+        locale.0,
+    )
+    .await?;
     let (user_id, access_token, refresh_token, storage_quota) =
         create_user_and_tokens(&state, &payload, is_first_user, locale.0).await?;
     Ok((
@@ -353,7 +380,7 @@ where
     .await?;
     if !is_first_user {
         if let Some(code) = &payload.invite_code {
-            let _ = state.cache.consume_invite_code(code, &user_id).await;
+            let _ = state.invites.consume(code, user_id).await;
         }
     }
     let storage_prefix = format!("users/{}", user_id);
@@ -365,7 +392,11 @@ where
     let (access_token, refresh_token, _ac, _rc) =
         generate_tokens(user_id, is_first_user, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })?;
     Ok((user_id, access_token, refresh_token, storage_quota))
 }
@@ -378,7 +409,14 @@ pub async fn login<DB: DbType>(
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
-    (uuid::Uuid, String, Option<String>, String, bool, Option<i64>): crate::db::DbRow<DB>,
+    (
+        uuid::Uuid,
+        String,
+        Option<String>,
+        String,
+        bool,
+        Option<i64>,
+    ): crate::db::DbRow<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     // Query user
@@ -399,17 +437,31 @@ where
     // Verify password
     let parsed_hash = PasswordHash::new(&password_hash).map_err(|e| {
         tracing::warn!("Stored password hash parse failed: {e}");
-        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
 
     Argon2::default()
         .verify_password(payload.password.as_bytes(), &parsed_hash)
-        .map_err(|_| error_json(locale.0, StatusCode::UNAUTHORIZED, "auth.invalid_credentials"))?;
+        .map_err(|_| {
+            error_json(
+                locale.0,
+                StatusCode::UNAUTHORIZED,
+                "auth.invalid_credentials",
+            )
+        })?;
 
     let (access_token, refresh_token, _access_claims, _refresh_claims) =
         generate_tokens(user_id, is_admin, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
-            error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale.0,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })?;
 
     let response = AuthResponse {
@@ -431,8 +483,10 @@ async fn lookup_user_for_refresh<DB: DbType>(
     pool: &Pool<DB>,
     sub: &str,
     locale: Language,
-) -> Result<(uuid::Uuid, String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)>
-
+) -> Result<
+    (uuid::Uuid, String, Option<String>, bool, Option<i64>),
+    (StatusCode, Json<serde_json::Value>),
+>
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
@@ -450,7 +504,11 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("User lookup failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "auth.internal_error",
+        )
     })?
     .ok_or_else(|| error_json(locale, StatusCode::UNAUTHORIZED, "auth.user_not_found"))?;
     Ok((user_id, row.0, row.1, row.2, row.3))
@@ -473,14 +531,21 @@ where
     validation.validate_exp = true;
     let token_data = decode::<RefreshTokenClaims>(&payload.refresh_token, &key, &validation)
         .map_err(|_| {
-            error_json(locale.0, StatusCode::UNAUTHORIZED, "auth.invalid_refresh_token")
+            error_json(
+                locale.0,
+                StatusCode::UNAUTHORIZED,
+                "auth.invalid_refresh_token",
+            )
         })?;
     let claims = token_data.claims;
     if claims.typ != "refresh" {
-        return Err(error_json(locale.0, StatusCode::UNAUTHORIZED, "auth.invalid_token_type"));
+        return Err(error_json(
+            locale.0,
+            StatusCode::UNAUTHORIZED,
+            "auth.invalid_token_type",
+        ));
     }
-    let bl_refresh_key = format!("bl:{}", claims.jti);
-    if state.cache.exists(&bl_refresh_key).await.unwrap_or(true) {
+    if state.blacklist.check(&claims.jti).await.unwrap_or(true) {
         return Err(error_json(
             locale.0,
             StatusCode::UNAUTHORIZED,
@@ -489,8 +554,8 @@ where
     }
     let (user_id, username, email, is_admin, storage_quota) =
         lookup_user_for_refresh(&state.pool, &claims.sub, locale.0).await?;
-    let (new_access, new_refresh, _ac, _rc) = generate_tokens(user_id, is_admin, config)
-        .map_err(|e| {
+    let (new_access, new_refresh, _ac, _rc) =
+        generate_tokens(user_id, is_admin, config).map_err(|e| {
             tracing::warn!("Refresh token generation failed: {e}");
             error_json(
                 locale.0,
@@ -499,13 +564,22 @@ where
             )
         })?;
     let now = Utc::now().timestamp() as usize;
-    revoke_old_tokens(&state.cache, &claims, now).await;
+    revoke_old_tokens(state.blacklist.as_ref(), &claims, now).await;
     tracing::info!(user = %user_id, "tokens refreshed (rotation)");
-    Ok((StatusCode::OK, Json(RefreshResponse {
-        access_token: new_access,
-        refresh_token: new_refresh,
-        user: UserInfo { id: user_id, username, email, is_admin, storage_quota },
-    })))
+    Ok((
+        StatusCode::OK,
+        Json(RefreshResponse {
+            access_token: new_access,
+            refresh_token: new_refresh,
+            user: UserInfo {
+                id: user_id,
+                username,
+                email,
+                is_admin,
+                storage_quota,
+            },
+        }),
+    ))
 }
 
 pub async fn logout<DB: DbType>(
@@ -538,8 +612,10 @@ pub async fn logout<DB: DbType>(
     let now = Utc::now().timestamp() as usize;
     let ttl = claims.exp.saturating_sub(now);
     if ttl > 0 {
-        let bl_key = format!("bl:{}", claims.jti);
-        let _ = state.cache.set_ex(&bl_key, "revoked", ttl as u64).await;
+        let _ = state
+            .blacklist
+            .revoke(&claims.jti, Duration::from_secs(ttl as u64))
+            .await;
     }
 
     tracing::info!(user = %claims.sub, jti = %claims.jti, "logged out");
@@ -564,7 +640,8 @@ mod tests {
     #[test]
     fn test_generate_tokens() {
         let user_id = Uuid::new_v4();
-        let (access, refresh, ac, rc) = generate_tokens(user_id, true, &config_with_secret()).unwrap();
+        let (access, refresh, ac, rc) =
+            generate_tokens(user_id, true, &config_with_secret()).unwrap();
         assert_eq!(ac.typ, "access");
         assert_eq!(rc.typ, "refresh");
         assert_eq!(ac.sub, user_id.to_string());
@@ -574,12 +651,15 @@ mod tests {
         assert!(ac.is_admin);
 
         let key = DecodingKey::from_secret(SECRET.as_bytes());
-        let decoded: AccessTokenClaims =
-            decode(&access, &key, &Validation::new(Algorithm::HS256)).unwrap().claims;
+        let decoded: AccessTokenClaims = decode(&access, &key, &Validation::new(Algorithm::HS256))
+            .unwrap()
+            .claims;
         assert_eq!(decoded.sub, user_id.to_string());
         assert_eq!(decoded.typ, "access");
         let decoded: RefreshTokenClaims =
-            decode(&refresh, &key, &Validation::new(Algorithm::HS256)).unwrap().claims;
+            decode(&refresh, &key, &Validation::new(Algorithm::HS256))
+                .unwrap()
+                .claims;
         assert_eq!(decoded.typ, "refresh");
         assert_eq!(decoded.sub, user_id.to_string());
     }

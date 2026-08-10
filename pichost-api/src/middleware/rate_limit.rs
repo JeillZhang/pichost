@@ -25,7 +25,10 @@ use crate::middleware::auth::AuthUser;
 const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 
 fn too_many_response(req: &Request, retry_after: u64) -> (StatusCode, Json<serde_json::Value>) {
-    let locale = locale_from_header(req.headers().get(ACCEPT_LANGUAGE), I18n::global().language());
+    let locale = locale_from_header(
+        req.headers().get(ACCEPT_LANGUAGE),
+        I18n::global().language(),
+    );
     error_json_args(
         locale,
         StatusCode::TOO_MANY_REQUESTS,
@@ -189,7 +192,12 @@ async fn limiter_check<DB: DbType>(
 ) -> RateLimitResult {
     match state
         .rate_limiter
-        .check(policy, key, max_requests, Duration::from_secs(RATE_LIMIT_WINDOW_SECS))
+        .check(
+            policy,
+            key,
+            max_requests,
+            Duration::from_secs(RATE_LIMIT_WINDOW_SECS),
+        )
         .await
     {
         Ok(result) => result,
@@ -256,10 +264,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "requires running PostgreSQL and Redis"]
     async fn test_redis_rate_limiter_against_redis() {
-        let cache = crate::cache::Cache::new(crate::cache::create_pool(
-            "redis://localhost:6379",
-            2,
-        ));
+        let cache =
+            crate::cache::Cache::new(crate::cache::create_pool("redis://localhost:6379", 2));
         let rl = RedisRateLimiter::new(cache);
         let key = format!("unit-test-{}", Uuid::new_v4());
         for _ in 0..3 {
@@ -282,7 +288,10 @@ mod tests {
         let state = rate_state_dead_redis(1).await;
         let app = Router::new()
             .route("/", axum::routing::get(|| async { "ok" }))
-            .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_auth))
+            .route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit_auth,
+            ))
             .with_state(state);
         let (first, second) = hit_twice(app, &unique_xff()).await;
         assert_eq!(first, StatusCode::OK);
@@ -297,17 +306,19 @@ mod tests {
         cfg.rate_limit.general_max = max;
         cfg.rate_limit.public_max = max;
         let cache_pool = crate::cache::create_pool("redis://localhost:6379", 2);
+        let components = crate::app::build_state_components(
+            cache_pool,
+            crate::cache::create_pool("redis://localhost:6379", 2),
+        );
         Arc::new(AppState {
             pool: crate::db::create_sqlite_pool("sqlite::memory:", 1)
                 .await
                 .unwrap(),
-            cache: Arc::new(crate::cache::Cache::new(cache_pool.clone())),
-            blacklist: Arc::new(crate::middleware::auth::RedisBlacklist::new(
-                crate::cache::Cache::new(cache_pool.clone()),
-            )),
-            rate_limiter: Arc::new(RedisRateLimiter::new(crate::cache::Cache::new(
-                cache_pool,
-            ))),
+            queue: components.queue,
+            blacklist: components.blacklist,
+            rate_limiter: components.rate_limiter,
+            invites: components.invites,
+            cache: components.cache,
             config: Arc::new(cfg),
             router: Arc::new(StorageRouter::new(
                 std::collections::HashMap::new(),
@@ -321,17 +332,19 @@ mod tests {
         let mut cfg = pichost_core::config::AppConfig::default();
         cfg.rate_limit.auth_max = max;
         let cache_pool = crate::cache::create_pool("redis://127.0.0.1:1", 1);
+        let components = crate::app::build_state_components(
+            cache_pool,
+            crate::cache::create_pool("redis://127.0.0.1:1", 1),
+        );
         Arc::new(AppState {
             pool: crate::db::create_sqlite_pool("sqlite::memory:", 1)
                 .await
                 .unwrap(),
-            cache: Arc::new(crate::cache::Cache::new(cache_pool.clone())),
-            blacklist: Arc::new(crate::middleware::auth::RedisBlacklist::new(
-                crate::cache::Cache::new(cache_pool.clone()),
-            )),
-            rate_limiter: Arc::new(RedisRateLimiter::new(crate::cache::Cache::new(
-                cache_pool,
-            ))),
+            queue: components.queue,
+            blacklist: components.blacklist,
+            rate_limiter: components.rate_limiter,
+            invites: components.invites,
+            cache: components.cache,
             config: Arc::new(cfg),
             router: Arc::new(StorageRouter::new(
                 std::collections::HashMap::new(),
@@ -365,7 +378,10 @@ mod tests {
         let state = rate_state(1).await;
         let app = Router::new()
             .route("/", axum::routing::get(|| async { "ok" }))
-            .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_auth))
+            .route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit_auth,
+            ))
             .with_state(state);
         let (first, second) = hit_twice(app, &unique_xff()).await;
         assert_eq!(first, StatusCode::OK);
@@ -378,7 +394,10 @@ mod tests {
         let state = rate_state(1).await;
         let app = Router::new()
             .route("/", axum::routing::get(|| async { "ok" }))
-            .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_upload))
+            .route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit_upload,
+            ))
             .with_state(state);
         let (first, second) = hit_twice(app, &unique_xff()).await;
         assert_eq!(first, StatusCode::OK);
@@ -391,7 +410,10 @@ mod tests {
         let state = rate_state(1).await;
         let app = Router::new()
             .route("/", axum::routing::get(|| async { "ok" }))
-            .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_general))
+            .route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit_general,
+            ))
             .with_state(state);
         let (first, second) = hit_twice(app, &unique_xff()).await;
         assert_eq!(first, StatusCode::OK);
@@ -404,7 +426,10 @@ mod tests {
         let state = rate_state(1).await;
         let app = Router::new()
             .route("/", axum::routing::get(|| async { "ok" }))
-            .route_layer(middleware::from_fn_with_state(state.clone(), rate_limit_public))
+            .route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit_public,
+            ))
             .with_state(state);
         let (first, second) = hit_twice(app, &unique_xff()).await;
         assert_eq!(first, StatusCode::OK);

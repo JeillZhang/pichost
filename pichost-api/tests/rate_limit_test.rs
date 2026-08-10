@@ -5,8 +5,8 @@ use std::time::Duration;
 use uuid::Uuid;
 
 fn test_cache() -> Cache {
-    let url = std::env::var("PICHOST_REDIS_URL")
-        .unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let url =
+        std::env::var("PICHOST_REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
     Cache::new(cache::create_pool(&url, 5))
 }
 

@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use pichost_core::DbType;
+use std::sync::Arc;
 
 use axum::{
     extract::{Query, State},
@@ -131,7 +131,12 @@ fn client_error_response(
         OAuthClientError::MissingClientId(p) => ("auth.oauth_not_configured", p),
         OAuthClientError::MissingClientSecret(p) => ("auth.oauth_secret_not_configured", p),
     };
-    error_json_args(locale, StatusCode::BAD_REQUEST, key, &[provider.to_string()])
+    error_json_args(
+        locale,
+        StatusCode::BAD_REQUEST,
+        key,
+        &[provider.to_string()],
+    )
 }
 
 // ── Client builders (return the fully-configured client inline) ──
@@ -153,14 +158,16 @@ macro_rules! oauth_client {
             .ok_or(OAuthClientError::MissingClientSecret($provider))?;
         BasicClient::new(ClientId::new(cid.clone()))
             .set_client_secret(ClientSecret::new(csec.clone()))
-            .set_auth_uri(
-                AuthUrl::new($auth_url.to_string())
-                    .expect(concat!("invalid ", $provider, " auth URL")),
-            )
-            .set_token_uri(
-                TokenUrl::new($token_url.to_string())
-                    .expect(concat!("invalid ", $provider, " token URL")),
-            )
+            .set_auth_uri(AuthUrl::new($auth_url.to_string()).expect(concat!(
+                "invalid ",
+                $provider,
+                " auth URL"
+            )))
+            .set_token_uri(TokenUrl::new($token_url.to_string()).expect(concat!(
+                "invalid ",
+                $provider,
+                " token URL"
+            )))
             .set_redirect_uri(
                 RedirectUrl::new(format!(
                     "{}/api/v1/auth/oauth/{}/callback",
@@ -171,7 +178,9 @@ macro_rules! oauth_client {
     }};
 }
 
-fn make_github_client<DB: DbType>(state: &AppState<DB>) -> Result<ConfiguredOAuthClient, OAuthClientError> {
+fn make_github_client<DB: DbType>(
+    state: &AppState<DB>,
+) -> Result<ConfiguredOAuthClient, OAuthClientError> {
     Ok(oauth_client!(
         state,
         oauth_github_client_id,
@@ -182,7 +191,9 @@ fn make_github_client<DB: DbType>(state: &AppState<DB>) -> Result<ConfiguredOAut
     ))
 }
 
-fn make_google_client<DB: DbType>(state: &AppState<DB>) -> Result<ConfiguredOAuthClient, OAuthClientError> {
+fn make_google_client<DB: DbType>(
+    state: &AppState<DB>,
+) -> Result<ConfiguredOAuthClient, OAuthClientError> {
     Ok(oauth_client!(
         state,
         oauth_google_client_id,
@@ -246,7 +257,11 @@ async fn oauth_exchange_and_fetch_user<DB: DbType>(
     let oauth_client = match provider {
         "github" => make_github_client(state).map_err(|e| client_error_response(locale, e)),
         "google" => make_google_client(state).map_err(|e| client_error_response(locale, e)),
-        _ => Err(error_json(locale, StatusCode::BAD_REQUEST, "auth.unknown_provider")),
+        _ => Err(error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "auth.unknown_provider",
+        )),
     }?;
 
     let http_client = reqwest::ClientBuilder::new()
@@ -254,7 +269,11 @@ async fn oauth_exchange_and_fetch_user<DB: DbType>(
         .build()
         .map_err(|e| {
             tracing::warn!("Failed to build HTTP client: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "auth.internal_error",
+            )
         })?;
 
     let token = oauth_client
@@ -270,11 +289,19 @@ async fn oauth_exchange_and_fetch_user<DB: DbType>(
     match provider {
         "github" => fetch_github_user(access_token).await.map_err(|e| {
             tracing::warn!("GitHub user fetch failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.oauth_userinfo_failed")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "auth.oauth_userinfo_failed",
+            )
         }),
         "google" => fetch_google_user(access_token).await.map_err(|e| {
             tracing::warn!("Google user fetch failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.oauth_userinfo_failed")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "auth.oauth_userinfo_failed",
+            )
         }),
         _ => unreachable!(),
     }
@@ -287,7 +314,10 @@ async fn lookup_oauth_user<DB: DbType>(
     locale: Language,
     provider: &str,
     provider_user_id: &str,
-) -> Result<(uuid::Uuid, String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)>
+) -> Result<
+    (uuid::Uuid, String, Option<String>, bool, Option<i64>),
+    (StatusCode, Json<serde_json::Value>),
+>
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
@@ -306,7 +336,11 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("OAuth account lookup failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "auth.internal_error",
+        )
     })?;
 
     let (user_id,) =
@@ -320,7 +354,11 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("User lookup failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "auth.internal_error",
+        )
     })?
     .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "auth.user_not_found"))
 }
@@ -349,13 +387,23 @@ where
     let (access_token_str, refresh_token_str, _ac, _rc) =
         generate_tokens(user_id, is_admin, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "auth.internal_error",
+            )
         })?;
 
     Ok(Json(AuthResponse {
         access_token: access_token_str,
         refresh_token: refresh_token_str,
-        user: UserInfo { id: user_id, username, email, is_admin, storage_quota },
+        user: UserInfo {
+            id: user_id,
+            username,
+            email,
+            is_admin,
+            storage_quota,
+        },
     }))
 }
 
@@ -387,11 +435,17 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("OAuth link insert failed: {e}");
-        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "auth.internal_error",
+        )
     })?;
 
     tracing::info!(user_id = %user.id, provider = %body.provider, "oauth account linked");
-    Ok(Json(serde_json::json!({"message": "account linked successfully"})))
+    Ok(Json(
+        serde_json::json!({"message": "account linked successfully"}),
+    ))
 }
 
 #[cfg(test)]
@@ -407,44 +461,51 @@ mod tests {
             .await
             .expect("sqlite memory pool should build");
         let cache_pool = crate::cache::create_pool("redis://localhost:6379", 2);
+        let components = crate::app::build_state_components(
+            cache_pool.clone(),
+            crate::cache::create_pool("redis://localhost:6379", 2),
+        );
         AppState {
             pool,
-            cache: Arc::new(crate::cache::Cache::new(cache_pool.clone())),
-            blacklist: Arc::new(crate::middleware::auth::RedisBlacklist::new(
-                crate::cache::Cache::new(cache_pool.clone()),
-            )),
-            rate_limiter: Arc::new(
-                crate::middleware::rate_limit::RedisRateLimiter::new(crate::cache::Cache::new(
-                    cache_pool,
-                )),
-            ),
+            queue: components.queue,
+            blacklist: components.blacklist,
+            rate_limiter: components.rate_limiter,
+            invites: components.invites,
+            cache: components.cache,
             config: Arc::new(AppConfig::default()),
-            router: Arc::new(StorageRouter::new(std::collections::HashMap::new(), "local".into())),
+            router: Arc::new(StorageRouter::new(
+                std::collections::HashMap::new(),
+                "local".into(),
+            )),
         }
     }
 
     async fn test_state() -> AppState<sqlx::Postgres> {
         use pichost_core::StorageRouter;
-        let pool = crate::db::create_pg_pool("postgres://pichost:pichost@localhost:5432/pichost", 2)
-            .await
-            .expect("pool should connect");
+        let pool =
+            crate::db::create_pg_pool("postgres://pichost:pichost@localhost:5432/pichost", 2)
+                .await
+                .expect("pool should connect");
         crate::db::run_pg_migrations(&pool)
             .await
             .expect("migrations should run");
         let cache_pool = crate::cache::create_pool("redis://localhost:6379", 2);
+        let components = crate::app::build_state_components(
+            cache_pool.clone(),
+            crate::cache::create_pool("redis://localhost:6379", 2),
+        );
         AppState {
             pool,
-            cache: Arc::new(crate::cache::Cache::new(cache_pool.clone())),
-            blacklist: Arc::new(crate::middleware::auth::RedisBlacklist::new(
-                crate::cache::Cache::new(cache_pool.clone()),
-            )),
-            rate_limiter: Arc::new(
-                crate::middleware::rate_limit::RedisRateLimiter::new(crate::cache::Cache::new(
-                    cache_pool,
-                )),
-            ),
+            queue: components.queue,
+            blacklist: components.blacklist,
+            rate_limiter: components.rate_limiter,
+            invites: components.invites,
+            cache: components.cache,
             config: Arc::new(AppConfig::default()),
-            router: Arc::new(StorageRouter::new(std::collections::HashMap::new(), "local".into())),
+            router: Arc::new(StorageRouter::new(
+                std::collections::HashMap::new(),
+                "local".into(),
+            )),
         }
     }
 
@@ -470,6 +531,9 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.0, StatusCode::NOT_FOUND);
-        assert!(err.1 .0["error"].as_str().unwrap().contains("no account linked"));
+        assert!(err.1 .0["error"]
+            .as_str()
+            .unwrap()
+            .contains("no account linked"));
     }
 }

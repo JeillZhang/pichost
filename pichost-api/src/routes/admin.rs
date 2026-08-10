@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use pichost_core::DbType;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
@@ -23,20 +23,24 @@ where
 }
 
 use crate::app::AppState;
-use crate::cache::{Cache, InviteCodeInfo};
-use sqlx::Pool;
+use crate::cache::InviteCodeInfo;
 use crate::i18n_ext::{error_json, error_json_args, JsonBody, Locale};
 use crate::metrics::{TOTAL_IMAGES, TOTAL_STORAGE_BYTES, TOTAL_USERS};
 use crate::middleware::auth::AuthUser;
 use crate::routes::auth::UserInfo;
 use crate::services::config::{self, SystemConfig};
+use sqlx::Pool;
 
 // ── Error shorthand ──
 
 type AdminError = (StatusCode, Json<serde_json::Value>);
 
 fn internal_error(locale: Language) -> AdminError {
-    error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    error_json(
+        locale,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "common.internal_error",
+    )
 }
 
 // ── Invite Code types ──
@@ -218,11 +222,13 @@ where
     for<'q> &'q str: sqlx::Encode<'q, DB>,
     Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     if let Some(ph) = params.password_hash {
@@ -285,7 +291,14 @@ async fn fetch_user_fields<DB: DbType>(
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
-    (String, Option<String>, bool, String, Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    (
+        String,
+        Option<String>,
+        bool,
+        String,
+        Option<i64>,
+        Option<serde_json::Value>,
+    ): crate::db::DbRow<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     sqlx::query_as::<_, UserFields>(
@@ -338,11 +351,19 @@ where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
-    (String, Option<String>, bool, String, Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
+    (
+        String,
+        Option<String>,
+        bool,
+        String,
+        Option<i64>,
+        Option<serde_json::Value>,
+    ): crate::db::DbRow<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     let existing = fetch_user_fields(pool, user_id, locale).await?;
@@ -389,7 +410,11 @@ where
     Ok(count)
 }
 
-async fn delete_user_from_db<DB: DbType>(pool: &Pool<DB>, user_id: Uuid, locale: Language) -> Result<(), AdminError>
+async fn delete_user_from_db<DB: DbType>(
+    pool: &Pool<DB>,
+    user_id: Uuid,
+    locale: Language,
+) -> Result<(), AdminError>
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
@@ -416,7 +441,11 @@ where
     Ok(())
 }
 
-async fn verify_user_exists<DB: DbType>(pool: &Pool<DB>, user_id: Uuid, locale: Language) -> Result<(), AdminError>
+async fn verify_user_exists<DB: DbType>(
+    pool: &Pool<DB>,
+    user_id: Uuid,
+    locale: Language,
+) -> Result<(), AdminError>
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
@@ -505,7 +534,10 @@ where
         })
 }
 
-async fn query_total_quota<DB: DbType>(pool: &Pool<DB>, locale: Language) -> Result<Option<i64>, AdminError>
+async fn query_total_quota<DB: DbType>(
+    pool: &Pool<DB>,
+    locale: Language,
+) -> Result<Option<i64>, AdminError>
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
@@ -523,7 +555,10 @@ where
     })
 }
 
-async fn query_image_stats<DB: DbType>(pool: &Pool<DB>, locale: Language) -> Result<(i64, i64), AdminError>
+async fn query_image_stats<DB: DbType>(
+    pool: &Pool<DB>,
+    locale: Language,
+) -> Result<(i64, i64), AdminError>
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
@@ -588,7 +623,7 @@ where
     })
 }
 
-async fn populate_stats_cache(cache: &Cache, params: StatsCacheParams) {
+async fn populate_stats_cache(cache: &dyn pichost_core::state::Cache, params: StatsCacheParams) {
     let StatsCacheParams {
         total_users,
         total_images,
@@ -668,9 +703,11 @@ where
     (i64,): crate::db::DbRow<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     let offset = pagination.offset.unwrap_or(0).max(0);
@@ -735,11 +772,13 @@ where
     usize: sqlx::ColumnIndex<DB::Row>,
     Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     // Prevent self-demotion
@@ -894,7 +933,7 @@ where
 
     // Populate cache (best-effort)
     populate_stats_cache(
-        &state.cache,
+        state.cache.as_ref(),
         StatsCacheParams {
             total_users,
             total_images,
@@ -929,9 +968,10 @@ pub async fn create_invite<DB: DbType>(
     let now = chrono::Utc::now().timestamp();
     let expires_at = now + ttl_secs as i64;
 
-    let code = state
-        .cache
-        .create_invite_code(&admin.id, ttl_secs)
+    let code = Uuid::new_v4().to_string().replace('-', "");
+    state
+        .invites
+        .create(&code, admin.id, ttl_secs)
         .await
         .map_err(|e| {
             tracing::warn!("Failed to create invite code: {e}");
@@ -946,11 +986,22 @@ pub async fn list_invites<DB: DbType>(
     State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
 ) -> Result<Json<Vec<InviteCodeInfo>>, AdminError> {
-    let codes = state.cache.list_invite_codes().await.map_err(|e| {
+    let codes = state.invites.list().await.map_err(|e| {
         tracing::warn!("Failed to list invite codes: {e}");
         internal_error(locale.0)
     })?;
-    Ok(Json(codes))
+    Ok(Json(
+        codes
+            .into_iter()
+            .map(|c| InviteCodeInfo {
+                code: c.code,
+                created_by: c.created_by.unwrap_or_default(),
+                expires_at: c.expires_at.map(|t| t.timestamp()).unwrap_or(0),
+                used_by: c.used_by,
+                created_at: c.created_at.timestamp(),
+            })
+            .collect(),
+    ))
 }
 
 // ── Config management handlers (P4-I) ─────────────────────────────────
@@ -1121,14 +1172,12 @@ pub async fn restore_admin_config(
 ) -> Result<Json<serde_json::Value>, AdminError> {
     let path = config_file_path();
     config::restore_config(&path, &body.backup_file).map_err(|e| match e {
-        config::ConfigError::Io(m) if m.starts_with("Backup not found") => {
-            error_json_args(
-                locale.0,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "config.backup_not_found",
-                &[m],
-            )
-        }
+        config::ConfigError::Io(m) if m.starts_with("Backup not found") => error_json_args(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "config.backup_not_found",
+            &[m],
+        ),
         e => {
             tracing::warn!("restore config failed: {e}");
             internal_error(locale.0)
@@ -1191,7 +1240,14 @@ mod tests {
 
     #[test]
     fn test_merge_user_fields_all_none_keeps_existing() {
-        let existing = ("bob".into(), Some("b@c.d".into()), false, "local".into(), Some(5), None);
+        let existing = (
+            "bob".into(),
+            Some("b@c.d".into()),
+            false,
+            "local".into(),
+            Some(5),
+            None,
+        );
         let merged = merge_user_fields(&empty_body(), existing);
         assert_eq!(merged.0, "bob");
         assert_eq!(merged.1, Some("b@c.d".into()));
@@ -1223,7 +1279,14 @@ mod tests {
 
     #[test]
     fn test_merge_user_fields_watermark_null_clears() {
-        let existing = ("bob".into(), None, false, "local".into(), None, Some(serde_json::json!({"enabled": true})));
+        let existing = (
+            "bob".into(),
+            None,
+            false,
+            "local".into(),
+            None,
+            Some(serde_json::json!({"enabled": true})),
+        );
         let mut body = empty_body();
         body.watermark_config = Some(None);
         let merged = merge_user_fields(&body, existing);
@@ -1232,7 +1295,14 @@ mod tests {
 
     #[test]
     fn test_merge_user_fields_watermark_absent_keeps() {
-        let existing = ("bob".into(), None, false, "local".into(), None, Some(serde_json::json!({"enabled": true})));
+        let existing = (
+            "bob".into(),
+            None,
+            false,
+            "local".into(),
+            None,
+            Some(serde_json::json!({"enabled": true})),
+        );
         let merged = merge_user_fields(&empty_body(), existing);
         assert!(merged.5.is_some());
     }
@@ -1282,8 +1352,14 @@ mod tests {
 
     #[test]
     fn test_build_backends_map() {
-        let local = BackendStats { total_images: 1, total_size: 2 };
-        let rustfs = BackendStats { total_images: 3, total_size: 4 };
+        let local = BackendStats {
+            total_images: 1,
+            total_size: 2,
+        };
+        let rustfs = BackendStats {
+            total_images: 3,
+            total_size: 4,
+        };
         let m = build_backends_map(&local, &rustfs);
         assert_eq!(m.len(), 2);
         assert_eq!(m["local"].total_images, 1);
@@ -1303,8 +1379,15 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_hash_password_if_provided() {
-        assert_eq!(hash_password_if_provided(&None, Language::En).await.unwrap(), None);
-        let err = hash_password_if_provided(&Some("short".into()), Language::En).await.unwrap_err();
+        assert_eq!(
+            hash_password_if_provided(&None, Language::En)
+                .await
+                .unwrap(),
+            None
+        );
+        let err = hash_password_if_provided(&Some("short".into()), Language::En)
+            .await
+            .unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
         let hash = hash_password_if_provided(&Some("long-enough-pass".into()), Language::En)
             .await

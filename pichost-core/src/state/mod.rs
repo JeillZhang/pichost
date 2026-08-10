@@ -58,6 +58,16 @@ pub enum CacheError {
     Other(String),
 }
 
+/// Detailed result of an invite-code verification, preserving the
+/// Used/Expired/NotFound distinction (the coarse `verify` collapses these).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InviteVerifyStatus {
+    Valid,
+    Used,
+    Expired,
+    NotFound,
+}
+
 #[async_trait::async_trait]
 pub trait Queue: Send + Sync {
     async fn enqueue(&self, payload: &crate::models::TaskPayload) -> Result<(), QueueError>;
@@ -93,15 +103,13 @@ pub trait RateLimiter: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait InviteStore: Send + Sync {
-    async fn create(
-        &self,
-        code: &str,
-        created_by: Uuid,
-        ttl_secs: u64,
-    ) -> Result<(), InviteError>;
+    async fn create(&self, code: &str, created_by: Uuid, ttl_secs: u64) -> Result<(), InviteError>;
     async fn verify(&self, code: &str) -> Result<bool, InviteError>;
     async fn consume(&self, code: &str, used_by: Uuid) -> Result<(), InviteError>;
     async fn list(&self) -> Result<Vec<InviteCodeInfo>, InviteError>;
+    /// Detailed verification preserving the Used/Expired/NotFound distinction
+    /// so routes can emit distinct user-facing error codes.
+    async fn verify_detail(&self, code: &str) -> Result<InviteVerifyStatus, InviteError>;
 }
 
 #[async_trait::async_trait]
@@ -111,6 +119,28 @@ pub trait Cache: Send + Sync {
     async fn del(&self, key: &str) -> Result<(), CacheError>;
     async fn exists(&self, key: &str) -> Result<bool, CacheError>;
     async fn incr(&self, key: &str, ttl: u64) -> Result<u64, CacheError>;
+    /// Raw byte fetch (binary-safe; `get` is String-based and lossy for blobs).
+    async fn get_bytes(&self, key: &str) -> Result<Option<Vec<u8>>, CacheError>;
+    /// Raw byte store with TTL (binary-safe counterpart of `get_bytes`).
+    async fn set_ex_bytes(&self, key: &str, val: &[u8], ttl: u64) -> Result<(), CacheError>;
+    /// Hash-based user-stat counter (HINCRBY) with TTL on first creation.
+    async fn incr_user_stat(
+        &self,
+        user_id: &Uuid,
+        field: &str,
+        delta: i64,
+    ) -> Result<(), CacheError>;
+    /// Overwrite user-stat hash fields and refresh TTL (HSET-based, no double count).
+    async fn set_user_stats(
+        &self,
+        user_id: &Uuid,
+        fields: &[(&str, Option<i64>)],
+    ) -> Result<(), CacheError>;
+    /// Read all user-stat fields as a map (empty map for a missing key).
+    async fn get_user_stats(
+        &self,
+        user_id: &Uuid,
+    ) -> Result<Option<std::collections::HashMap<String, String>>, CacheError>;
 }
 
 // 测试用 Mock 实现（state_test.rs 及后续任务测试使用）
@@ -182,6 +212,9 @@ impl InviteStore for MockInviteStore {
     async fn list(&self) -> Result<Vec<InviteCodeInfo>, InviteError> {
         Ok(Vec::new())
     }
+    async fn verify_detail(&self, _code: &str) -> Result<InviteVerifyStatus, InviteError> {
+        Ok(InviteVerifyStatus::Valid)
+    }
 }
 
 pub struct MockCache;
@@ -201,6 +234,33 @@ impl Cache for MockCache {
     }
     async fn incr(&self, _key: &str, _ttl: u64) -> Result<u64, CacheError> {
         Ok(0)
+    }
+    async fn get_bytes(&self, _key: &str) -> Result<Option<Vec<u8>>, CacheError> {
+        Ok(None)
+    }
+    async fn set_ex_bytes(&self, _key: &str, _val: &[u8], _ttl: u64) -> Result<(), CacheError> {
+        Ok(())
+    }
+    async fn incr_user_stat(
+        &self,
+        _user_id: &Uuid,
+        _field: &str,
+        _delta: i64,
+    ) -> Result<(), CacheError> {
+        Ok(())
+    }
+    async fn set_user_stats(
+        &self,
+        _user_id: &Uuid,
+        _fields: &[(&str, Option<i64>)],
+    ) -> Result<(), CacheError> {
+        Ok(())
+    }
+    async fn get_user_stats(
+        &self,
+        _user_id: &Uuid,
+    ) -> Result<Option<std::collections::HashMap<String, String>>, CacheError> {
+        Ok(None)
     }
 }
 

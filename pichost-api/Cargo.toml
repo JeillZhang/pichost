@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 pichost-core = { path = "../pichost-core" }
+pichost-worker = { path = "../pichost-worker" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

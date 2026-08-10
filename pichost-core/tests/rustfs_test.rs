@@ -27,7 +27,10 @@ async fn test_put_and_get() {
     let storage = RustfsStorage::new(&config).await;
     let key = "test/hello.txt";
 
-    storage.put(key, b"hello world", "text/plain").await.unwrap();
+    storage
+        .put(key, b"hello world", "text/plain")
+        .await
+        .unwrap();
     let data = storage.get(key).await.unwrap();
     assert_eq!(data, b"hello world");
 
@@ -56,7 +59,10 @@ async fn test_get_not_found() {
     let storage = RustfsStorage::new(&config).await;
 
     let err = storage.get("test/nonexistent.txt").await.unwrap_err();
-    assert!(matches!(err, pichost_core::error::StorageError::NotFound(_)));
+    assert!(matches!(
+        err,
+        pichost_core::error::StorageError::NotFound(_)
+    ));
 }
 
 #[tokio::test]

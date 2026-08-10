@@ -49,7 +49,10 @@ pub async fn create_pg_pool(url: &str, max_connections: u32) -> Result<PgPool, s
 // post-connect pragma is needed. `sqlite::memory:` shares ONE in-memory DB
 // across pooled connections (sqlx special-cases it with shared_cache=true),
 // so the AnyPool-era URL rewrite hack must not be reintroduced.
-pub async fn create_sqlite_pool(url: &str, max_connections: u32) -> Result<SqlitePool, sqlx::Error> {
+pub async fn create_sqlite_pool(
+    url: &str,
+    max_connections: u32,
+) -> Result<SqlitePool, sqlx::Error> {
     let connect = SqliteConnectOptions::from_str(url)?
         .create_if_missing(true)
         .foreign_keys(true)
@@ -93,5 +96,3 @@ pub fn db_error_kind(err: &sqlx::Error) -> DbErrorKind {
         _ => DbErrorKind::Other,
     }
 }
-
-

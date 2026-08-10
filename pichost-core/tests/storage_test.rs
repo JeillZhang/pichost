@@ -4,7 +4,10 @@ use tempfile::TempDir;
 
 fn setup() -> (LocalStorage, TempDir) {
     let dir = TempDir::new().unwrap();
-    (LocalStorage::new(dir.path().to_path_buf(), "http://localhost/u".into()), dir)
+    (
+        LocalStorage::new(dir.path().to_path_buf(), "http://localhost/u".into()),
+        dir,
+    )
 }
 
 #[tokio::test]

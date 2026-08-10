@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use std::time::Duration;
 use pichost_core::state::{Blacklist, BlacklistError};
 use pichost_core::DbType;
+use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
     extract::{Request, State},
@@ -69,7 +69,10 @@ where
     (Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
-    let locale = locale_from_header(req.headers().get(ACCEPT_LANGUAGE), I18n::global().language());
+    let locale = locale_from_header(
+        req.headers().get(ACCEPT_LANGUAGE),
+        I18n::global().language(),
+    );
     let token = extract_bearer_token(&req)?;
     let claims = decode_and_validate_jwt(token, state.config.auth.jwt_secret.as_bytes(), locale)?;
     let auth_user = check_blacklist_and_quota(&state, &claims, locale).await?;
@@ -80,19 +83,24 @@ where
     Ok(next.run(req).await)
 }
 
-fn extract_bearer_token(
-    req: &Request,
-) -> Result<&str, (StatusCode, Json<serde_json::Value>)> {
-    let locale = locale_from_header(req.headers().get(ACCEPT_LANGUAGE), I18n::global().language());
+fn extract_bearer_token(req: &Request) -> Result<&str, (StatusCode, Json<serde_json::Value>)> {
+    let locale = locale_from_header(
+        req.headers().get(ACCEPT_LANGUAGE),
+        I18n::global().language(),
+    );
     let auth_header = req
         .headers()
         .get("Authorization")
         .and_then(|v| v.to_str().ok())
         .ok_or_else(|| error_json(locale, StatusCode::UNAUTHORIZED, "auth.missing_header"))?;
 
-    auth_header
-        .strip_prefix("Bearer ")
-        .ok_or_else(|| error_json(locale, StatusCode::UNAUTHORIZED, "auth.invalid_header_format"))
+    auth_header.strip_prefix("Bearer ").ok_or_else(|| {
+        error_json(
+            locale,
+            StatusCode::UNAUTHORIZED,
+            "auth.invalid_header_format",
+        )
+    })
 }
 
 fn decode_and_validate_jwt(
@@ -105,7 +113,11 @@ fn decode_and_validate_jwt(
     validation.validate_exp = true;
     let token_data = decode::<AccessTokenClaims>(token, &key, &validation).map_err(|e| {
         tracing::warn!("JWT decode failed: {e}");
-        error_json(locale, StatusCode::UNAUTHORIZED, "auth.invalid_or_expired_token")
+        error_json(
+            locale,
+            StatusCode::UNAUTHORIZED,
+            "auth.invalid_or_expired_token",
+        )
     })?;
     Ok(token_data.claims)
 }
@@ -122,7 +134,11 @@ where
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     if state.blacklist.check(&claims.jti).await.unwrap_or(true) {
-        return Err(error_json(locale, StatusCode::UNAUTHORIZED, "auth.token_revoked"));
+        return Err(error_json(
+            locale,
+            StatusCode::UNAUTHORIZED,
+            "auth.token_revoked",
+        ));
     }
     let user_id: Uuid = claims
         .sub
@@ -136,14 +152,22 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("Auth user lookup failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
 
     let (quota, wm_raw) = row.unwrap_or((None, None));
-    let watermark_config = wm_raw.and_then(|v| {
-        serde_json::from_value::<pichost_core::models::WatermarkConfig>(v).ok()
-    });
-    Ok(AuthUser { id: user_id, is_admin: claims.is_admin, storage_quota: quota, watermark_config })
+    let watermark_config = wm_raw
+        .and_then(|v| serde_json::from_value::<pichost_core::models::WatermarkConfig>(v).ok());
+    Ok(AuthUser {
+        id: user_id,
+        is_admin: claims.is_admin,
+        storage_quota: quota,
+        watermark_config,
+    })
 }
 
 /// Middleware that rejects non-admin users with 403 Forbidden.
@@ -152,14 +176,25 @@ pub async fn require_admin(
     req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    let locale = locale_from_header(req.headers().get(ACCEPT_LANGUAGE), I18n::global().language());
+    let locale = locale_from_header(
+        req.headers().get(ACCEPT_LANGUAGE),
+        I18n::global().language(),
+    );
     let auth_user = req.extensions().get::<AuthUser>().ok_or_else(|| {
         tracing::warn!("require_admin called without AuthUser in extensions");
-        error_json(locale, StatusCode::UNAUTHORIZED, "auth.authentication_required")
+        error_json(
+            locale,
+            StatusCode::UNAUTHORIZED,
+            "auth.authentication_required",
+        )
     })?;
 
     if !auth_user.is_admin {
-        return Err(error_json(locale, StatusCode::FORBIDDEN, "auth.admin_required"));
+        return Err(error_json(
+            locale,
+            StatusCode::FORBIDDEN,
+            "auth.admin_required",
+        ));
     }
 
     Ok(next.run(req).await)
@@ -187,7 +222,12 @@ mod tests {
             is_admin,
             typ: "access".to_string(),
         };
-        encode(&Header::default(), &claims, &EncodingKey::from_secret(SECRET.as_bytes())).unwrap()
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(SECRET.as_bytes()),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -227,9 +267,8 @@ mod tests {
 
     #[test]
     fn test_decode_garbage() {
-        let err =
-            decode_and_validate_jwt("garbage.token.value", SECRET.as_bytes(), Language::En)
-                .unwrap_err();
+        let err = decode_and_validate_jwt("garbage.token.value", SECRET.as_bytes(), Language::En)
+            .unwrap_err();
         assert_eq!(err.0, StatusCode::UNAUTHORIZED);
     }
 
@@ -302,15 +341,19 @@ mod tests {
         let mut cfg = pichost_core::config::AppConfig::default();
         cfg.auth.jwt_secret = SECRET.to_string();
         let cache_pool = crate::cache::create_pool("redis://localhost:6379", 2);
+        let components = crate::app::build_state_components(
+            cache_pool,
+            crate::cache::create_pool("redis://localhost:6379", 2),
+        );
         Arc::new(crate::app::AppState {
             pool: crate::db::create_sqlite_pool("sqlite::memory:", 1)
                 .await
                 .unwrap(),
-            cache: Arc::new(Cache::new(cache_pool.clone())),
-            blacklist: Arc::new(RedisBlacklist::new(Cache::new(cache_pool.clone()))),
-            rate_limiter: Arc::new(crate::middleware::rate_limit::RedisRateLimiter::new(
-                Cache::new(cache_pool),
-            )),
+            queue: components.queue,
+            blacklist: components.blacklist,
+            rate_limiter: components.rate_limiter,
+            invites: components.invites,
+            cache: components.cache,
             config: Arc::new(cfg),
             router: Arc::new(StorageRouter::new(
                 std::collections::HashMap::new(),
@@ -322,10 +365,7 @@ mod tests {
     fn auth_app(state: Arc<crate::app::AppState<sqlx::Sqlite>>) -> Router {
         Router::new()
             .route("/", get(|| async { "ok" }))
-            .route_layer(middleware::from_fn_with_state(
-                state.clone(),
-                require_auth,
-            ))
+            .route_layer(middleware::from_fn_with_state(state.clone(), require_auth))
             .with_state(state)
     }
 

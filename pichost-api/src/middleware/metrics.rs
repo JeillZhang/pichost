@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use axum::{extract::Request, middleware::Next, response::Response};
 
-use crate::metrics::{HTTP_REQUEST_DURATION, HTTP_REQUESTS_TOTAL};
+use crate::metrics::{HTTP_REQUESTS_TOTAL, HTTP_REQUEST_DURATION};
 
 pub async fn track_metrics(req: Request, next: Next) -> Response {
     let method = req.method().to_string();

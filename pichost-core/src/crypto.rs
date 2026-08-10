@@ -20,8 +20,7 @@ const NONCE_SIZE: usize = 12;
 /// Encrypt plaintext using AES-256-GCM.
 /// Returns base64-encoded "nonce || ciphertext" string.
 pub fn encrypt_token(plaintext: &str, key: &[u8; 32]) -> Result<String, CryptoError> {
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|_| CryptoError::InvalidKey(key.len()))?;
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CryptoError::InvalidKey(key.len()))?;
 
     let mut nonce_bytes = [0u8; NONCE_SIZE];
     OsRng.fill_bytes(&mut nonce_bytes);
@@ -38,8 +37,7 @@ pub fn encrypt_token(plaintext: &str, key: &[u8; 32]) -> Result<String, CryptoEr
 
 /// Decrypt base64-encoded "nonce || ciphertext" string.
 pub fn decrypt_token(encoded: &str, key: &[u8; 32]) -> Result<String, CryptoError> {
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|_| CryptoError::InvalidKey(key.len()))?;
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CryptoError::InvalidKey(key.len()))?;
 
     let combined = BASE64.decode(encoded).map_err(|_| CryptoError::Decrypt)?;
 
@@ -59,9 +57,9 @@ pub fn decrypt_token(encoded: &str, key: &[u8; 32]) -> Result<String, CryptoErro
 
 /// Decode a base64-encoded 32-byte key string into `[u8; 32]`.
 pub fn decode_key(encoded: &str) -> Result<[u8; 32], CryptoError> {
-    let bytes = BASE64.decode(encoded).map_err(|_| {
-        CryptoError::InvalidKey(0)
-    })?;
+    let bytes = BASE64
+        .decode(encoded)
+        .map_err(|_| CryptoError::InvalidKey(0))?;
     if bytes.len() != 32 {
         return Err(CryptoError::InvalidKey(bytes.len()));
     }

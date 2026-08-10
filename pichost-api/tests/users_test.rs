@@ -11,8 +11,14 @@ async fn get_my_profile_success() {
     let app = test_app().await;
     let (username, token, user_id) = create_user(&app, "profile").await;
 
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/users/me", Some(&token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/users/me",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "get profile failed: {resp}");
     assert_eq!(resp["id"].as_str().unwrap(), user_id.to_string());
     assert_eq!(resp["username"].as_str().unwrap(), username);
@@ -30,8 +36,7 @@ async fn get_my_profile_success() {
 #[ignore = "requires running PostgreSQL and Redis"]
 async fn get_my_profile_unauthorized() {
     let app = test_app().await;
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/users/me", None, &Value::Null).await;
+    let (status, resp) = send_json(&app, Method::GET, "/api/v1/users/me", None, &Value::Null).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert!(resp["error"].is_string());
 }
@@ -55,8 +60,14 @@ async fn patch_my_profile_username() {
     assert_eq!(resp["username"].as_str().unwrap(), new_username);
     assert_eq!(resp["id"].as_str().unwrap(), user_id.to_string());
 
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/users/me", Some(&token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/users/me",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(resp["username"].as_str().unwrap(), new_username);
 }
@@ -141,7 +152,11 @@ async fn patch_my_profile_unknown_backend() {
         &serde_json::json!({"storage_backend": "nope"}),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
     assert!(resp["error"].as_str().unwrap().contains("unknown backend"));
 }
 
@@ -161,7 +176,11 @@ async fn patch_my_profile_username_conflict() {
         &serde_json::json!({"username": user_b}),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "expected 409, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -171,8 +190,14 @@ async fn get_my_stats_success() {
     let app = test_app().await;
     let (_, token, _) = create_user(&app, "stats").await;
 
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/users/me/stats", Some(&token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/users/me/stats",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "stats failed: {resp}");
     assert_eq!(resp["total_images"].as_i64().unwrap(), 0);
     assert_eq!(resp["total_size"].as_i64().unwrap(), 0);
@@ -198,8 +223,14 @@ async fn get_my_stats_reflects_uploads() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "upload failed: {status}");
 
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/users/me/stats", Some(&token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/users/me/stats",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "stats after upload failed: {resp}");
     assert!(resp["total_images"].as_i64().unwrap() >= 1);
     assert!(resp["total_size"].as_i64().unwrap() > 0);
@@ -247,7 +278,11 @@ async fn change_password_wrong_current() {
         &serde_json::json!({"current_password": "wrongpass", "new_password": "newpass12345"}),
     )
     .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "expected 401, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "expected 401, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -265,7 +300,11 @@ async fn change_password_short_new_password() {
         &serde_json::json!({"current_password": "user123456", "new_password": "short"}),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
     assert!(resp["error"].as_str().unwrap().contains("at least 8"));
 }
 
@@ -306,7 +345,11 @@ async fn storage_configs_create_unsupported_provider() {
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -329,7 +372,11 @@ async fn storage_configs_create_unknown_provider() {
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -354,7 +401,11 @@ async fn storage_configs_create_github_unreachable_repo() {
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -373,7 +424,11 @@ async fn storage_configs_get_not_found() {
         &Value::Null,
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "expected 404, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "expected 404, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -392,7 +447,11 @@ async fn storage_configs_patch_not_found() {
         &serde_json::json!({"name": "renamed"}),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "expected 404, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "expected 404, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -411,7 +470,11 @@ async fn storage_configs_delete_not_found() {
         &Value::Null,
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "expected 404, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "expected 404, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -430,7 +493,11 @@ async fn test_username_taken_returns_code() {
         &serde_json::json!({"username": user_b}),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "expected 409, got {status}: {resp}"
+    );
     assert_eq!(resp["code"], "user.username_taken");
 }
 
@@ -449,6 +516,10 @@ async fn storage_configs_set_default_not_found() {
         &Value::Null,
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "expected 404, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "expected 404, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }

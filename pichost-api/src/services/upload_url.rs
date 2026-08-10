@@ -46,8 +46,8 @@ pub fn is_private_ip(octets: &[u8; 4]) -> bool {
 
 /// Validate that the URL uses an allowed scheme (http or https only).
 pub fn validate_url_scheme(url_str: &str, locale: Language) -> Result<url::Url, ApiError> {
-    let parsed = url::Url::parse(url_str)
-        .map_err(|e| err(locale, "url.invalid", &[e.to_string()]))?;
+    let parsed =
+        url::Url::parse(url_str).map_err(|e| err(locale, "url.invalid", &[e.to_string()]))?;
     match parsed.scheme() {
         "http" | "https" => Ok(parsed),
         other => Err(err(locale, "url.unsupported_scheme", &[other.to_string()])),
@@ -134,11 +134,7 @@ async fn fetch_remote_body(
 
     let content_length = response.content_length().unwrap_or(0);
     if content_length > MAX_BODY_SIZE {
-        return Err(err(
-            locale,
-            "url.too_large",
-            &[content_length.to_string()],
-        ));
+        return Err(err(locale, "url.too_large", &[content_length.to_string()]));
     }
 
     let bytes = response
@@ -165,7 +161,9 @@ pub async fn fetch_image_from_url(
     locale: Language,
 ) -> Result<(Vec<u8>, String), ApiError> {
     let parsed = validate_url_scheme(url, locale)?;
-    let host = parsed.host_str().ok_or_else(|| err(locale, "url.no_host", &[]))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| err(locale, "url.no_host", &[]))?;
     resolve_and_check_host(host, locale).await?;
 
     let client = build_download_client(locale)?;
@@ -285,7 +283,11 @@ mod tests {
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x00";
 
-    async fn spawn_server(status: &'static str, content_length: Option<u64>, body: &'static [u8]) -> String {
+    async fn spawn_server(
+        status: &'static str,
+        content_length: Option<u64>,
+        body: &'static [u8],
+    ) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -321,7 +323,9 @@ mod tests {
     async fn test_fetch_remote_body_happy_path() {
         let url = spawn_server("200 OK", None, PNG).await;
         let client = build_download_client(Language::En).unwrap();
-        let bytes = fetch_remote_body(&client, &url, Language::En).await.unwrap();
+        let bytes = fetch_remote_body(&client, &url, Language::En)
+            .await
+            .unwrap();
         assert_eq!(bytes, PNG);
     }
 
@@ -329,16 +333,23 @@ mod tests {
     async fn test_fetch_remote_body_garbage() {
         let url = spawn_server("200 OK", None, b"not an image").await;
         let client = build_download_client(Language::En).unwrap();
-        let (status, json) = fetch_remote_body(&client, &url, Language::En).await.unwrap_err();
+        let (status, json) = fetch_remote_body(&client, &url, Language::En)
+            .await
+            .unwrap_err();
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert!(json.0["error"].as_str().unwrap().contains("not a valid image"));
+        assert!(json.0["error"]
+            .as_str()
+            .unwrap()
+            .contains("not a valid image"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_fetch_remote_body_404() {
         let url = spawn_server("404 Not Found", None, b"nope").await;
         let client = build_download_client(Language::En).unwrap();
-        let (_, json) = fetch_remote_body(&client, &url, Language::En).await.unwrap_err();
+        let (_, json) = fetch_remote_body(&client, &url, Language::En)
+            .await
+            .unwrap_err();
         assert!(json.0["error"].as_str().unwrap().contains("404"));
     }
 
@@ -346,7 +357,9 @@ mod tests {
     async fn test_fetch_remote_body_oversized() {
         let url = spawn_server("200 OK", Some(MAX_BODY_SIZE + 1), b"x").await;
         let client = build_download_client(Language::En).unwrap();
-        let (_, json) = fetch_remote_body(&client, &url, Language::En).await.unwrap_err();
+        let (_, json) = fetch_remote_body(&client, &url, Language::En)
+            .await
+            .unwrap_err();
         assert!(json.0["error"].as_str().unwrap().contains("maximum size"));
     }
 
@@ -360,6 +373,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_fetch_image_from_url_rejects_ftp() {
-        assert!(fetch_image_from_url("ftp://example.com/x.png", Language::En).await.is_err());
+        assert!(
+            fetch_image_from_url("ftp://example.com/x.png", Language::En)
+                .await
+                .is_err()
+        );
     }
 }

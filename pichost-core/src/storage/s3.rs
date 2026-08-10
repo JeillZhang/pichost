@@ -4,9 +4,9 @@ use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
 
+use super::StorageBackend;
 use crate::config::RustfsStorageConfig;
 use crate::error::StorageError;
-use super::StorageBackend;
 
 pub struct RustfsStorage {
     client: Client,
@@ -47,7 +47,12 @@ impl RustfsStorage {
 
 #[async_trait]
 impl StorageBackend for RustfsStorage {
-    async fn put(&self, key: &str, data: &[u8], content_type: &str) -> Result<String, StorageError> {
+    async fn put(
+        &self,
+        key: &str,
+        data: &[u8],
+        content_type: &str,
+    ) -> Result<String, StorageError> {
         self.client
             .put_object()
             .bucket(&self.bucket)
@@ -69,9 +74,7 @@ impl StorageBackend for RustfsStorage {
             .send()
             .await
             .map_err(|e| {
-                let not_found = e
-                    .as_service_error()
-                    .is_some_and(|se| se.is_no_such_key())
+                let not_found = e.as_service_error().is_some_and(|se| se.is_no_such_key())
                     || e.to_string().contains("NoSuchKey")
                     || e.to_string().contains("NotFound");
                 if not_found {
@@ -153,10 +156,7 @@ mod tests {
     #[tokio::test]
     async fn public_url_no_trailing_slash() {
         let s = RustfsStorage::new(&config("http://localhost:9000")).await;
-        assert_eq!(
-            s.public_url("k.png"),
-            "http://localhost:9000/pichost/k.png"
-        );
+        assert_eq!(s.public_url("k.png"), "http://localhost:9000/pichost/k.png");
     }
 
     #[tokio::test]

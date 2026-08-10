@@ -1,7 +1,7 @@
-use std::sync::Arc;
 use crate::db::DbQueryResult;
 use pichost_core::DbType;
 use sqlx::Pool;
+use std::sync::Arc;
 
 use axum::{
     extract::{Json, Path, State},
@@ -109,9 +109,8 @@ where
             &[e.to_string()],
         )
     })?;
-    let parent = parent.ok_or_else(|| {
-        error_json(locale, StatusCode::NOT_FOUND, "category.parent_not_found")
-    })?;
+    let parent = parent
+        .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "category.parent_not_found"))?;
     if let Some(gp) = parent.parent_id {
         Box::pin(validate_depth(pool, user_id, gp, current + 1, locale)).await?;
     }
@@ -161,7 +160,8 @@ where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     pichost_core::models::Category: crate::db::DbRow<DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
@@ -188,11 +188,7 @@ where
     .await
     .map_err(|e| {
         if pichost_core::db::db_error_kind(&e) == pichost_core::db::DbErrorKind::UniqueViolation {
-            return error_json(
-                locale,
-                StatusCode::CONFLICT,
-                "category.name_exists",
-            );
+            return error_json(locale, StatusCode::CONFLICT, "category.name_exists");
         }
         error_json_args(
             locale,
@@ -369,7 +365,11 @@ mod tests {
         let parent = Uuid::new_v4();
         let child = Uuid::new_v4();
         let other = Uuid::new_v4();
-        let categories = vec![cat(parent, None), cat(child, Some(parent)), cat(other, Some(Uuid::new_v4()))];
+        let categories = vec![
+            cat(parent, None),
+            cat(child, Some(parent)),
+            cat(other, Some(Uuid::new_v4())),
+        ];
         let children = build_children(parent, &categories);
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].id, child);

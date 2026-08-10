@@ -11,8 +11,14 @@ async fn categories_empty_tree() {
     let app = test_app().await;
     let (_, token, _) = create_user(&app, "cate_empty").await;
 
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/categories", Some(&token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/categories",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "list categories failed: {resp}");
     assert!(resp.as_array().unwrap().is_empty());
 }
@@ -31,7 +37,11 @@ async fn categories_create_root_success() {
         &serde_json::json!({"name": "Photos"}),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "create category failed: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "create category failed: {resp}"
+    );
     let id = Uuid::parse_str(resp["id"].as_str().unwrap()).unwrap();
     assert_ne!(id, Uuid::nil());
     assert_eq!(resp["name"].as_str().unwrap(), "Photos");
@@ -53,7 +63,11 @@ async fn categories_create_empty_name() {
         &serde_json::json!({"name": "   "}),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -72,7 +86,11 @@ async fn categories_create_name_too_long() {
         &serde_json::json!({"name": long_name}),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -93,9 +111,14 @@ async fn categories_get_success() {
     assert_eq!(status, StatusCode::CREATED);
     let id = resp["id"].as_str().unwrap().to_string();
 
-    let (status, resp) =
-        send_json(&app, Method::GET, &format!("/api/v1/categories/{id}"), Some(&token), &Value::Null)
-            .await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        &format!("/api/v1/categories/{id}"),
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "get category failed: {resp}");
     assert_eq!(resp["id"].as_str().unwrap(), id);
     assert_eq!(resp["name"].as_str().unwrap(), "Travel");
@@ -116,7 +139,11 @@ async fn categories_get_not_found() {
         &Value::Null,
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "expected 404, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "expected 404, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -176,7 +203,11 @@ async fn categories_update_not_found() {
         &serde_json::json!({"name": "Renamed"}),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "expected 404, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "expected 404, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -233,7 +264,11 @@ async fn categories_delete_not_found() {
         &Value::Null,
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "expected 404, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "expected 404, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -266,8 +301,14 @@ async fn categories_tree_nested_structure() {
     let child_id = resp["id"].as_str().unwrap().to_string();
     assert_eq!(resp["parent_id"].as_str().unwrap(), root_id);
 
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/categories", Some(&token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/categories",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "list tree failed: {resp}");
     let tree = resp.as_array().unwrap();
     assert_eq!(tree.len(), 1);
@@ -315,7 +356,11 @@ async fn categories_duplicate_name_conflict() {
         &serde_json::json!({"name": "Vacation", "parent_id": root_id}),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "expected 409, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -334,7 +379,11 @@ async fn categories_create_child_with_missing_parent() {
         &serde_json::json!({"name": "Orphan", "parent_id": missing}),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "expected 404, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "expected 404, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -363,7 +412,11 @@ async fn categories_depth_limit_rejects_third_level() {
         &serde_json::json!({"name": "L2", "parent_id": l1_id}),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "second level should succeed: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "second level should succeed: {resp}"
+    );
     let l2_id = resp["id"].as_str().unwrap().to_string();
 
     let (status, resp) = send_json(
@@ -374,7 +427,11 @@ async fn categories_depth_limit_rejects_third_level() {
         &serde_json::json!({"name": "L3", "parent_id": l2_id}),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -392,7 +449,11 @@ async fn duplicate_category_returns_conflict() {
         &serde_json::json!({"name": "Photos"}),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "create category failed: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "create category failed: {resp}"
+    );
     let root_id = resp["id"].as_str().unwrap().to_string();
 
     let (status, resp) = send_json(
@@ -413,6 +474,10 @@ async fn duplicate_category_returns_conflict() {
         &serde_json::json!({"name": "Vacation", "parent_id": root_id}),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "expected 409, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }

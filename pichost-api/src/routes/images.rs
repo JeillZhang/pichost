@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use crate::db::DbQueryResult;
 use pichost_core::DbType;
+use std::sync::Arc;
 
 use axum::{
     extract::{Extension, Multipart, Path, State},
@@ -14,11 +14,12 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::app::AppState;
-use sqlx::{Pool, Row};
+use crate::cache::{cached_meta, cached_thumb};
 use crate::i18n_ext::{error_json, error_json_args, JsonBody, Locale};
 use crate::middleware::auth::AuthUser;
 use crate::services::upload::{self, ImageListQuery, ImageListResponse, ImageRow, UploadResult};
 use crate::services::upload_url;
+use sqlx::{Pool, Row};
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -33,10 +34,18 @@ fn validate_batch_ids(
     locale: Language,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     if ids.is_empty() {
-        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.batch_empty"));
+        return Err(error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "image.batch_empty",
+        ));
     }
     if ids.len() > 100 {
-        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.batch_limit"));
+        return Err(error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "image.batch_limit",
+        ));
     }
     Ok(())
 }
@@ -69,18 +78,28 @@ pub struct UpdateImageRequest {
 /// Validate original_name: non-empty, ≤255 chars, no path separators or null bytes.
 fn validate_original_name(name: &str, locale: Language) -> Result<(), RouteError> {
     if name.is_empty() {
-        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.rename_empty"));
+        return Err(error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "image.rename_empty",
+        ));
     }
     if name.len() > 255 {
-        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.rename_too_long"));
+        return Err(error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "image.rename_too_long",
+        ));
     }
     if name.contains('/') || name.contains('\\') || name.contains('\0') {
-        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.rename_invalid"));
+        return Err(error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "image.rename_invalid",
+        ));
     }
     Ok(())
 }
-
-
 
 async fn count_user_images<DB: DbType>(
     pool: &Pool<DB>,
@@ -97,7 +116,8 @@ where
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     let sql = build_count_sql(search_term, config_id, category_id);
@@ -113,11 +133,19 @@ where
     }
     let row = q.fetch_one(pool).await.map_err(|e| {
         tracing::warn!("Image count query failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
     row.try_get(0usize).map_err(|e| {
         tracing::warn!("Image count decode failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })
 }
 
@@ -140,8 +168,10 @@ where
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
@@ -159,7 +189,11 @@ where
     q = q.bind(limit).bind(offset);
     q.fetch_all(pool).await.map_err(|e| {
         tracing::warn!("Image list query failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })
 }
 
@@ -253,20 +287,30 @@ where
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
     [uuid::Uuid]: sqlx::Type<DB>,
 {
     let (bytes, file_name, storage_config_ids) =
         extract_upload_parts(&mut multipart, locale.0).await?;
 
-    match upload::process_upload(&state, &user, bytes, file_name, storage_config_ids, locale.0)
-        .await
+    match upload::process_upload(
+        &state,
+        &user,
+        bytes,
+        file_name,
+        storage_config_ids,
+        locale.0,
+    )
+    .await
     {
         Ok(results) => {
             crate::metrics::UPLOADS_TOTAL.inc();
@@ -293,7 +337,11 @@ pub struct UrlUploadRequest {
 
 fn validate_url_not_empty(url: &str, locale: Language) -> Result<(), RouteError> {
     if url.trim().is_empty() {
-        return Err(error_json(locale, StatusCode::BAD_REQUEST, "url.field_required"));
+        return Err(error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "url.field_required",
+        ));
     }
     Ok(())
 }
@@ -318,12 +366,15 @@ where
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    sqlx::types::Json<serde_json::Value>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
     [uuid::Uuid]: sqlx::Type<DB>,
 {
@@ -331,8 +382,15 @@ where
 
     let (bytes, file_name) = upload_url::fetch_image_from_url(&payload.url, locale.0).await?;
 
-    match upload::process_upload(&state, &user, bytes, file_name, payload.storage_config_ids, locale.0)
-        .await
+    match upload::process_upload(
+        &state,
+        &user,
+        bytes,
+        file_name,
+        payload.storage_config_ids,
+        locale.0,
+    )
+    .await
     {
         Ok(results) => {
             crate::metrics::UPLOADS_TOTAL.inc();
@@ -412,9 +470,8 @@ async fn extract_upload_parts(
         .await?;
     }
 
-    let bytes = file_data.ok_or_else(|| {
-        error_json(locale, StatusCode::BAD_REQUEST, "upload.file_missing")
-    })?;
+    let bytes = file_data
+        .ok_or_else(|| error_json(locale, StatusCode::BAD_REQUEST, "upload.file_missing"))?;
 
     Ok((bytes, file_name, storage_config_ids))
 }
@@ -446,8 +503,10 @@ where
     usize: sqlx::ColumnIndex<DB::Row>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
@@ -509,35 +568,38 @@ where
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
-    let result = state
-        .cache
-        .cached_meta(&id, 600, async {
-            sqlx::query_as::<_, ImageRow>(
-                "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size,\
+    let result = cached_meta(state.cache.as_ref(), &id, 600, async {
+        sqlx::query_as::<_, ImageRow>(
+            "SELECT i.id, i.public_key, i.original_name, i.url, i.mime_type, i.file_size,\
                  i.sha256, i.width, i.height, i.status, i.thumbnail_url, i.webp_url, \
                  i.created_at, i.category_id, i.storage_config_id, \
                  c.name, c.provider \
                  FROM images i \
                  LEFT JOIN user_storage_configs c ON i.storage_config_id = c.id \
                  WHERE i.id = $1 AND i.user_id = $2",
+        )
+        .bind(id)
+        .bind(user.id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Get image query failed: {e}");
+            error_json(
+                locale.0,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "image.internal_error",
             )
-            .bind(id)
-            .bind(user.id)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|e| {
-                tracing::warn!("Get image query failed: {e}");
-                error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "image.internal_error")
-            })?
-            .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"))
-            .map(UploadResult::from_row)
-        })
-        .await?;
+        })?
+        .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"))
+        .map(UploadResult::from_row)
+    })
+    .await?;
 
     Ok(Json(result))
 }
@@ -566,7 +628,11 @@ where
             .await
             .map_err(|e| {
                 tracing::warn!("Rename image query failed: {e}");
-                error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+                error_json(
+                    locale,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "common.internal_error",
+                )
             })?
             .affected();
     if updated_rows == 0 {
@@ -586,7 +652,8 @@ where
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -606,7 +673,11 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("Rename image re-fetch failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?
     .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "image.not_found"))
 }
@@ -627,7 +698,8 @@ where
     for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
     <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    chrono::DateTime<chrono::Utc>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -650,7 +722,12 @@ pub async fn public_get<DB: DbType>(
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
-    (std::string::String, std::string::String, std::string::String, std::string::String): crate::db::DbRow<DB>,
+    (
+        std::string::String,
+        std::string::String,
+        std::string::String,
+        std::string::String,
+    ): crate::db::DbRow<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     let row = sqlx::query_as::<_, (String, String, String, String)>(
@@ -661,13 +738,21 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("Public image query failed: {e}");
-        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?
     .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"))?;
 
     let (storage_key, mime_type, status, storage_backend) = row;
     if !check_image_status(&status) {
-        return Err(error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"));
+        return Err(error_json(
+            locale.0,
+            StatusCode::NOT_FOUND,
+            "image.not_found",
+        ));
     }
 
     let storage = state.router.for_backend(&storage_backend);
@@ -719,20 +804,22 @@ where
     .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"))?;
 
     let (thumb_key, storage_backend) = row;
-    let thumb_key = thumb_key.ok_or_else(|| {
-        error_json(locale.0, StatusCode::NOT_FOUND, "image.thumbnail_not_ready")
-    })?;
+    let thumb_key = thumb_key
+        .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.thumbnail_not_ready"))?;
 
-    let bytes = state
-        .cache
-        .cached_thumb(&format!("thumb:{}", image_id), 3600, async {
+    let bytes = cached_thumb(
+        state.cache.as_ref(),
+        &format!("thumb:{}", image_id),
+        3600,
+        async {
             let backend = state.router.for_backend(&storage_backend);
             backend.get(&thumb_key).await.map_err(|e| {
                 tracing::warn!("Thumb storage read failed: {e}");
                 error_json(locale.0, StatusCode::NOT_FOUND, "image.thumbnail_not_found")
             })
-        })
-        .await?;
+        },
+    )
+    .await?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -763,14 +850,17 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("Thumbnail-by-key query failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?
     .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "image.not_found"))?;
 
     let (thumb_key, storage_backend) = row;
-    let thumb_key = thumb_key.ok_or_else(|| {
-        error_json(locale, StatusCode::NOT_FOUND, "image.thumbnail_not_ready")
-    })?;
+    let thumb_key = thumb_key
+        .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "image.thumbnail_not_ready"))?;
     Ok((thumb_key, storage_backend))
 }
 
@@ -791,9 +881,11 @@ where
         resolve_thumb_key_by_public_key(&state.pool, &public_key, locale.0).await?;
 
     let backend = state.router.for_backend(&storage_backend);
-    let bytes = state
-        .cache
-        .cached_thumb(&format!("thumb:pk:{}", public_key), 3600, async {
+    let bytes = cached_thumb(
+        state.cache.as_ref(),
+        &format!("thumb:pk:{}", public_key),
+        3600,
+        async {
             backend.get(&thumb_key).await.map_err(|e| {
                 tracing::warn!("Thumb storage read by key failed: {e}");
                 error_json(
@@ -802,8 +894,9 @@ where
                     "image.thumbnail_not_found",
                 )
             })
-        })
-        .await?;
+        },
+    )
+    .await?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -838,20 +931,22 @@ where
     .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"))?;
 
     let (webp_key, storage_backend) = row;
-    let webp_key = webp_key.ok_or_else(|| {
-        error_json(locale.0, StatusCode::NOT_FOUND, "image.webp_not_ready")
-    })?;
+    let webp_key = webp_key
+        .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.webp_not_ready"))?;
 
-    let bytes = state
-        .cache
-        .cached_thumb(&format!("webp:{}", image_id), 3600, async {
+    let bytes = cached_thumb(
+        state.cache.as_ref(),
+        &format!("webp:{}", image_id),
+        3600,
+        async {
             let backend = state.router.for_backend(&storage_backend);
             backend.get(&webp_key).await.map_err(|e| {
                 tracing::warn!("WebP storage read failed: {e}");
                 error_json(locale.0, StatusCode::NOT_FOUND, "image.webp_not_found")
             })
-        })
-        .await?;
+        },
+    )
+    .await?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -885,7 +980,11 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("Delete image query failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?
     .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "image.not_found"))
 }
@@ -921,7 +1020,11 @@ where
         .await
         .map_err(|e| {
             tracing::warn!("Image delete db failed: {e}");
-            error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "image.delete_failed")
+            error_json(
+                locale.0,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "image.delete_failed",
+            )
         })?;
 
     let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
@@ -963,10 +1066,18 @@ where
     for id in ids {
         q = q.bind(id);
     }
-    q.bind(user.id).bind(user.is_admin).fetch_all(pool).await.map_err(|e| {
-        tracing::warn!("Batch delete query failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
-    })
+    q.bind(user.id)
+        .bind(user.is_admin)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Batch delete query failed: {e}");
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
+        })
 }
 
 /// POST /api/v1/images/batch-delete — delete multiple images (protected)
@@ -996,7 +1107,10 @@ where
     }
 
     let placeholders: Vec<String> = (1..=body.ids.len()).map(|i| format!("${i}")).collect();
-    let sql = format!("DELETE FROM images WHERE id IN ({})", placeholders.join(", "));
+    let sql = format!(
+        "DELETE FROM images WHERE id IN ({})",
+        placeholders.join(", ")
+    );
     let mut q = sqlx::query(&sql);
     for image_id in &body.ids {
         q = q.bind(image_id);
@@ -1078,7 +1192,8 @@ where
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
     pichost_core::models::Category: crate::db::DbRow<DB>,
     <DB as sqlx::Database>::QueryResult: crate::db::DbQueryResult,
-    Option<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<uuid::Uuid>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
@@ -1103,7 +1218,11 @@ where
         })?;
 
     if result.affected() == 0 {
-        return Err(error_json(locale.0, StatusCode::NOT_FOUND, "image.move_not_found"));
+        return Err(error_json(
+            locale.0,
+            StatusCode::NOT_FOUND,
+            "image.move_not_found",
+        ));
     }
 
     let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", id)).await;
@@ -1119,10 +1238,18 @@ pub struct BatchMoveRequest {
 
 fn validate_batch_move(ids: &[Uuid], locale: Language) -> Result<(), RouteError> {
     if ids.is_empty() {
-        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.batch_move_empty"));
+        return Err(error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "image.batch_move_empty",
+        ));
     }
     if ids.len() > 100 {
-        return Err(error_json(locale, StatusCode::BAD_REQUEST, "image.batch_move_limit"));
+        return Err(error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "image.batch_move_limit",
+        ));
     }
     Ok(())
 }
@@ -1144,8 +1271,9 @@ where
     validate_batch_move(&body.image_ids, locale.0)?;
     ensure_category_owned(&state.pool, body.category_id, user.id, locale.0).await?;
 
-    let placeholders: Vec<String> =
-        (3..3 + body.image_ids.len()).map(|i| format!("${i}")).collect();
+    let placeholders: Vec<String> = (3..3 + body.image_ids.len())
+        .map(|i| format!("${i}"))
+        .collect();
     let sql = format!(
         "UPDATE images SET category_id = $1 WHERE user_id = $2 AND id IN ({})",
         placeholders.join(", ")
@@ -1154,17 +1282,14 @@ where
     for image_id in &body.image_ids {
         q = q.bind(image_id);
     }
-    let result = q
-        .execute(&state.pool)
-            .await
-            .map_err(|e| {
-                error_json_args(
-                    locale.0,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "common.db_error",
-                    &[e.to_string()],
-                )
-            })?;
+    let result = q.execute(&state.pool).await.map_err(|e| {
+        error_json_args(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.db_error",
+            &[e.to_string()],
+        )
+    })?;
 
     for image_id in &body.image_ids {
         let _: Result<(), _> = state.cache.del(&format!("pichost:meta:{}", image_id)).await;
@@ -1194,7 +1319,11 @@ pub async fn get_image_links<DB: DbType>(
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
-    (std::string::String, std::string::String, std::string::String): crate::db::DbRow<DB>,
+    (
+        std::string::String,
+        std::string::String,
+        std::string::String,
+    ): crate::db::DbRow<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     use crate::services::html_escape;
@@ -1208,7 +1337,11 @@ where
     .await
     .map_err(|e| {
         tracing::warn!("Image links query failed: {e}");
-        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?
     .ok_or_else(|| error_json(locale.0, StatusCode::NOT_FOUND, "image.not_found"))?;
 
@@ -1369,10 +1502,22 @@ mod tests {
 
     #[test]
     fn test_resolve_sort() {
-        assert_eq!(resolve_sort(&sample_query("file_size", "asc")), ("file_size", "ASC"));
-        assert_eq!(resolve_sort(&sample_query("original_name", "ASC")), ("original_name", "ASC"));
-        assert_eq!(resolve_sort(&sample_query("created_at", "desc")), ("created_at", "DESC"));
-        assert_eq!(resolve_sort(&sample_query("bogus", "bogus")), ("created_at", "DESC"));
+        assert_eq!(
+            resolve_sort(&sample_query("file_size", "asc")),
+            ("file_size", "ASC")
+        );
+        assert_eq!(
+            resolve_sort(&sample_query("original_name", "ASC")),
+            ("original_name", "ASC")
+        );
+        assert_eq!(
+            resolve_sort(&sample_query("created_at", "desc")),
+            ("created_at", "DESC")
+        );
+        assert_eq!(
+            resolve_sort(&sample_query("bogus", "bogus")),
+            ("created_at", "DESC")
+        );
     }
 
     #[test]
@@ -1381,7 +1526,10 @@ mod tests {
         let jpeg = [0xff, 0xd8, 0xff, 0xe0];
         assert_eq!(mime_for_thumb_bytes(&png), "image/png");
         assert_eq!(mime_for_thumb_bytes(&jpeg), "image/jpeg");
-        assert_eq!(mime_for_thumb_bytes(b"not an image"), "application/octet-stream");
+        assert_eq!(
+            mime_for_thumb_bytes(b"not an image"),
+            "application/octet-stream"
+        );
         assert_eq!(mime_for_thumb_bytes(&[]), "application/octet-stream");
     }
 
