@@ -406,12 +406,13 @@ mod tests {
         let pool = crate::db::create_sqlite_pool("sqlite::memory:", 1)
             .await
             .expect("sqlite memory pool should build");
+        let cache_pool = crate::cache::create_pool("redis://localhost:6379", 2);
         AppState {
             pool,
-            cache: Arc::new(crate::cache::Cache::new(crate::cache::create_pool(
-                "redis://localhost:6379",
-                2,
-            ))),
+            cache: Arc::new(crate::cache::Cache::new(cache_pool.clone())),
+            blacklist: Arc::new(crate::middleware::auth::RedisBlacklist::new(
+                crate::cache::Cache::new(cache_pool),
+            )),
             config: Arc::new(AppConfig::default()),
             router: Arc::new(StorageRouter::new(std::collections::HashMap::new(), "local".into())),
         }
@@ -425,12 +426,13 @@ mod tests {
         crate::db::run_pg_migrations(&pool)
             .await
             .expect("migrations should run");
+        let cache_pool = crate::cache::create_pool("redis://localhost:6379", 2);
         AppState {
             pool,
-            cache: Arc::new(crate::cache::Cache::new(crate::cache::create_pool(
-                "redis://localhost:6379",
-                2,
-            ))),
+            cache: Arc::new(crate::cache::Cache::new(cache_pool.clone())),
+            blacklist: Arc::new(crate::middleware::auth::RedisBlacklist::new(
+                crate::cache::Cache::new(cache_pool),
+            )),
             config: Arc::new(AppConfig::default()),
             router: Arc::new(StorageRouter::new(std::collections::HashMap::new(), "local".into())),
         }

@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use std::time::Duration;
+use pichost_core::state::{Blacklist, BlacklistError};
 use pichost_core::DbType;
 
 use axum::{
@@ -15,6 +17,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::app::AppState;
+use crate::cache::Cache;
 use crate::i18n_ext::{error_json, locale_from_header};
 use crate::routes::auth::AccessTokenClaims;
 
@@ -24,6 +27,35 @@ pub struct AuthUser {
     pub is_admin: bool,
     pub storage_quota: Option<i64>,
     pub watermark_config: Option<pichost_core::models::WatermarkConfig>,
+}
+
+/// Redis-backed `Blacklist` implementation. Keys are `bl:{jti}`; the
+/// middleware call site keeps fail-closed semantics (`unwrap_or(true)`).
+pub struct RedisBlacklist {
+    cache: Cache,
+}
+
+impl RedisBlacklist {
+    pub fn new(cache: Cache) -> Self {
+        Self { cache }
+    }
+}
+
+#[async_trait::async_trait]
+impl Blacklist for RedisBlacklist {
+    async fn check(&self, jti: &str) -> Result<bool, BlacklistError> {
+        self.cache
+            .exists(&format!("bl:{}", jti))
+            .await
+            .map_err(|e| BlacklistError::Other(e.to_string()))
+    }
+
+    async fn revoke(&self, jti: &str, ttl: Duration) -> Result<(), BlacklistError> {
+        self.cache
+            .set_ex(&format!("bl:{}", jti), "revoked", ttl.as_secs())
+            .await
+            .map_err(|e| BlacklistError::Other(e.to_string()))
+    }
 }
 
 pub async fn require_auth<DB: DbType>(
@@ -89,7 +121,7 @@ where
     (Option<i64>, Option<serde_json::Value>): crate::db::DbRow<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
-    if state.cache.exists(&format!("bl:{}", claims.jti)).await.unwrap_or(true) {
+    if state.blacklist.check(&claims.jti).await.unwrap_or(true) {
         return Err(error_json(locale, StatusCode::UNAUTHORIZED, "auth.token_revoked"));
     }
     let user_id: Uuid = claims
@@ -269,14 +301,13 @@ mod tests {
         use pichost_core::StorageRouter;
         let mut cfg = pichost_core::config::AppConfig::default();
         cfg.auth.jwt_secret = SECRET.to_string();
+        let cache_pool = crate::cache::create_pool("redis://localhost:6379", 2);
         Arc::new(crate::app::AppState {
             pool: crate::db::create_sqlite_pool("sqlite::memory:", 1)
                 .await
                 .unwrap(),
-            cache: Arc::new(crate::cache::Cache::new(crate::cache::create_pool(
-                "redis://localhost:6379",
-                2,
-            ))),
+            cache: Arc::new(Cache::new(cache_pool.clone())),
+            blacklist: Arc::new(RedisBlacklist::new(Cache::new(cache_pool))),
             config: Arc::new(cfg),
             router: Arc::new(StorageRouter::new(
                 std::collections::HashMap::new(),

@@ -23,11 +23,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = db::create_pg_pool(&config.database.url, config.database.max_connections).await?;
     db::run_pg_migrations(&pool).await?;
     let cache_pool = cache::create_pool(&config.redis.url, config.redis.pool_size as usize);
+    let cache = Arc::new(cache::Cache::new(cache_pool.clone()));
 
     let router = Arc::new(init_storage_backends(&config).await);
     let state = Arc::new(AppState {
         pool,
-        cache: Arc::new(cache::Cache::new(cache_pool)),
+        cache,
+        blacklist: Arc::new(pichost_api::middleware::auth::RedisBlacklist::new(
+            cache::Cache::new(cache_pool),
+        )),
         config: Arc::new(config),
         router,
     });

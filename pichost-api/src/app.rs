@@ -25,6 +25,7 @@ use crate::middleware::rate_limit;
 pub struct AppState<DB: DbType> {
     pub pool: Pool<DB>,
     pub cache: Arc<Cache>,
+    pub blacklist: Arc<dyn pichost_core::state::Blacklist>,
     pub config: Arc<AppConfig>,
     pub router: Arc<StorageRouter>,
 }
@@ -495,11 +496,15 @@ mod tests {
     use pichost_core::config::RustfsStorageConfig;
 
     async fn test_state() -> Arc<AppState<sqlx::Sqlite>> {
+        let cache_pool = create_pool("redis://localhost:6379", 2);
         Arc::new(AppState {
             pool: crate::db::create_sqlite_pool("sqlite::memory:", 1)
                 .await
                 .unwrap(),
-            cache: Arc::new(Cache::new(create_pool("redis://localhost:6379", 2))),
+            cache: Arc::new(Cache::new(cache_pool.clone())),
+            blacklist: Arc::new(crate::middleware::auth::RedisBlacklist::new(Cache::new(
+                cache_pool,
+            ))),
             config: Arc::new(AppConfig::default()),
             router: Arc::new(StorageRouter::new(HashMap::new(), "local".into())),
         })

@@ -230,14 +230,15 @@ mod tests {
         cfg.rate_limit.upload_max = max;
         cfg.rate_limit.general_max = max;
         cfg.rate_limit.public_max = max;
+        let cache_pool = crate::cache::create_pool("redis://localhost:6379", 2);
         Arc::new(AppState {
             pool: crate::db::create_sqlite_pool("sqlite::memory:", 1)
                 .await
                 .unwrap(),
-            cache: Arc::new(crate::cache::Cache::new(crate::cache::create_pool(
-                "redis://localhost:6379",
-                2,
-            ))),
+            cache: Arc::new(crate::cache::Cache::new(cache_pool.clone())),
+            blacklist: Arc::new(crate::middleware::auth::RedisBlacklist::new(
+                crate::cache::Cache::new(cache_pool),
+            )),
             config: Arc::new(cfg),
             router: Arc::new(StorageRouter::new(
                 std::collections::HashMap::new(),

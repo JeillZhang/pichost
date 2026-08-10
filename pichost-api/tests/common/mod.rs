@@ -113,6 +113,9 @@ pub async fn test_app_with_config(mut config: AppConfig) -> TestApp {
 
     let state = Arc::new(AppState {
         pool,
+        blacklist: Arc::new(pichost_api::middleware::auth::RedisBlacklist::new(
+            Cache::new(cache.get_pool()),
+        )),
         cache,
         config,
         router: storage_router,

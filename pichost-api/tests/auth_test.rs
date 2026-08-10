@@ -289,3 +289,21 @@ async fn test_app_with_rate_limits(auth_max: u32) -> TestApp {
     cfg.rate_limit.auth_max = auth_max;
     common::test_app_with_config(cfg).await
 }
+
+fn test_cache() -> pichost_api::cache::Cache {
+    let url = std::env::var("PICHOST_REDIS_URL")
+        .unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    pichost_api::cache::Cache::new(pichost_api::cache::create_pool(&url, 5))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires Redis"]
+async fn redis_blacklist_revoke_blocks_jti() {
+    use pichost_core::state::Blacklist;
+    let cache = test_cache();
+    let bl = pichost_api::middleware::auth::RedisBlacklist::new(cache);
+    let jti = format!("jti-{}", uuid::Uuid::new_v4());
+    assert!(!bl.check(&jti).await.unwrap());
+    bl.revoke(&jti, std::time::Duration::from_secs(60)).await.unwrap();
+    assert!(bl.check(&jti).await.unwrap());
+}

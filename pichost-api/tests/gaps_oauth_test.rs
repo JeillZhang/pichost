@@ -73,6 +73,9 @@ async fn oauth_app() -> OAuthApp {
 
     let state = Arc::new(AppState {
         pool,
+        blacklist: Arc::new(pichost_api::middleware::auth::RedisBlacklist::new(
+            Cache::new(cache.get_pool()),
+        )),
         cache,
         config,
         router: storage_router,
