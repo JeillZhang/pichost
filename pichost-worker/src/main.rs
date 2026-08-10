@@ -2,10 +2,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use deadpool_redis::{Config as RedisConfig, Pool as RedisPool, Runtime};
+use pichost_core::state::Queue;
 use pichost_core::storage::local::LocalStorage;
 use pichost_core::storage::s3::RustfsStorage;
 use pichost_core::storage::StorageBackend;
+use pichost_core::DbType;
 use pichost_core::StorageRouter;
+use sqlx::Pool;
 use tokio::task::JoinHandle;
 
 mod config;
@@ -16,9 +19,11 @@ mod processor;
 mod queue;
 mod watermark;
 
+use crate::queue::RedisQueue;
+
 /// Bundled state shared across all worker tasks.
-struct WorkerState {
-    pool: sqlx::PgPool,
+struct WorkerState<DB: DbType> {
+    pool: Pool<DB>,
     redis: RedisPool,
     config: Arc<pichost_core::config::AppConfig>,
     router: Arc<StorageRouter>,
@@ -39,12 +44,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 2. Init DB pool
-    let pool = db::create_pool(
+    let pool = db::create_pg_pool(
         &app_config.database.url,
         app_config.database.max_connections,
     )
     .await?;
-    db::run_migrations(&pool).await?;
+    db::run_pg_migrations(&pool).await?;
     tracing::info!("database connected, migrations applied");
 
     // 3. Init Redis pool
@@ -69,14 +74,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Recover stale tasks and initialise the StorageRouter for all configured backends.
-async fn init_worker_state(
-    pool: sqlx::PgPool,
+async fn init_worker_state<DB: DbType>(
+    pool: Pool<DB>,
     redis: RedisPool,
     config: Arc<pichost_core::config::AppConfig>,
-) -> Result<WorkerState, Box<dyn std::error::Error>> {
+) -> Result<WorkerState<DB>, Box<dyn std::error::Error>>
+where
+    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
+{
     // Startup recovery: re-enqueue stale tasks from processing queue
-    let recovered =
-        queue::recover_stale_tasks(&redis, config.worker.task_timeout).await?;
+    let recovered = queue::recover_stale_tasks(&redis, config.worker.task_timeout).await?;
     if !recovered.is_empty() {
         tracing::info!(count = recovered.len(), "recovered stale tasks");
     }
@@ -110,111 +117,209 @@ async fn init_worker_state(
 }
 
 /// Spawn one `worker_loop` task per configured concurrency slot.
-fn spawn_workers(state: WorkerState) -> Vec<JoinHandle<()>> {
+fn spawn_workers<DB: DbType>(state: WorkerState<DB>) -> Vec<JoinHandle<()>>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    str: sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    for<'q> Option<&'q str>: sqlx::Encode<'q, DB>,
+    for<'q> Option<&'q str>: sqlx::Type<DB>,
+{
     let concurrency = state.config.worker.concurrency;
     let mut handles = Vec::with_capacity(concurrency);
+    let rq = RedisQueue::new(state.redis.clone());
     for i in 0..concurrency {
         let pool = state.pool.clone();
-        let redis = state.redis.clone();
+        let rq = rq.clone();
         let config = state.config.clone();
         let router = state.router.clone();
 
         let handle = tokio::spawn(async move {
             tracing::info!(worker_id = i, "worker started");
-            worker_loop(i, pool, redis, config, router).await;
+            worker_loop(i, pool, rq, config, router).await;
         });
         handles.push(handle);
     }
     handles
 }
 
-async fn worker_loop(
+async fn worker_loop<DB: DbType>(
     worker_id: usize,
-    pool: sqlx::PgPool,
-    redis: RedisPool,
+    pool: Pool<DB>,
+    rq: RedisQueue,
     config: Arc<pichost_core::config::AppConfig>,
     router: Arc<StorageRouter>,
-) {
+) where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    str: sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    pichost_core::models::UserStorageConfig: crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
+    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    for<'q> Option<&'q str>: sqlx::Encode<'q, DB>,
+    for<'q> Option<&'q str>: sqlx::Type<DB>,
+{
     let timeout = config.worker.queue_poll_timeout;
 
     loop {
-        // Dequeue: block up to `timeout` seconds for a task
-        let task = match queue::dequeue_task(&redis, timeout).await {
-            Ok(Some(t)) => t,
-            Ok(None) => {
-                // No task available within timeout — loop again
-                continue;
-            }
-            Err(e) => {
-                tracing::error!(worker_id, error = %e, "dequeue failed");
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                continue;
-            }
+        let Some(task) = dequeue_or_retry(&rq, timeout, worker_id).await else {
+            continue;
         };
 
         let task_id = task.task_id;
         let image_id = task.image_id;
         tracing::info!(worker_id, %task_id, %image_id, "processing task");
 
-        // Process with timeout
         let process_result = tokio::time::timeout(
             tokio::time::Duration::from_secs(config.worker.task_timeout),
             pipeline::process_task(&pool, &router, &config, &task),
         )
         .await;
 
-        handle_task_result(worker_id, &pool, &redis, task, process_result, &config).await;
+        handle_task_result(worker_id, &pool, &rq, task, process_result, &config).await;
+    }
+}
+
+/// Block up to `timeout` seconds for a task. `None` means "poll again":
+/// either the queue was empty or a Redis error occurred (logged, 1s backoff).
+async fn dequeue_or_retry(
+    rq: &RedisQueue,
+    timeout: u64,
+    worker_id: usize,
+) -> Option<pichost_core::models::TaskPayload> {
+    match rq.dequeue(std::time::Duration::from_secs(timeout)).await {
+        Ok(Some(t)) => Some(t),
+        Ok(None) => None,
+        Err(e) => {
+            tracing::error!(worker_id, error = %e, "dequeue failed");
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            None
+        }
     }
 }
 
 /// Handle the result of a single task processing attempt.
-async fn handle_task_result(
-    worker_id: usize, pool: &sqlx::PgPool, redis: &RedisPool,
-    task: queue::TaskPayload,
+async fn handle_task_result<DB: DbType>(
+    worker_id: usize,
+    pool: &Pool<DB>,
+    rq: &RedisQueue,
+    task: pichost_core::models::TaskPayload,
     result: Result<Result<(), pipeline::PipelineError>, tokio::time::error::Elapsed>,
     config: &pichost_core::config::AppConfig,
-) {
+) where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    str: sqlx::Type<DB>,
+    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+{
     let task_id = task.task_id;
     match result {
         Ok(Ok(())) => {
-            if let Err(e) = queue::ack_task(redis, task_id).await {
+            if let Err(e) = rq.ack(task_id).await {
                 tracing::error!(worker_id, %task_id, error = %e, "ack failed");
             }
             tracing::info!(worker_id, %task_id, "task completed");
         }
         Ok(Err(e)) => {
             tracing::warn!(worker_id, %task_id, error = %e, "task processing failed");
-            match queue::nack_task(redis, &task, &e.to_string()).await {
-                Ok(queue::NackAction::Retry) => tracing::info!(
-                    worker_id, %task_id, retry = task.retry_count + 1, "task retrying"
-                ),
-                Ok(queue::NackAction::DeadLetter) => {
-                    tracing::error!(worker_id, %task_id, "task dead-lettered");
-                    handle_dead_letter(
-                        pool, task.image_id, task.retry_count + 1,
-                        task.max_retries, &e.to_string(),
-                    )
-                    .await;
-                }
-                Err(e) => tracing::error!(worker_id, %task_id, error = %e, "nack failed"),
-            }
+            nack_failed_task(worker_id, pool, rq, task, e.to_string()).await;
         }
         Err(_elapsed) => {
-            tracing::warn!(worker_id, %task_id, "task timed out");
-            let timeout_err = format!("timed out after {}s", config.worker.task_timeout);
-            let _ = queue::nack_task(redis, &task, &timeout_err).await;
+            tracing::warn!(
+                worker_id, %task_id,
+                timeout_s = config.worker.task_timeout,
+                "task timed out",
+            );
+            let _ = rq.nack(task_id, task.retry_count, task.max_retries).await;
         }
     }
 }
 
+/// Nack a failed task and persist the failure in the DB when the retry
+/// budget is exhausted (dead-lettered).
+async fn nack_failed_task<DB: DbType>(
+    worker_id: usize,
+    pool: &Pool<DB>,
+    rq: &RedisQueue,
+    task: pichost_core::models::TaskPayload,
+    error: String,
+) where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    str: sqlx::Type<DB>,
+    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+{
+    let task_id = task.task_id;
+    match rq.nack(task_id, task.retry_count, task.max_retries).await {
+        Ok(pichost_core::state::NackAction::Retry) => tracing::info!(
+            worker_id, %task_id, retry = task.retry_count + 1, "task retrying"
+        ),
+        Ok(pichost_core::state::NackAction::DeadLetter) => {
+            tracing::error!(worker_id, %task_id, "task dead-lettered");
+            handle_dead_letter(
+                pool,
+                task.image_id,
+                task.retry_count + 1,
+                task.max_retries,
+                &error,
+            )
+            .await;
+        }
+        Err(e) => tracing::error!(worker_id, %task_id, error = %e, "nack failed"),
+    }
+}
+
 /// Persist dead-letter task failure in the database.
-async fn handle_dead_letter(
-    pool: &sqlx::PgPool,
+async fn handle_dead_letter<DB: DbType>(
+    pool: &Pool<DB>,
     image_id: uuid::Uuid,
     retry_count: i32,
     max_retries: i32,
     error: &str,
-) {
+) where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'a, 'q> &'a str: sqlx::Encode<'q, DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i32: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+{
     let now = chrono::Utc::now();
     let _ = sqlx::query(
         r#"INSERT INTO upload_tasks
@@ -255,13 +360,13 @@ mod tests {
     }
 
     async fn test_pg_pool() -> sqlx::PgPool {
-        let pool = db::create_pool(TEST_DB_URL, 4).await.unwrap();
-        db::run_migrations(&pool).await.unwrap();
+        let pool = db::create_pg_pool(TEST_DB_URL, 4).await.unwrap();
+        db::run_pg_migrations(&pool).await.unwrap();
         pool
     }
 
-    fn sample_task() -> queue::TaskPayload {
-        queue::TaskPayload {
+    fn sample_task() -> pichost_core::models::TaskPayload {
+        pichost_core::models::TaskPayload {
             task_id: uuid::Uuid::new_v4(),
             image_id: uuid::Uuid::new_v4(),
             user_id: uuid::Uuid::new_v4(),
@@ -281,8 +386,8 @@ mod tests {
 
     async fn enqueue_and_dequeue_own(
         redis: &RedisPool,
-        task: &queue::TaskPayload,
-    ) -> queue::TaskPayload {
+        task: &pichost_core::models::TaskPayload,
+    ) -> pichost_core::models::TaskPayload {
         loop {
             queue::enqueue_task(redis, task).await.unwrap();
             match queue::dequeue_task(redis, 1).await.unwrap() {
@@ -357,7 +462,8 @@ mod tests {
         let cfg = AppConfig::default();
         let task = sample_task();
         let got = enqueue_and_dequeue_own(&redis, &task).await;
-        handle_task_result(0, &pool, &redis, got, Ok(Ok(())), &cfg).await;
+        let rq = RedisQueue::new(redis.clone());
+        handle_task_result(0, &pool, &rq, got, Ok(Ok(())), &cfg).await;
         let mut conn = redis.get().await.unwrap();
         let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
         assert_eq!(status.as_deref(), Some("done"));
@@ -372,8 +478,12 @@ mod tests {
         let cfg = AppConfig::default();
         let task = sample_task();
         let got = enqueue_and_dequeue_own(&redis, &task).await;
+        let rq = RedisQueue::new(redis.clone());
         handle_task_result(
-            0, &pool, &redis, got,
+            0,
+            &pool,
+            &rq,
+            got,
             Ok(Err(pipeline::PipelineError::Decode("boom".into()))),
             &cfg,
         )
@@ -382,7 +492,8 @@ mod tests {
         let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
         assert_eq!(status.as_deref(), Some("pending"));
         let data: Option<String> = conn.hget(task_key(task.task_id), "data").await.unwrap();
-        let stored: queue::TaskPayload = serde_json::from_str(&data.unwrap()).unwrap();
+        let stored: pichost_core::models::TaskPayload =
+            serde_json::from_str(&data.unwrap()).unwrap();
         assert_eq!(stored.retry_count, 1);
         drop(conn);
         drain_own(&redis, task.task_id).await;
@@ -402,8 +513,12 @@ mod tests {
         task.retry_count = 3;
         task.max_retries = 3;
         let got = enqueue_and_dequeue_own(&redis, &task).await;
+        let rq = RedisQueue::new(redis.clone());
         handle_task_result(
-            0, &pool, &redis, got,
+            0,
+            &pool,
+            &rq,
+            got,
             Ok(Err(pipeline::PipelineError::Decode("fatal".into()))),
             &cfg,
         )
@@ -413,21 +528,23 @@ mod tests {
         assert_eq!(status.as_deref(), Some("dead"));
         let dead: Vec<String> = conn.lrange(KEY_DEAD, 0, -1).await.unwrap();
         assert!(dead.contains(&task.task_id.to_string()));
-        conn.lrem::<_, _, ()>(KEY_DEAD, 1, task.task_id.to_string()).await.unwrap();
+        conn.lrem::<_, _, ()>(KEY_DEAD, 1, task.task_id.to_string())
+            .await
+            .unwrap();
         drop(conn);
-        let (ut_status,): (String,) =
-            sqlx::query_as("SELECT status FROM upload_tasks WHERE image_id = $1 ORDER BY created_at DESC LIMIT 1")
-                .bind(image_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let (ut_status,): (String,) = sqlx::query_as(
+            "SELECT status FROM upload_tasks WHERE image_id = $1 ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(image_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(ut_status, "failed");
-        let (img_status,): (String,) =
-            sqlx::query_as("SELECT status FROM images WHERE id = $1")
-                .bind(image_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let (img_status,): (String,) = sqlx::query_as("SELECT status FROM images WHERE id = $1")
+            .bind(image_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(img_status, "failed");
         cleanup_rows(&pool, image_id, user_id).await;
     }
@@ -438,19 +555,19 @@ mod tests {
         let pool = test_pg_pool().await;
         let (user_id, image_id) = insert_user_image(&pool).await;
         handle_dead_letter(&pool, image_id, 4, 3, "boom").await;
-        let (ut_status,): (String,) =
-            sqlx::query_as("SELECT status FROM upload_tasks WHERE image_id = $1 ORDER BY created_at DESC LIMIT 1")
-                .bind(image_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let (ut_status,): (String,) = sqlx::query_as(
+            "SELECT status FROM upload_tasks WHERE image_id = $1 ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(image_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(ut_status, "failed");
-        let (img_status,): (String,) =
-            sqlx::query_as("SELECT status FROM images WHERE id = $1")
-                .bind(image_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let (img_status,): (String,) = sqlx::query_as("SELECT status FROM images WHERE id = $1")
+            .bind(image_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(img_status, "failed");
         cleanup_rows(&pool, image_id, user_id).await;
     }
@@ -461,7 +578,9 @@ mod tests {
         let redis = test_redis_pool();
         let pool = test_pg_pool().await;
         let cfg = Arc::new(AppConfig::default());
-        let state = init_worker_state(pool, redis, cfg).await.expect("state init");
+        let state = init_worker_state(pool, redis, cfg)
+            .await
+            .expect("state init");
         assert_eq!(state.config.worker.concurrency, 4);
         assert!(state.router.get("local").is_some());
         assert!(state.router.backend_count() >= 1);
@@ -525,12 +644,14 @@ mod tests {
         )
         .await
         .unwrap_err();
-        handle_task_result(0, &pool, &redis, got, Err(elapsed), &cfg).await;
+        let rq = RedisQueue::new(redis.clone());
+        handle_task_result(0, &pool, &rq, got, Err(elapsed), &cfg).await;
         let mut conn = redis.get().await.unwrap();
         let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
         assert_eq!(status.as_deref(), Some("pending"));
         let data: Option<String> = conn.hget(task_key(task.task_id), "data").await.unwrap();
-        let stored: queue::TaskPayload = serde_json::from_str(&data.unwrap()).unwrap();
+        let stored: pichost_core::models::TaskPayload =
+            serde_json::from_str(&data.unwrap()).unwrap();
         assert_eq!(stored.retry_count, 1);
         drop(conn);
         drain_own(&redis, task.task_id).await;
@@ -548,7 +669,8 @@ mod tests {
         let got = enqueue_and_dequeue_own(&normal, &task).await;
         let exhausted = exhausted_redis_pool();
         let held = exhausted.get().await.unwrap();
-        handle_task_result(0, &pool, &exhausted, got, Ok(Ok(())), &cfg).await;
+        let rq = RedisQueue::new(exhausted.clone());
+        handle_task_result(0, &pool, &rq, got, Ok(Ok(())), &cfg).await;
         let mut conn = normal.get().await.unwrap();
         let status: Option<String> = conn.hget(task_key(task.task_id), "status").await.unwrap();
         assert_eq!(status.as_deref(), Some("processing"));
@@ -558,8 +680,12 @@ mod tests {
         let got2 = enqueue_and_dequeue_own(&normal, &task2).await;
         let exhausted2 = exhausted_redis_pool();
         let held2 = exhausted2.get().await.unwrap();
+        let rq2 = RedisQueue::new(exhausted2.clone());
         handle_task_result(
-            0, &pool, &exhausted2, got2,
+            0,
+            &pool,
+            &rq2,
+            got2,
             Ok(Err(pipeline::PipelineError::Decode("boom".into()))),
             &cfg,
         )
@@ -606,7 +732,7 @@ mod tests {
 
         let result = tokio::time::timeout(
             tokio::time::Duration::from_secs(4),
-            worker_loop(0, pool.clone(), redis.clone(), cfg, router),
+            worker_loop(0, pool.clone(), RedisQueue::new(redis.clone()), cfg, router),
         )
         .await;
         assert!(result.is_err());
@@ -631,15 +757,13 @@ mod tests {
         let task = sample_task();
         let got = enqueue_and_dequeue_own(&redis, &task).await;
         let mut conn = redis.get().await.unwrap();
-        conn.hset::<_, _, _, ()>(
-            &task_key(got.task_id),
-            "updated_at",
-            "2020-01-01T00:00:00Z",
-        )
-        .await
-        .unwrap();
+        conn.hset::<_, _, _, ()>(&task_key(got.task_id), "updated_at", "2020-01-01T00:00:00Z")
+            .await
+            .unwrap();
         drop(conn);
-        let state = init_worker_state(pool, redis, cfg).await.expect("state init");
+        let state = init_worker_state(pool, redis, cfg)
+            .await
+            .expect("state init");
         assert!(state.router.get("local").is_some());
         drain_own(&state.redis, got.task_id).await;
     }
@@ -660,7 +784,9 @@ mod tests {
             use_ssl: false,
             public_endpoint: None,
         });
-        let state = init_worker_state(pool, redis, Arc::new(cfg)).await.expect("state init");
+        let state = init_worker_state(pool, redis, Arc::new(cfg))
+            .await
+            .expect("state init");
         assert!(state.router.get("rustfs").is_some());
         assert!(state.router.get("local").is_some());
     }

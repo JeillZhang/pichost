@@ -2462,6 +2462,7 @@ version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
 dependencies = [
+ "cc",
  "pkg-config",
  "vcpkg",
 ]
@@ -3043,9 +3044,10 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pichost-api"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "argon2",
+ "async-trait",
  "axum",
  "chrono",
  "deadpool-redis",
@@ -3057,6 +3059,7 @@ dependencies = [
  "lazy_static",
  "oauth2",
  "pichost-core",
+ "pichost-worker",
  "prometheus",
  "rand 0.8.6",
  "redis 0.27.6",
@@ -3082,7 +3085,7 @@ dependencies = [
 
 [[package]]
 name = "pichost-core"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -3096,6 +3099,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serial_test",
  "sqlx",
  "tempfile",
  "thiserror 2.0.18",
@@ -3107,9 +3111,10 @@ dependencies = [
 
 [[package]]
 name = "pichost-worker"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "ab_glyph",
+ "async-trait",
  "chrono",
  "deadpool-redis",
  "figment",

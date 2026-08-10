@@ -3,7 +3,7 @@ members = ["pichost-core", "pichost-api", "pichost-worker"]
 resolver = "2"
 
 [workspace.package]
-version = "0.20.0"
+version = "0.21.0"
 edition = "2021"
 license = "MIT"
 
@@ -16,7 +16,8 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "migrate"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "sqlite", "json", "uuid", "chrono", "migrate"] }
+async-trait = "0.1"
 dotenvy = "0.15"
 deadpool-redis = "0.15"
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }

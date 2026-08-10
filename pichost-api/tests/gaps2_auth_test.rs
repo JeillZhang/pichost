@@ -124,7 +124,7 @@ async fn register_rejects_expired_invite() {
     let code = create_invite(&app, 3600).await;
     let key = format!("pichost:invite:{code}");
     let past = (chrono::Utc::now().timestamp() - 100).to_string();
-    let mut conn = app.state.cache.get_pool().get().await.expect("redis conn");
+    let mut conn = app.redis_pool().get().await.expect("redis conn");
     deadpool_redis::redis::cmd("HSET")
         .arg(&key)
         .arg("expires_at")
@@ -235,8 +235,14 @@ async fn refresh_rejects_rotated_token() {
 #[ignore = "requires running PostgreSQL and Redis"]
 async fn logout_requires_authorization() {
     let app = test_app().await;
-    let (status, resp) =
-        send_json(&app, Method::POST, "/api/v1/auth/logout", None, &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::POST,
+        "/api/v1/auth/logout",
+        None,
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "got {status}: {resp}");
     assert_eq!(resp["error"], "missing authorization header");
 }
@@ -273,7 +279,10 @@ async fn logout_rejects_refresh_token() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "got {status}: {resp}");
     assert!(
-        resp["error"].as_str().unwrap().contains("only access tokens"),
+        resp["error"]
+            .as_str()
+            .unwrap()
+            .contains("only access tokens"),
         "unexpected error: {resp}"
     );
 }

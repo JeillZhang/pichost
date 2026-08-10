@@ -20,8 +20,7 @@ pub fn load_font(name: &str) -> Result<Font<'static>, String> {
             ))
         }
     };
-    Font::try_from_bytes(bytes)
-        .ok_or_else(|| format!("Failed to parse font: {}", name))
+    Font::try_from_bytes(bytes).ok_or_else(|| format!("Failed to parse font: {}", name))
 }
 
 /// List all built-in font names.

@@ -1,4 +1,7 @@
-use figment::{Figment, providers::{Env, Format, Serialized, Toml}};
+use figment::{
+    providers::{Env, Format, Serialized, Toml},
+    Figment,
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -78,8 +81,20 @@ fn default_storage_quota() -> u64 {
     1_073_741_824 // 1 GB
 }
 
+/// Which database engine the API should connect to.
+/// `Postgres` is the default; `Sqlite` powers the lightweight "lite mode".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseMode {
+    #[default]
+    Postgres,
+    Sqlite,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DatabaseConfig {
+    #[serde(default)]
+    pub mode: DatabaseMode,
     pub url: String,
     pub max_connections: u32,
 }
@@ -229,10 +244,14 @@ impl Default for AppConfig {
                 rustfs: None,
             },
             database: DatabaseConfig {
+                mode: DatabaseMode::default(),
                 url: "postgres://pichost:pichost@localhost:5432/pichost".into(),
                 max_connections: 10,
             },
-            redis: RedisConfig { url: "redis://localhost:6379".into(), pool_size: 20 },
+            redis: RedisConfig {
+                url: "redis://localhost:6379".into(),
+                pool_size: 20,
+            },
             upload: UploadConfig {
                 max_file_size_admin: 52_428_800,
                 max_file_size_user: 10_485_760,
@@ -247,7 +266,10 @@ impl Default for AppConfig {
                 ],
                 storage_quota_default: 1_073_741_824,
             },
-            logging: LoggingConfig { level: "info".into(), format: "json".into() },
+            logging: LoggingConfig {
+                level: "info".into(),
+                format: "json".into(),
+            },
             worker: WorkerConfig::default(),
             rate_limit: RateLimitConfig::default(),
             token_encryption_key: None,
@@ -276,6 +298,7 @@ pub fn load_config() -> Result<AppConfig, figment::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     struct EnvGuard {
         key: &'static str,
@@ -351,7 +374,10 @@ mod tests {
         assert_eq!(cfg.redis.url, "redis://localhost:6379");
         assert_eq!(cfg.redis.pool_size, 20);
         assert_eq!(cfg.storage.default_backend, "local");
-        assert_eq!(cfg.storage.local_base_path, PathBuf::from("./storage-local"));
+        assert_eq!(
+            cfg.storage.local_base_path,
+            PathBuf::from("./storage-local")
+        );
         assert!(cfg.storage.rustfs.is_none());
         assert_eq!(cfg.upload.max_file_size_admin, 52_428_800);
         assert_eq!(cfg.upload.max_file_size_user, 10_485_760);
@@ -387,6 +413,7 @@ mod tests {
         assert_eq!(w.processing.thumbnail_size, p.thumbnail_size);
     }
 
+    #[serial]
     #[test]
     fn test_load_config_env_override_and_restore() {
         let _guard = PichostEnvGuard::capture();

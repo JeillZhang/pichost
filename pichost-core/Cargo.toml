@@ -12,10 +12,10 @@ chrono.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 figment.workspace = true
-async-trait = "0.1"
+async-trait.workspace = true
 aws-config.workspace = true
 aws-sdk-s3.workspace = true
-sqlx = { workspace = true, features = ["derive"] }
+sqlx = { workspace = true, features = ["derive", "sqlite", "migrate"] }
 toml = "0.8"
 aes-gcm = "0.10"
 base64 = "0.22"
@@ -26,6 +26,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["rt", "macros"] }
+serial_test = "3"
 
 [lib]
 name = "pichost_core"

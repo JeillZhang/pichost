@@ -1,8 +1,9 @@
+use pichost_core::DbType;
 use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, Extension, Json};
 use serde::Serialize;
-use sqlx::PgPool;
+use sqlx::Pool;
 use uuid::Uuid;
 
 use argon2::{
@@ -13,7 +14,6 @@ use pichost_core::i18n::Language;
 use pichost_core::models::{ChangePasswordRequest, UpdateProfileRequest, UserProfile};
 
 use crate::app::AppState;
-use crate::cache::Cache;
 use crate::i18n_ext::{error_json, error_json_args, JsonBody, Locale};
 use crate::middleware::auth::AuthUser;
 
@@ -26,11 +26,19 @@ pub struct UserStats {
 }
 
 /// GET /api/v1/users/me/stats — usage statistics (protected, cached)
-pub async fn get_my_stats(
-    State(state): State<Arc<AppState>>,
+pub async fn get_my_stats<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
-) -> Result<Json<UserStats>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<UserStats>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64, Option<i64>): crate::db::DbRow<DB>,
+    (Option<i64>,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let quota = fetch_user_quota(&state.pool, user.id, locale).await?;
 
     let cache_stats = state.cache.get_user_stats(&user.id).await.ok().flatten();
@@ -48,23 +56,34 @@ pub async fn get_my_stats(
         storage_quota: quota,
     };
 
-    populate_user_stats_cache(&state.cache, &user.id, total_images, total_size).await;
+    populate_user_stats_cache(state.cache.as_ref(), &user.id, total_images, total_size).await;
 
     Ok(Json(stats))
 }
 
-async fn fetch_user_quota(
-    pool: &PgPool,
+async fn fetch_user_quota<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     locale: Language,
-) -> Result<Option<i64>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Option<i64>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (Option<i64>,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_scalar("SELECT storage_quota FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| {
             tracing::warn!("Quota query failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })
         .map(|r| r.flatten())
 }
@@ -88,14 +107,20 @@ fn try_cached_stats(
     })
 }
 
-async fn query_user_stats(
-    pool: &PgPool,
+async fn query_user_stats<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     locale: Language,
-) -> Result<(i64, i64), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(i64, i64), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (i64, Option<i64>): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let row = sqlx::query_as::<_, (i64, Option<i64>)>(
-        r#"SELECT COUNT(*)::BIGINT as total_images,
-                  COALESCE(SUM(file_size), 0)::BIGINT as total_size
+        r#"SELECT COUNT(*) as total_images,
+                  CAST(COALESCE(SUM(file_size), 0) AS BIGINT) as total_size
            FROM images WHERE user_id = $1"#,
     )
     .bind(user_id)
@@ -103,14 +128,18 @@ async fn query_user_stats(
     .await
     .map_err(|e| {
         tracing::warn!("Stats query failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
 
     Ok((row.0, row.1.unwrap_or(0)))
 }
 
 async fn populate_user_stats_cache(
-    cache: &Cache,
+    cache: &dyn pichost_core::state::Cache,
     user_id: &Uuid,
     total_images: i64,
     total_size: i64,
@@ -155,42 +184,72 @@ fn build_user_profile(row: ProfileRow) -> UserProfile {
         is_admin: row.6,
         created_at: row.7,
         updated_at: row.8,
-        watermark_config: row.9.and_then(|v| {
-            serde_json::from_value::<pichost_core::models::WatermarkConfig>(v).ok()
-        }),
+        watermark_config: row
+            .9
+            .and_then(|v| serde_json::from_value::<pichost_core::models::WatermarkConfig>(v).ok()),
     }
 }
 
-async fn fetch_profile_row(
-    pool: &PgPool,
+async fn fetch_profile_row<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     log_msg: &str,
     locale: Language,
-) -> Result<Option<ProfileRow>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Option<ProfileRow>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_as::<_, ProfileRow>(PROFILE_SELECT)
         .bind(user_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| {
             tracing::warn!("{log_msg}: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })
 }
 
 /// GET /api/v1/users/me — current user's full profile
-pub async fn get_my_profile(
-    State(state): State<Arc<AppState>>,
+pub async fn get_my_profile<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
-) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let row = fetch_profile_row(&state.pool, user.id, "User profile query failed", locale)
         .await?
         .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "user.not_found"))?;
     Ok(Json(build_user_profile(row)))
 }
 
-fn ensure_backend_exists(
-    state: &AppState,
+fn ensure_backend_exists<DB: DbType>(
+    state: &AppState<DB>,
     payload: &UpdateProfileRequest,
     locale: Language,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
@@ -207,26 +266,38 @@ fn ensure_backend_exists(
     Ok(())
 }
 
-async fn ensure_username_available(
-    pool: &PgPool,
+async fn ensure_username_available<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     username: Option<&str>,
     locale: Language,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (bool,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let Some(username) = username else {
         return Ok(());
     };
-    let conflict: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 AND id != $2)",
-    )
-    .bind(username)
-    .bind(user_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!("Username uniqueness check failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
-    })?;
+    let conflict: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 AND id != $2)")
+            .bind(username)
+            .bind(user_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Username uniqueness check failed: {e}");
+                error_json(
+                    locale,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "common.internal_error",
+                )
+            })?;
     if conflict {
         return Err(error_json(
             locale,
@@ -237,12 +308,21 @@ async fn ensure_username_available(
     Ok(())
 }
 
-async fn ensure_email_available(
-    pool: &PgPool,
+async fn ensure_email_available<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     email: Option<&str>,
     locale: Language,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (bool,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let Some(email) = email else {
         return Ok(());
     };
@@ -254,7 +334,11 @@ async fn ensure_email_available(
             .await
             .map_err(|e| {
                 tracing::warn!("Email uniqueness check failed: {e}");
-                error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+                error_json(
+                    locale,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "common.internal_error",
+                )
             })?;
     if conflict {
         return Err(error_json(locale, StatusCode::CONFLICT, "user.email_taken"));
@@ -280,21 +364,33 @@ fn serialize_watermark_config(
     }
 }
 
-async fn apply_profile_update(
-    pool: &PgPool,
+async fn apply_profile_update<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     payload: &UpdateProfileRequest,
     wm_provided: bool,
     wm_value: &Option<serde_json::Value>,
     locale: Language,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query(
         "UPDATE users SET \
          username = COALESCE($1, username), \
-         email = CASE WHEN $2::boolean THEN $3 ELSE email END, \
+         email = CASE WHEN $2 THEN $3 ELSE email END, \
          storage_backend = COALESCE($4, storage_backend), \
-         watermark_config = CASE WHEN $6::boolean THEN $7::jsonb ELSE watermark_config END, \
-         updated_at = now() \
+         watermark_config = CASE WHEN $6 THEN $7 ELSE watermark_config END, \
+         updated_at = CURRENT_TIMESTAMP \
          WHERE id = $5",
     )
     .bind(&payload.username)
@@ -307,48 +403,87 @@ async fn apply_profile_update(
     .execute(pool)
     .await
     .map_err(|e| {
-        if let sqlx::Error::Database(ref db_err) = e {
-            if let Some(code) = db_err.code() {
-                if code == "23505" {
-                    return error_json(
-                        locale,
-                        StatusCode::CONFLICT,
-                        "user.username_email_taken",
-                    );
-                }
-            }
+        if pichost_core::db::db_error_kind(&e) == pichost_core::db::DbErrorKind::UniqueViolation {
+            return error_json(locale, StatusCode::CONFLICT, "user.username_email_taken");
         }
         tracing::warn!("Profile update failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
     Ok(())
 }
 
 /// PATCH /api/v1/users/me — update own profile
-pub async fn update_my_profile(
-    State(state): State<Arc<AppState>>,
+pub async fn update_my_profile<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
     JsonBody(payload): JsonBody<UpdateProfileRequest>,
-) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (bool,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    chrono::DateTime<chrono::Utc>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    sqlx::types::Json<serde_json::Value>:
+        for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     ensure_backend_exists(&state, &payload, locale)?;
     ensure_username_available(&state.pool, user.id, payload.username.as_deref(), locale).await?;
     ensure_email_available(&state.pool, user.id, payload.email.as_deref(), locale).await?;
     let (wm_provided, wm_value) = serialize_watermark_config(&payload, locale)?;
-    apply_profile_update(&state.pool, user.id, &payload, wm_provided, &wm_value, locale).await?;
-    let row = fetch_profile_row(&state.pool, user.id, "Profile re-fetch after update failed", locale)
-        .await?
-        .ok_or_else(|| {
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
-        })?;
+    apply_profile_update(
+        &state.pool,
+        user.id,
+        &payload,
+        wm_provided,
+        &wm_value,
+        locale,
+    )
+    .await?;
+    let row = fetch_profile_row(
+        &state.pool,
+        user.id,
+        "Profile re-fetch after update failed",
+        locale,
+    )
+    .await?
+    .ok_or_else(|| {
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
+    })?;
     Ok(Json(build_user_profile(row)))
 }
 
-async fn fetch_password_hash(
-    pool: &PgPool,
+async fn fetch_password_hash<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     locale: Language,
-) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<String, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (std::string::String,): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let current_hash: Option<String> =
         sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
             .bind(user_id)
@@ -356,7 +491,11 @@ async fn fetch_password_hash(
             .await
             .map_err(|e| {
                 tracing::warn!("Password hash fetch failed: {e}");
-                error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+                error_json(
+                    locale,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "common.internal_error",
+                )
             })?;
     current_hash.ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "user.not_found"))
 }
@@ -368,7 +507,11 @@ fn verify_current_password(
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     let parsed_hash = PasswordHash::new(stored_hash).map_err(|e| {
         tracing::warn!("Invalid stored password hash: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
     Argon2::default()
         .verify_password(current_password.as_bytes(), &parsed_hash)
@@ -391,35 +534,61 @@ fn hash_new_password(
         .map(|h| h.to_string())
         .map_err(|e| {
             tracing::warn!("Password hashing failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })
 }
 
-async fn update_password_hash(
-    pool: &PgPool,
+async fn update_password_hash<DB: DbType>(
+    pool: &Pool<DB>,
     user_id: Uuid,
     new_hash: &str,
     locale: Language,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    sqlx::query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2")
-        .bind(new_hash)
-        .bind(user_id)
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Password update failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
-        })?;
+) -> Result<(), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
+    sqlx::query(
+        "UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+    )
+    .bind(new_hash)
+    .bind(user_id)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        tracing::warn!("Password update failed: {e}");
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
+    })?;
     Ok(())
 }
 
 /// POST /api/v1/users/me/password — change own password
-pub async fn change_my_password(
-    State(state): State<Arc<AppState>>,
+pub async fn change_my_password<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     Extension(user): Extension<AuthUser>,
     Locale(locale): Locale,
     JsonBody(payload): JsonBody<ChangePasswordRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (std::string::String,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     if payload.new_password.len() < 8 {
         return Err(error_json(
             locale,
@@ -501,7 +670,9 @@ mod tests {
         assert!(profile.watermark_config.is_none());
     }
 
-    fn wm_payload(watermark_config: Option<Option<pichost_core::models::WatermarkConfig>>) -> UpdateProfileRequest {
+    fn wm_payload(
+        watermark_config: Option<Option<pichost_core::models::WatermarkConfig>>,
+    ) -> UpdateProfileRequest {
         UpdateProfileRequest {
             username: None,
             email: None,
@@ -540,7 +711,8 @@ mod tests {
 
     #[test]
     fn test_serialize_watermark_config_absent() {
-        let (provided, value) = serialize_watermark_config(&wm_payload(None), Language::En).unwrap();
+        let (provided, value) =
+            serialize_watermark_config(&wm_payload(None), Language::En).unwrap();
         assert!(!provided);
         assert!(value.is_none());
     }

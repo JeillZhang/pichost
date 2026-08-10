@@ -22,7 +22,10 @@ async fn create_admin(app: &TestApp, tag: &str) -> (String, Uuid) {
         "invite_code": code,
     });
     let (status, resp) = send_json(app, Method::POST, "/api/v1/auth/register", None, &body).await;
-    assert!(status.is_success(), "admin register failed: {status} {resp}");
+    assert!(
+        status.is_success(),
+        "admin register failed: {status} {resp}"
+    );
     let user_id = Uuid::parse_str(resp["user"]["id"].as_str().unwrap()).unwrap();
     make_admin(app, user_id).await;
     let (status, resp) = login(app, &username, "admin123456").await;
@@ -56,7 +59,7 @@ async fn insert_image(app: &TestApp, user_id: Uuid, backend: &str) -> Uuid {
 }
 
 async fn del_redis_key(app: &TestApp, key: &str) {
-    let mut conn = app.state.cache.get_pool().get().await.unwrap();
+    let mut conn = app.redis_pool().get().await.unwrap();
     let _: () = deadpool_redis::redis::cmd("DEL")
         .arg(key)
         .query_async::<_, ()>(&mut *conn)
@@ -71,8 +74,7 @@ fn cleanup_config_files() {
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name == "config.toml"
-                || (name.starts_with("config.toml.") && name.ends_with(".bak"))
+            if name == "config.toml" || (name.starts_with("config.toml.") && name.ends_with(".bak"))
             {
                 let _ = std::fs::remove_file(dir.join(&name));
             }
@@ -146,9 +148,13 @@ async fn admin_delete_user_removes_storage_files() {
     .await
     .expect("image row");
     let base = app.state.config.storage.local_base_path.clone();
-    for k in [Some(storage_key.as_str()), thumb.as_deref(), webp.as_deref()]
-        .into_iter()
-        .flatten()
+    for k in [
+        Some(storage_key.as_str()),
+        thumb.as_deref(),
+        webp.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
     {
         assert!(base.join(k).exists(), "file missing before delete: {k}");
     }
@@ -156,9 +162,13 @@ async fn admin_delete_user_removes_storage_files() {
     let (status, resp) =
         send_json(&app, Method::DELETE, &uri, Some(&admin_token), &Value::Null).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "delete failed: {resp}");
-    for k in [Some(storage_key.as_str()), thumb.as_deref(), webp.as_deref()]
-        .into_iter()
-        .flatten()
+    for k in [
+        Some(storage_key.as_str()),
+        thumb.as_deref(),
+        webp.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
     {
         assert!(!base.join(k).exists(), "file not removed: {k}");
     }
@@ -211,7 +221,11 @@ async fn admin_config_restore_missing_backup_error() {
         &serde_json::json!({"backup_file": "config.toml.nonexistent.bak"}),
     )
     .await;
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "got {status}: {resp}"
+    );
     cleanup_config_files();
 }
 

@@ -1,4 +1,8 @@
+use pichost_core::state::InviteVerifyStatus;
+use pichost_core::DbType;
+use sqlx::Pool;
 use std::sync::Arc;
+use std::time::Duration;
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -16,7 +20,6 @@ use tracing;
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::cache::{self, Cache};
 use crate::i18n_ext::{error_json, JsonBody, Locale};
 use pichost_core::config::AppConfig;
 use pichost_core::i18n::Language;
@@ -129,8 +132,8 @@ pub(crate) fn generate_tokens(
     Ok((access_token, refresh_token, access_claims, refresh_claims))
 }
 
-async fn check_invite_code(
-    state: &AppState,
+async fn check_invite_code<DB: DbType>(
+    state: &AppState<DB>,
     invite_code: Option<&str>,
     is_first_user: bool,
     locale: Language,
@@ -139,19 +142,31 @@ async fn check_invite_code(
         let code = invite_code
             .ok_or_else(|| error_json(locale, StatusCode::BAD_REQUEST, "invite.required"))?;
 
-        match state.cache.verify_invite_code(code).await.map_err(|e| {
+        match state.invites.verify_detail(code).await.map_err(|e| {
             tracing::warn!("Invite code verification failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })? {
-            cache::InviteVerifyResult::Valid => {}
-            cache::InviteVerifyResult::Used => {
+            InviteVerifyStatus::Valid => {}
+            InviteVerifyStatus::Used => {
                 return Err(error_json(locale, StatusCode::BAD_REQUEST, "invite.used"));
             }
-            cache::InviteVerifyResult::Expired => {
-                return Err(error_json(locale, StatusCode::BAD_REQUEST, "invite.expired"));
+            InviteVerifyStatus::Expired => {
+                return Err(error_json(
+                    locale,
+                    StatusCode::BAD_REQUEST,
+                    "invite.expired",
+                ));
             }
-            cache::InviteVerifyResult::NotFound => {
-                return Err(error_json(locale, StatusCode::BAD_REQUEST, "invite.invalid"));
+            InviteVerifyStatus::NotFound => {
+                return Err(error_json(
+                    locale,
+                    StatusCode::BAD_REQUEST,
+                    "invite.invalid",
+                ));
             }
         }
     }
@@ -168,52 +183,79 @@ fn hash_password(
         .map(|h| h.to_string())
         .map_err(|e| {
             tracing::warn!("Password hashing failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })
 }
 
-async fn revoke_old_tokens(cache: &Cache, claims: &RefreshTokenClaims, now: usize) {
+async fn revoke_old_tokens(
+    blacklist: &dyn pichost_core::state::Blacklist,
+    claims: &RefreshTokenClaims,
+    now: usize,
+) {
     let refresh_ttl = claims.exp.saturating_sub(now);
-    let _ = cache
-        .set_ex(&format!("bl:{}", claims.jti), "revoked", refresh_ttl as u64)
+    let _ = blacklist
+        .revoke(&claims.jti, Duration::from_secs(refresh_ttl as u64))
         .await;
 
     let access_ttl = claims.access_exp.saturating_sub(now);
     if access_ttl > 0 {
-        let _ = cache
-            .set_ex(
-                &format!("bl:{}", claims.access_jti),
-                "revoked",
-                access_ttl as u64,
-            )
+        let _ = blacklist
+            .revoke(&claims.access_jti, Duration::from_secs(access_ttl as u64))
             .await;
     }
 }
 
 // ---- Handlers ----
 
-async fn count_existing_users(
-    pool: &sqlx::PgPool,
+async fn count_existing_users<DB: DbType>(
+    pool: &Pool<DB>,
     locale: Language,
-) -> Result<i64, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<i64, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (i64,): crate::db::DbRow<DB>,
+{
     sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(pool)
         .await
         .map_err(|e| {
             tracing::warn!("User count query failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })
 }
 
-async fn insert_user(
-    state: &AppState,
+async fn insert_user<DB: DbType>(
+    state: &AppState<DB>,
     username: &str,
     email: &Option<String>,
     hash: &str,
     is_admin: bool,
     storage_quota: Option<i64>,
     locale: Language,
-) -> Result<Uuid, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Uuid, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     sqlx::query_scalar(
         "INSERT INTO users (username, email, password_hash, is_admin, storage_quota) \
          VALUES ($1, $2, $3, $4, $5) RETURNING id",
@@ -226,31 +268,48 @@ async fn insert_user(
     .fetch_one(&state.pool)
     .await
     .map_err(|e| {
-        if let sqlx::Error::Database(ref db_err) = e {
-            if let Some(code) = db_err.code() {
-                if code == "23505" {
-                    return error_json(
-                        locale,
-                        StatusCode::CONFLICT,
-                        "auth.username_exists",
-                    );
-                }
-            }
+        if pichost_core::db::db_error_kind(&e) == pichost_core::db::DbErrorKind::UniqueViolation {
+            return error_json(locale, StatusCode::CONFLICT, "auth.username_exists");
         }
         tracing::warn!("User registration db error: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })
 }
 
-pub async fn register(
-    State(state): State<Arc<AppState>>,
+pub async fn register<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     JsonBody(payload): JsonBody<RegisterRequest>,
-) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    (i64,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     validate_register_payload(&payload, locale.0)?;
     let user_count = count_existing_users(&state.pool, locale.0).await?;
     let is_first_user = user_count == 0;
-    check_invite_code(&state, payload.invite_code.as_deref(), is_first_user, locale.0).await?;
+    check_invite_code(
+        &state,
+        payload.invite_code.as_deref(),
+        is_first_user,
+        locale.0,
+    )
+    .await?;
     let (user_id, access_token, refresh_token, storage_quota) =
         create_user_and_tokens(&state, &payload, is_first_user, locale.0).await?;
     Ok((
@@ -283,12 +342,26 @@ fn validate_register_payload(
     Ok(())
 }
 
-async fn create_user_and_tokens(
-    state: &AppState,
+async fn create_user_and_tokens<DB: DbType>(
+    state: &AppState<DB>,
     payload: &RegisterRequest,
     is_first_user: bool,
     locale: Language,
-) -> Result<(Uuid, String, String, Option<i64>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(uuid::Uuid, String, String, Option<i64>), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let hash = hash_password(&payload.password, locale)?;
     let storage_quota = if state.config.upload.storage_quota_default > 0 {
         Some(state.config.upload.storage_quota_default as i64)
@@ -307,7 +380,7 @@ async fn create_user_and_tokens(
     .await?;
     if !is_first_user {
         if let Some(code) = &payload.invite_code {
-            let _ = state.cache.consume_invite_code(code, &user_id).await;
+            let _ = state.invites.consume(code, user_id).await;
         }
     }
     let storage_prefix = format!("users/{}", user_id);
@@ -319,18 +392,35 @@ async fn create_user_and_tokens(
     let (access_token, refresh_token, _ac, _rc) =
         generate_tokens(user_id, is_first_user, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })?;
     Ok((user_id, access_token, refresh_token, storage_quota))
 }
 
-pub async fn login(
-    State(state): State<Arc<AppState>>,
+pub async fn login<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     JsonBody(payload): JsonBody<LoginRequest>,
-) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (
+        uuid::Uuid,
+        String,
+        Option<String>,
+        String,
+        bool,
+        Option<i64>,
+    ): crate::db::DbRow<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     // Query user
-    let row = sqlx::query_as::<_, (Uuid, String, Option<String>, String, bool, Option<i64>)>(
+    let row = sqlx::query_as::<_, (uuid::Uuid, String, Option<String>, String, bool, Option<i64>)>(
         "SELECT id, username, email, password_hash, is_admin, storage_quota FROM users WHERE username = $1",
     )
     .bind(&payload.username)
@@ -347,17 +437,31 @@ pub async fn login(
     // Verify password
     let parsed_hash = PasswordHash::new(&password_hash).map_err(|e| {
         tracing::warn!("Stored password hash parse failed: {e}");
-        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "common.internal_error",
+        )
     })?;
 
     Argon2::default()
         .verify_password(payload.password.as_bytes(), &parsed_hash)
-        .map_err(|_| error_json(locale.0, StatusCode::UNAUTHORIZED, "auth.invalid_credentials"))?;
+        .map_err(|_| {
+            error_json(
+                locale.0,
+                StatusCode::UNAUTHORIZED,
+                "auth.invalid_credentials",
+            )
+        })?;
 
     let (access_token, refresh_token, _access_claims, _refresh_claims) =
         generate_tokens(user_id, is_admin, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
-            error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+            error_json(
+                locale.0,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "common.internal_error",
+            )
         })?;
 
     let response = AuthResponse {
@@ -375,11 +479,19 @@ pub async fn login(
     Ok((StatusCode::OK, Json(response)))
 }
 
-async fn lookup_user_for_refresh(
-    pool: &sqlx::PgPool,
+async fn lookup_user_for_refresh<DB: DbType>(
+    pool: &Pool<DB>,
     sub: &str,
     locale: Language,
-) -> Result<(Uuid, String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)>
+) -> Result<
+    (uuid::Uuid, String, Option<String>, bool, Option<i64>),
+    (StatusCode, Json<serde_json::Value>),
+>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     let user_id: Uuid = sub
         .parse()
@@ -392,31 +504,48 @@ async fn lookup_user_for_refresh(
     .await
     .map_err(|e| {
         tracing::warn!("User lookup failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "auth.internal_error",
+        )
     })?
     .ok_or_else(|| error_json(locale, StatusCode::UNAUTHORIZED, "auth.user_not_found"))?;
     Ok((user_id, row.0, row.1, row.2, row.3))
 }
 
-pub async fn refresh(
-    State(state): State<Arc<AppState>>,
+pub async fn refresh<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     JsonBody(payload): JsonBody<RefreshRequest>,
-) -> Result<(StatusCode, Json<RefreshResponse>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<RefreshResponse>), (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let config = &state.config;
     let key = DecodingKey::from_secret(config.auth.jwt_secret.as_bytes());
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
     let token_data = decode::<RefreshTokenClaims>(&payload.refresh_token, &key, &validation)
         .map_err(|_| {
-            error_json(locale.0, StatusCode::UNAUTHORIZED, "auth.invalid_refresh_token")
+            error_json(
+                locale.0,
+                StatusCode::UNAUTHORIZED,
+                "auth.invalid_refresh_token",
+            )
         })?;
     let claims = token_data.claims;
     if claims.typ != "refresh" {
-        return Err(error_json(locale.0, StatusCode::UNAUTHORIZED, "auth.invalid_token_type"));
+        return Err(error_json(
+            locale.0,
+            StatusCode::UNAUTHORIZED,
+            "auth.invalid_token_type",
+        ));
     }
-    let bl_refresh_key = format!("bl:{}", claims.jti);
-    if state.cache.exists(&bl_refresh_key).await.unwrap_or(true) {
+    if state.blacklist.check(&claims.jti).await.unwrap_or(true) {
         return Err(error_json(
             locale.0,
             StatusCode::UNAUTHORIZED,
@@ -425,8 +554,8 @@ pub async fn refresh(
     }
     let (user_id, username, email, is_admin, storage_quota) =
         lookup_user_for_refresh(&state.pool, &claims.sub, locale.0).await?;
-    let (new_access, new_refresh, _ac, _rc) = generate_tokens(user_id, is_admin, config)
-        .map_err(|e| {
+    let (new_access, new_refresh, _ac, _rc) =
+        generate_tokens(user_id, is_admin, config).map_err(|e| {
             tracing::warn!("Refresh token generation failed: {e}");
             error_json(
                 locale.0,
@@ -435,17 +564,26 @@ pub async fn refresh(
             )
         })?;
     let now = Utc::now().timestamp() as usize;
-    revoke_old_tokens(&state.cache, &claims, now).await;
+    revoke_old_tokens(state.blacklist.as_ref(), &claims, now).await;
     tracing::info!(user = %user_id, "tokens refreshed (rotation)");
-    Ok((StatusCode::OK, Json(RefreshResponse {
-        access_token: new_access,
-        refresh_token: new_refresh,
-        user: UserInfo { id: user_id, username, email, is_admin, storage_quota },
-    })))
+    Ok((
+        StatusCode::OK,
+        Json(RefreshResponse {
+            access_token: new_access,
+            refresh_token: new_refresh,
+            user: UserInfo {
+                id: user_id,
+                username,
+                email,
+                is_admin,
+                storage_quota,
+            },
+        }),
+    ))
 }
 
-pub async fn logout(
-    State(state): State<Arc<AppState>>,
+pub async fn logout<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     headers: HeaderMap,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
@@ -474,8 +612,10 @@ pub async fn logout(
     let now = Utc::now().timestamp() as usize;
     let ttl = claims.exp.saturating_sub(now);
     if ttl > 0 {
-        let bl_key = format!("bl:{}", claims.jti);
-        let _ = state.cache.set_ex(&bl_key, "revoked", ttl as u64).await;
+        let _ = state
+            .blacklist
+            .revoke(&claims.jti, Duration::from_secs(ttl as u64))
+            .await;
     }
 
     tracing::info!(user = %claims.sub, jti = %claims.jti, "logged out");
@@ -500,7 +640,8 @@ mod tests {
     #[test]
     fn test_generate_tokens() {
         let user_id = Uuid::new_v4();
-        let (access, refresh, ac, rc) = generate_tokens(user_id, true, &config_with_secret()).unwrap();
+        let (access, refresh, ac, rc) =
+            generate_tokens(user_id, true, &config_with_secret()).unwrap();
         assert_eq!(ac.typ, "access");
         assert_eq!(rc.typ, "refresh");
         assert_eq!(ac.sub, user_id.to_string());
@@ -510,12 +651,15 @@ mod tests {
         assert!(ac.is_admin);
 
         let key = DecodingKey::from_secret(SECRET.as_bytes());
-        let decoded: AccessTokenClaims =
-            decode(&access, &key, &Validation::new(Algorithm::HS256)).unwrap().claims;
+        let decoded: AccessTokenClaims = decode(&access, &key, &Validation::new(Algorithm::HS256))
+            .unwrap()
+            .claims;
         assert_eq!(decoded.sub, user_id.to_string());
         assert_eq!(decoded.typ, "access");
         let decoded: RefreshTokenClaims =
-            decode(&refresh, &key, &Validation::new(Algorithm::HS256)).unwrap().claims;
+            decode(&refresh, &key, &Validation::new(Algorithm::HS256))
+                .unwrap()
+                .claims;
         assert_eq!(decoded.typ, "refresh");
         assert_eq!(decoded.sub, user_id.to_string());
     }

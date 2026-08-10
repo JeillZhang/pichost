@@ -22,7 +22,10 @@ async fn create_admin(app: &TestApp, tag: &str) -> (String, Uuid) {
         "invite_code": code,
     });
     let (status, resp) = send_json(app, Method::POST, "/api/v1/auth/register", None, &body).await;
-    assert!(status.is_success(), "admin register failed: {status} {resp}");
+    assert!(
+        status.is_success(),
+        "admin register failed: {status} {resp}"
+    );
     let user_id = Uuid::parse_str(resp["user"]["id"].as_str().unwrap()).unwrap();
     make_admin(app, user_id).await;
     let (status, resp) = login(app, &username, "admin123456").await;
@@ -74,7 +77,7 @@ async fn insert_image(app: &TestApp, user_id: Uuid, backend: &str) -> Uuid {
 }
 
 async fn del_redis_key(app: &TestApp, key: &str) {
-    let mut conn = app.state.cache.get_pool().get().await.unwrap();
+    let mut conn = app.redis_pool().get().await.unwrap();
     let _: () = deadpool_redis::redis::cmd("DEL")
         .arg(key)
         .query_async::<_, ()>(&mut *conn)
@@ -95,15 +98,26 @@ async fn auth_invite_code_used_rejected() {
         "invite_code": code,
     });
     let (status, resp) = send_json(&app, Method::POST, "/api/v1/auth/register", None, &body).await;
-    assert_eq!(status, StatusCode::CREATED, "first register failed: {status} {resp}");
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "first register failed: {status} {resp}"
+    );
     let body2 = serde_json::json!({
         "username": uname("used2"),
         "password": "user123456",
         "invite_code": code,
     });
     let (status, resp) = send_json(&app, Method::POST, "/api/v1/auth/register", None, &body2).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
-    assert!(resp["error"].as_str().unwrap().contains("already been used"));
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
+    assert!(resp["error"]
+        .as_str()
+        .unwrap()
+        .contains("already been used"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -111,7 +125,7 @@ async fn auth_invite_code_used_rejected() {
 async fn auth_invite_code_expired_rejected() {
     let app = test_app().await;
     let code = create_invite(&app, 60).await;
-    let mut conn = app.state.cache.get_pool().get().await.unwrap();
+    let mut conn = app.redis_pool().get().await.unwrap();
     let _: () = deadpool_redis::redis::cmd("HSET")
         .arg(format!("pichost:invite:{code}"))
         .arg("expires_at")
@@ -125,7 +139,11 @@ async fn auth_invite_code_expired_rejected() {
         "invite_code": code,
     });
     let (status, resp) = send_json(&app, Method::POST, "/api/v1/auth/register", None, &body).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
     assert!(resp["error"].as_str().unwrap().contains("expired"));
 }
 
@@ -150,7 +168,11 @@ async fn auth_refresh_deleted_user_unauthorized() {
         &serde_json::json!({"refresh_token": refresh}),
     )
     .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "expected 401, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "expected 401, got {status}: {resp}"
+    );
     assert!(resp["error"].as_str().unwrap().contains("user not found"));
 }
 
@@ -158,10 +180,23 @@ async fn auth_refresh_deleted_user_unauthorized() {
 #[ignore = "requires running PostgreSQL and Redis"]
 async fn auth_logout_missing_header_unauthorized() {
     let app = test_app().await;
-    let (status, resp) =
-        send_json(&app, Method::POST, "/api/v1/auth/logout", None, &Value::Null).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "expected 401, got {status}: {resp}");
-    assert!(resp["error"].as_str().unwrap().contains("missing authorization header"));
+    let (status, resp) = send_json(
+        &app,
+        Method::POST,
+        "/api/v1/auth/logout",
+        None,
+        &Value::Null,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "expected 401, got {status}: {resp}"
+    );
+    assert!(resp["error"]
+        .as_str()
+        .unwrap()
+        .contains("missing authorization header"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -176,7 +211,11 @@ async fn auth_logout_invalid_token_unauthorized() {
         &Value::Null,
     )
     .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "expected 401, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "expected 401, got {status}: {resp}"
+    );
     assert!(resp["error"].is_string());
 }
 
@@ -196,8 +235,15 @@ async fn auth_logout_rejects_refresh_token() {
         &Value::Null,
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
-    assert!(resp["error"].as_str().unwrap().contains("only access tokens"));
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
+    assert!(resp["error"]
+        .as_str()
+        .unwrap()
+        .contains("only access tokens"));
 }
 
 // ── users.rs gaps ──────────────────────────────────────────────────────
@@ -207,9 +253,23 @@ async fn auth_logout_rejects_refresh_token() {
 async fn users_me_stats_served_from_cache() {
     let app = test_app().await;
     let (_, token, _) = create_user(&app, "statscache").await;
-    let (s1, r1) = send_json(&app, Method::GET, "/api/v1/users/me/stats", Some(&token), &Value::Null).await;
+    let (s1, r1) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/users/me/stats",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(s1, StatusCode::OK);
-    let (s2, r2) = send_json(&app, Method::GET, "/api/v1/users/me/stats", Some(&token), &Value::Null).await;
+    let (s2, r2) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/users/me/stats",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(s2, StatusCode::OK);
     assert_eq!(r1["total_images"], r2["total_images"]);
     assert_eq!(r1["total_size"], r2["total_size"]);
@@ -232,7 +292,14 @@ async fn users_me_stats_db_path_with_images() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "upload failed: {status}");
     del_redis_key(&app, &format!("pichost:stats:{uid}")).await;
-    let (status, resp) = send_json(&app, Method::GET, "/api/v1/users/me/stats", Some(&token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/users/me/stats",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "stats failed: {resp}");
     assert!(resp["total_images"].as_i64().unwrap() >= 1);
     assert!(resp["total_size"].as_i64().unwrap() > 0);
@@ -248,9 +315,19 @@ async fn users_me_profile_not_found_after_delete() {
         .execute(app.pool())
         .await
         .unwrap();
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/users/me", Some(&token), &Value::Null).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "expected 404, got {status}: {resp}");
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/users/me",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "expected 404, got {status}: {resp}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -271,7 +348,11 @@ async fn users_me_password_not_found_after_delete() {
         &serde_json::json!({"current_password": "user123456", "new_password": "newpass12345"}),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "expected 404, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "expected 404, got {status}: {resp}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -289,8 +370,15 @@ async fn users_me_email_conflict() {
         &serde_json::json!({"email": b_email}),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
-    assert!(resp["error"].as_str().unwrap().contains("email already taken"));
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "expected 409, got {status}: {resp}"
+    );
+    assert!(resp["error"]
+        .as_str()
+        .unwrap()
+        .contains("email already taken"));
 }
 
 // ── storage_configs.rs gaps ────────────────────────────────────────────
@@ -311,7 +399,11 @@ async fn storage_configs_limit_reached() {
         &serde_json::json!({"name": "sixth", "provider": "github", "token": "t", "repo": "o/r"}),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
     assert_eq!(resp["code"], "storage_config.limit");
 }
 
@@ -329,7 +421,11 @@ async fn storage_configs_name_duplicate() {
         &serde_json::json!({"name": "dup", "provider": "github", "token": "t", "repo": "o/r"}),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "expected 409, got {status}: {resp}"
+    );
     assert_eq!(resp["code"], "storage_config.name_exists");
 }
 
@@ -437,7 +533,11 @@ async fn storage_configs_delete_referenced_image_rejected() {
     .expect("insert referencing image");
     let uri = format!("/api/v1/users/me/storage-configs/{id}");
     let (status, resp) = send_json(&app, Method::DELETE, &uri, Some(&token), &Value::Null).await;
-    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "expected 409, got {status}: {resp}"
+    );
     assert_eq!(resp["code"], "storage_config.in_use");
 }
 
@@ -481,7 +581,11 @@ async fn admin_update_user_password() {
     .await;
     assert_eq!(status, StatusCode::OK, "update failed: {resp}");
     let (status, _) = login(&app, &target_name, "brandnewpass99").await;
-    assert_eq!(status, StatusCode::OK, "login with admin-set password failed");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "login with admin-set password failed"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -499,7 +603,11 @@ async fn admin_update_user_short_password_rejected() {
         &serde_json::json!({"password": "short"}),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "expected 400, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "expected 400, got {status}: {resp}"
+    );
     assert!(resp["error"].as_str().unwrap().contains("at least 8"));
 }
 
@@ -578,7 +686,8 @@ async fn admin_delete_user_with_images_cascades() {
     let _ = insert_image(&app, target_id, "local").await;
     let _ = insert_image(&app, target_id, "local").await;
     let uri = format!("/api/v1/admin/users/{target_id}");
-    let (status, resp) = send_json(&app, Method::DELETE, &uri, Some(&admin_token), &Value::Null).await;
+    let (status, resp) =
+        send_json(&app, Method::DELETE, &uri, Some(&admin_token), &Value::Null).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "delete failed: {resp}");
     let images: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE user_id = $1")
         .bind(target_id)
@@ -600,8 +709,13 @@ async fn admin_delete_user_not_found() {
     let app = test_app().await;
     let (admin_token, _) = create_admin(&app, "delmissing").await;
     let uri = format!("/api/v1/admin/users/{}", Uuid::new_v4());
-    let (status, resp) = send_json(&app, Method::DELETE, &uri, Some(&admin_token), &Value::Null).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "expected 404, got {status}: {resp}");
+    let (status, resp) =
+        send_json(&app, Method::DELETE, &uri, Some(&admin_token), &Value::Null).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "expected 404, got {status}: {resp}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -654,15 +768,37 @@ async fn admin_stats_reflects_data() {
     let _ = insert_image(&app, u1, "local").await;
     let _ = insert_image(&app, u1, "local").await;
     let _ = insert_image(&app, u2, "rustfs").await;
-    let (status, resp) = send_json(&app, Method::GET, "/api/v1/admin/stats", Some(&admin_token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/admin/stats",
+        Some(&admin_token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "stats failed: {resp}");
     assert!(resp["total_users"].as_i64().unwrap() >= 3);
     assert!(resp["total_images"].as_i64().unwrap() >= 3);
     assert!(resp["total_size"].as_i64().unwrap() >= 300);
     assert!(resp["total_quota"].as_i64().unwrap() >= 12000);
-    assert!(resp["storage_backends"]["local"]["total_images"].as_i64().unwrap() >= 2);
-    assert!(resp["storage_backends"]["rustfs"]["total_images"].as_i64().unwrap() >= 1);
-    assert!(resp["storage_backends"]["local"]["total_size"].as_i64().unwrap() >= 200);
+    assert!(
+        resp["storage_backends"]["local"]["total_images"]
+            .as_i64()
+            .unwrap()
+            >= 2
+    );
+    assert!(
+        resp["storage_backends"]["rustfs"]["total_images"]
+            .as_i64()
+            .unwrap()
+            >= 1
+    );
+    assert!(
+        resp["storage_backends"]["local"]["total_size"]
+            .as_i64()
+            .unwrap()
+            >= 200
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -681,15 +817,36 @@ async fn admin_stats_cached_prepopulated() {
         ("local_size", Some(50)),
         ("rustfs_size", Some(49)),
     ];
-    app.state.cache.set_user_stats(&Uuid::nil(), &fields).await.unwrap();
-    let (status, resp) = send_json(&app, Method::GET, "/api/v1/admin/stats", Some(&admin_token), &Value::Null).await;
+    app.state
+        .cache
+        .set_user_stats(&Uuid::nil(), &fields)
+        .await
+        .unwrap();
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/admin/stats",
+        Some(&admin_token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "stats failed: {resp}");
     assert_eq!(resp["total_users"].as_i64().unwrap(), 42);
     assert_eq!(resp["total_images"].as_i64().unwrap(), 7);
     assert_eq!(resp["total_size"].as_i64().unwrap(), 99);
     assert_eq!(resp["total_quota"].as_i64().unwrap(), 500);
-    assert_eq!(resp["storage_backends"]["local"]["total_images"].as_i64().unwrap(), 3);
-    assert_eq!(resp["storage_backends"]["rustfs"]["total_size"].as_i64().unwrap(), 49);
+    assert_eq!(
+        resp["storage_backends"]["local"]["total_images"]
+            .as_i64()
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        resp["storage_backends"]["rustfs"]["total_size"]
+            .as_i64()
+            .unwrap(),
+        49
+    );
 }
 
 // ── Config endpoints (serial: writes config.toml in test CWD) ──────────
@@ -699,8 +856,7 @@ fn cleanup_config_files() {
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name == "config.toml"
-                || (name.starts_with("config.toml.") && name.ends_with(".bak"))
+            if name == "config.toml" || (name.starts_with("config.toml.") && name.ends_with(".bak"))
             {
                 let _ = std::fs::remove_file(dir.join(&name));
             }
@@ -739,6 +895,9 @@ async fn admin_config_put_merge_preserves_existing() {
     .await;
     assert_eq!(status, StatusCode::OK, "merge put failed: {resp}");
     assert!(resp["database_url"].as_str().unwrap().contains(":***@"));
-    assert_eq!(resp["public_url"].as_str().unwrap(), "https://merge.example.com");
+    assert_eq!(
+        resp["public_url"].as_str().unwrap(),
+        "https://merge.example.com"
+    );
     cleanup_config_files();
 }

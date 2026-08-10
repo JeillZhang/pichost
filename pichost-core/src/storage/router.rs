@@ -21,10 +21,7 @@ pub struct StorageRouter {
 
 impl StorageRouter {
     /// Create a new router with the given backends and default backend name.
-    pub fn new(
-        backends: HashMap<String, Arc<dyn StorageBackend>>,
-        default: String,
-    ) -> Self {
+    pub fn new(backends: HashMap<String, Arc<dyn StorageBackend>>, default: String) -> Self {
         Self {
             backends: RwLock::new(backends),
             default,
@@ -62,11 +59,7 @@ impl StorageRouter {
         self.backends
             .read()
             .ok()
-            .and_then(|b| {
-                b.get(&self.default)
-                    .or_else(|| b.values().next())
-                    .cloned()
-            })
+            .and_then(|b| b.get(&self.default).or_else(|| b.values().next()).cloned())
             .expect("StorageRouter must have at least one backend registered")
     }
 
@@ -94,9 +87,10 @@ impl StorageRouter {
 
         let cache_key = config.id.to_string();
         {
-            let backends = self.backends.read().map_err(|_| {
-                StorageError::Config("Router lock poisoned".into())
-            })?;
+            let backends = self
+                .backends
+                .read()
+                .map_err(|_| StorageError::Config("Router lock poisoned".into()))?;
             if let Some(backend) = backends.get(&cache_key) {
                 return Ok(Arc::clone(backend));
             }
@@ -131,11 +125,7 @@ impl StorageRouter {
         let (owner, repo) = detail
             .repo
             .split_once('/')
-            .ok_or_else(|| {
-                StorageError::Config(
-                    "repo format error, expected owner/repo".into(),
-                )
-            })?;
+            .ok_or_else(|| StorageError::Config("repo format error, expected owner/repo".into()))?;
 
         let git = Arc::new(GitStorage::new(
             provider,
@@ -146,9 +136,10 @@ impl StorageRouter {
             token,
         )) as Arc<dyn StorageBackend>;
 
-        let mut backends = self.backends.write().map_err(|_| {
-            StorageError::Config("Router lock poisoned".into())
-        })?;
+        let mut backends = self
+            .backends
+            .write()
+            .map_err(|_| StorageError::Config("Router lock poisoned".into()))?;
         backends.insert(config.id.to_string(), Arc::clone(&git));
 
         Ok(git)
@@ -177,12 +168,7 @@ mod tests {
 
     #[async_trait]
     impl StorageBackend for MockBackend {
-        async fn put(
-            &self,
-            _key: &str,
-            _data: &[u8],
-            _ct: &str,
-        ) -> Result<String, StorageError> {
+        async fn put(&self, _key: &str, _data: &[u8], _ct: &str) -> Result<String, StorageError> {
             Ok(self.0.to_string())
         }
         async fn get(&self, _key: &str) -> Result<Vec<u8>, StorageError> {

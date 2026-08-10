@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Versions before 0.7.0 are not documented here.
 
+## [0.21.0] - 2026-08-09
+
+### Added
+
+- **SQLite lite mode** — zero-external-dependency single-process deployment (`PICHOST_DATABASE_MODE=sqlite`): no PostgreSQL, no Redis, no separate worker binary. Dual DB modes: standard (PostgreSQL + Redis + external workers) and lite (SQLite + embedded in-process worker, `lite_worker_task` dequeues every 500ms and runs `pichost_worker::process_task` in-process).
+- **A′ generic architecture** — `AppState<DB: DbType>` generic state with concrete per-driver pools (`create_pg_pool` / `create_sqlite_pool`), `configure_app<DB>` router assembly, and `run_with::<DB>()` / `run_with_sqlite` runners (the sqlx `Any` driver lacks `Uuid`/`DateTime`/`Json` support, so `AnyPool` was rejected).
+- **5 state traits with dual implementations** — `Queue` / `Blacklist` / `RateLimiter` / `InviteStore` / `Cache` traits with Redis implementations (standard mode) and SQLite table implementations (lite mode, migration `0011`: `pending_tasks` / `token_blacklist` / `rate_limits` / `invite_codes`), plus a fail-open `NoopCache`.
+- **SQLite migration directory** — `migrations-sqlite/` (11 files, `0001`–`0011`), driver-specific migration runner picks PostgreSQL or SQLite at startup.
+- **Interactive install script** — `scripts/install.sh` supports `--yes` (unattended) and `--mode postgres|sqlite` (apt dependency bootstrap); sqlite mode skips the postgresql/redis dependency checks, installs no `pichost-worker.service`, and writes a `sqlite://` URL into `.env` — zero external deps.
+- Deployment i18n variables in `.env.example` (`PICHOST_I18N_LANGUAGE`, `PICHOST_I18N_LOCALES_DIR`).
+
 ## [0.20.0] - 2026-08-09
 
 ### Added

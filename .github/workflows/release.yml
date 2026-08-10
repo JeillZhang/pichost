@@ -60,6 +60,7 @@ jobs:
           cp target/${{ matrix.target }}/release/pichost-worker dist/$PKG_NAME/
           cp -r web-ui/dist dist/$PKG_NAME/web-ui/
           cp -r migrations dist/$PKG_NAME/
+          cp -r migrations-sqlite dist/$PKG_NAME/
           cp -r nginx dist/$PKG_NAME/
           cp .env.example dist/$PKG_NAME/
           cp scripts/install.sh scripts/uninstall.sh dist/$PKG_NAME/scripts/

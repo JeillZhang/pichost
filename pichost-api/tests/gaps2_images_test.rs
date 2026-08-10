@@ -108,9 +108,14 @@ async fn service_extract_file_from_multipart() {
         "--{boundary}\r\nContent-Disposition: form-data; name=\"x\"\r\n\r\nvalue\r\n--{boundary}--\r\n"
     );
     let ct = format!("multipart/form-data; boundary={boundary}");
-    let err = extract_via_request(&ct, body.into_bytes()).await.unwrap_err();
+    let err = extract_via_request(&ct, body.into_bytes())
+        .await
+        .unwrap_err();
     assert_eq!(err.0, StatusCode::BAD_REQUEST);
-    assert!(err.1 .0["error"].as_str().unwrap().contains("no file field"));
+    assert!(err.1 .0["error"]
+        .as_str()
+        .unwrap()
+        .contains("no file field"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

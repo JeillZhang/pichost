@@ -1,3 +1,4 @@
+use pichost_core::DbType;
 use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, Json};
@@ -5,9 +6,13 @@ use axum::{extract::State, http::StatusCode, Json};
 use crate::app::AppState;
 
 /// GET /api/health — service health check (public, no auth)
-pub async fn health_check(
-    State(state): State<Arc<AppState>>,
-) -> (StatusCode, Json<serde_json::Value>) {
+pub async fn health_check<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
+) -> (StatusCode, Json<serde_json::Value>)
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+{
     // Check PostgreSQL
     let pg_ok = sqlx::query("SELECT 1").execute(&state.pool).await.is_ok();
 

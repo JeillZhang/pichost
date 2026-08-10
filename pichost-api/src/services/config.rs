@@ -30,7 +30,11 @@ impl SystemConfig {
             default_backend: Some(cfg.storage.default_backend.clone()),
             local_base_path: Some(cfg.storage.local_base_path.display().to_string()),
             i18n_language: Some(cfg.i18n.language.clone()),
-            i18n_locales_dir: cfg.i18n.locales_dir.as_ref().map(|p| p.display().to_string()),
+            i18n_locales_dir: cfg
+                .i18n
+                .locales_dir
+                .as_ref()
+                .map(|p| p.display().to_string()),
         }
     }
 }
@@ -53,8 +57,7 @@ pub fn read_config_toml(path: &Path) -> Result<SystemConfig, ConfigError> {
     if !path.exists() {
         return Ok(SystemConfig::default());
     }
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| ConfigError::Io(e.to_string()))?;
+    let content = std::fs::read_to_string(path).map_err(|e| ConfigError::Io(e.to_string()))?;
     let doc: toml_edit::DocumentMut = content
         .parse::<toml_edit::DocumentMut>()
         .map_err(|e| ConfigError::Parse(e.to_string()))?;
@@ -83,8 +86,7 @@ pub fn read_config_toml(path: &Path) -> Result<SystemConfig, ConfigError> {
 /// Preserves all existing sections/keys.
 pub fn write_config_toml(path: &Path, config: &SystemConfig) -> Result<(), ConfigError> {
     let mut doc: toml_edit::DocumentMut = if path.exists() {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| ConfigError::Io(e.to_string()))?;
+        let content = std::fs::read_to_string(path).map_err(|e| ConfigError::Io(e.to_string()))?;
         content
             .parse::<toml_edit::DocumentMut>()
             .map_err(|e| ConfigError::Parse(e.to_string()))?
@@ -113,8 +115,18 @@ pub fn write_config_toml(path: &Path, config: &SystemConfig) -> Result<(), Confi
     set_nested(&mut doc, "database", "url", &config.database_url);
     set_nested(&mut doc, "redis", "url", &config.redis_url);
     set_nested(&mut doc, "server", "public_url", &config.public_url);
-    set_nested(&mut doc, "storage", "default_backend", &config.default_backend);
-    set_nested(&mut doc, "storage", "local_base_path", &config.local_base_path);
+    set_nested(
+        &mut doc,
+        "storage",
+        "default_backend",
+        &config.default_backend,
+    );
+    set_nested(
+        &mut doc,
+        "storage",
+        "local_base_path",
+        &config.local_base_path,
+    );
     set_nested(&mut doc, "i18n", "language", &config.i18n_language);
     set_nested(&mut doc, "i18n", "locales_dir", &config.i18n_locales_dir);
 
@@ -153,7 +165,10 @@ pub fn restore_config(path: &Path, backup_file: &str) -> Result<(), ConfigError>
     let dir = path.parent().unwrap_or(Path::new("."));
     let backup_path = dir.join(backup_file);
     if !backup_path.exists() {
-        return Err(ConfigError::Io(format!("Backup not found: {}", backup_file)));
+        return Err(ConfigError::Io(format!(
+            "Backup not found: {}",
+            backup_file
+        )));
     }
     std::fs::copy(&backup_path, path).map_err(|e| ConfigError::Io(e.to_string()))?;
     Ok(())
@@ -191,7 +206,10 @@ pub fn test_redis_connection(url: &str) -> Result<(), ConfigError> {
     if result == "PONG" {
         Ok(())
     } else {
-        Err(ConfigError::Connection(format!("unexpected PING: {}", result)))
+        Err(ConfigError::Connection(format!(
+            "unexpected PING: {}",
+            result
+        )))
     }
 }
 
@@ -302,7 +320,10 @@ mod gaps_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "[database\nurl = ").unwrap();
-        assert!(matches!(read_config_toml(&path), Err(ConfigError::Parse(_))));
+        assert!(matches!(
+            read_config_toml(&path),
+            Err(ConfigError::Parse(_))
+        ));
     }
 
     #[test]
@@ -353,7 +374,10 @@ mod gaps_tests {
         let path = dir.path().join("config.toml");
         std::fs::create_dir(&path).unwrap();
         let cfg = SystemConfig::default();
-        assert!(matches!(write_config_toml(&path, &cfg), Err(ConfigError::Io(_))));
+        assert!(matches!(
+            write_config_toml(&path, &cfg),
+            Err(ConfigError::Io(_))
+        ));
     }
 
     #[test]
@@ -378,7 +402,10 @@ mod gaps_tests {
             database_url: Some("postgres://u:p@h/d".into()),
             ..Default::default()
         };
-        assert!(matches!(write_config_toml(&path, &cfg), Err(ConfigError::Io(_))));
+        assert!(matches!(
+            write_config_toml(&path, &cfg),
+            Err(ConfigError::Io(_))
+        ));
     }
 
     #[test]
@@ -445,7 +472,9 @@ mod gaps_tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_database_connection_invalid_url() {
-        let err = test_database_connection("not-a-valid-url").await.unwrap_err();
+        let err = test_database_connection("not-a-valid-url")
+            .await
+            .unwrap_err();
         assert!(matches!(err, ConfigError::Connection(_)));
     }
 

@@ -19,9 +19,11 @@ async fn create_admin(app: &TestApp, tag: &str) -> (String, Uuid) {
         "password": password,
         "invite_code": code,
     });
-    let (status, resp) =
-        send_json(app, Method::POST, "/api/v1/auth/register", None, &body).await;
-    assert!(status.is_success(), "admin register failed: {status} {resp}");
+    let (status, resp) = send_json(app, Method::POST, "/api/v1/auth/register", None, &body).await;
+    assert!(
+        status.is_success(),
+        "admin register failed: {status} {resp}"
+    );
     let user_id = Uuid::parse_str(resp["user"]["id"].as_str().unwrap()).unwrap();
     make_admin(app, user_id).await;
     let (status, resp) = login(app, &username, password).await;
@@ -37,8 +39,14 @@ async fn create_admin(app: &TestApp, tag: &str) -> (String, Uuid) {
 async fn admin_users_non_admin_forbidden() {
     let app = test_app().await;
     let (_, token, _) = create_user(&app, "forbidlist").await;
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/admin/users", Some(&token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/admin/users",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(resp["error"].as_str().is_some());
 }
@@ -50,14 +58,22 @@ async fn admin_users_lists_users_with_total() {
     let (admin_token, _) = create_admin(&app, "listusers").await;
     let (username, _, _) = create_user(&app, "listed").await;
 
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/admin/users", Some(&admin_token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/admin/users",
+        Some(&admin_token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "list failed: {resp}");
     let users = resp["users"].as_array().unwrap();
     assert!(!users.is_empty());
     assert!(resp["total"].as_i64().unwrap() >= 2);
     assert!(
-        users.iter().any(|u| u["username"].as_str() == Some(username.as_str())),
+        users
+            .iter()
+            .any(|u| u["username"].as_str() == Some(username.as_str())),
         "created user missing from list: {resp}"
     );
 }
@@ -76,20 +92,18 @@ async fn admin_update_user_fields() {
         "storage_quota": 12345,
     });
     let uri = format!("/api/v1/admin/users/{target_id}");
-    let (status, resp) =
-        send_json(&app, Method::PATCH, &uri, Some(&admin_token), &body).await;
+    let (status, resp) = send_json(&app, Method::PATCH, &uri, Some(&admin_token), &body).await;
     assert_eq!(status, StatusCode::OK, "update failed: {resp}");
     assert_eq!(resp["username"].as_str().unwrap(), new_name);
     assert!(!resp["is_admin"].as_bool().unwrap());
     assert_eq!(resp["storage_quota"].as_i64().unwrap(), 12345);
 
-    let row: (String, bool, Option<i64>) = sqlx::query_as(
-        "SELECT username, is_admin, storage_quota FROM users WHERE id = $1",
-    )
-    .bind(target_id)
-    .fetch_one(app.pool())
-    .await
-    .expect("fetch updated user");
+    let row: (String, bool, Option<i64>) =
+        sqlx::query_as("SELECT username, is_admin, storage_quota FROM users WHERE id = $1")
+            .bind(target_id)
+            .fetch_one(app.pool())
+            .await
+            .expect("fetch updated user");
     assert_eq!(row.0, new_name);
     assert!(!row.1);
     assert_eq!(row.2, Some(12345));
@@ -187,12 +201,11 @@ async fn admin_delete_another_user() {
         send_json(&app, Method::DELETE, &uri, Some(&admin_token), &Value::Null).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "delete failed: {resp}");
 
-    let exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
-            .bind(target_id)
-            .fetch_one(app.pool())
-            .await
-            .expect("check deleted user");
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
+        .bind(target_id)
+        .fetch_one(app.pool())
+        .await
+        .expect("check deleted user");
     assert!(!exists);
 }
 
@@ -203,14 +216,22 @@ async fn admin_delete_another_user() {
 async fn admin_stats_returns_totals() {
     let app = test_app().await;
     let (admin_token, _) = create_admin(&app, "statsadmin").await;
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/admin/stats", Some(&admin_token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/admin/stats",
+        Some(&admin_token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "stats failed: {resp}");
     assert!(resp["total_users"].as_i64().unwrap() >= 1);
     assert!(resp["total_images"].as_i64().unwrap() >= 0);
     assert!(resp["total_size"].as_i64().unwrap() >= 0);
     assert!(resp["total_quota"].is_null() || resp["total_quota"].as_i64().is_some());
-    assert!(resp["storage_backends"]["local"]["total_images"].as_i64().is_some());
+    assert!(resp["storage_backends"]["local"]["total_images"]
+        .as_i64()
+        .is_some());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -218,8 +239,14 @@ async fn admin_stats_returns_totals() {
 async fn admin_stats_non_admin_forbidden() {
     let app = test_app().await;
     let (_, token, _) = create_user(&app, "forbidstats").await;
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/admin/stats", Some(&token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/admin/stats",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(resp["error"].as_str().is_some());
 }
@@ -278,12 +305,20 @@ async fn admin_list_invites_contains_created() {
     assert_eq!(status, StatusCode::OK);
     let code = created["code"].as_str().unwrap().to_string();
 
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/admin/invites", Some(&admin_token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/admin/invites",
+        Some(&admin_token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "list invites failed: {resp}");
     let codes = resp.as_array().unwrap();
     assert!(
-        codes.iter().any(|c| c["code"].as_str() == Some(code.as_str())),
+        codes
+            .iter()
+            .any(|c| c["code"].as_str() == Some(code.as_str())),
         "created code missing from list: {resp}"
     );
 }
@@ -293,8 +328,14 @@ async fn admin_list_invites_contains_created() {
 async fn admin_list_invites_non_admin_forbidden() {
     let app = test_app().await;
     let (_, token, _) = create_user(&app, "forbidlistinv").await;
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/admin/invites", Some(&token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/admin/invites",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(resp["error"].as_str().is_some());
 }
@@ -306,8 +347,7 @@ fn cleanup_config_files() {
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name == "config.toml"
-                || (name.starts_with("config.toml.") && name.ends_with(".bak"))
+            if name == "config.toml" || (name.starts_with("config.toml.") && name.ends_with(".bak"))
             {
                 let _ = std::fs::remove_file(dir.join(&name));
             }
@@ -321,8 +361,7 @@ fn test_db_url() -> String {
 }
 
 fn test_redis_url() -> String {
-    std::env::var("PICHOST_REDIS_URL")
-        .unwrap_or_else(|_| "redis://localhost:6379".to_string())
+    std::env::var("PICHOST_REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -332,8 +371,14 @@ async fn admin_config_non_admin_forbidden() {
     cleanup_config_files();
     let app = test_app().await;
     let (_, token, _) = create_user(&app, "forbidcfg").await;
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/admin/config", Some(&token), &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/admin/config",
+        Some(&token),
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(resp["error"].as_str().is_some());
     cleanup_config_files();
@@ -357,7 +402,10 @@ async fn admin_config_get_masks_secret() {
     assert_eq!(status, StatusCode::OK, "get config failed: {resp}");
     assert_eq!(resp["jwt_secret"].as_str().unwrap(), "********");
     assert!(resp["token_encryption_key"].is_string());
-    assert!(resp["config_path"].as_str().unwrap().ends_with("config.toml"));
+    assert!(resp["config_path"]
+        .as_str()
+        .unwrap()
+        .ends_with("config.toml"));
     cleanup_config_files();
 }
 
@@ -453,7 +501,9 @@ async fn admin_config_backup_list_restore() {
     assert_eq!(status, StatusCode::OK, "list backups failed: {resp}");
     let backups = resp.as_array().unwrap();
     assert!(
-        backups.iter().any(|b| b["filename"].as_str() == Some(filename.as_str())),
+        backups
+            .iter()
+            .any(|b| b["filename"].as_str() == Some(filename.as_str())),
         "backup missing from list: {resp}"
     );
 
@@ -515,20 +565,38 @@ async fn test_admin_config_roundtrip_i18n_language() {
 #[ignore = "requires running PostgreSQL and Redis"]
 async fn oauth_github_redirect_unconfigured() {
     let app = test_app().await;
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/auth/oauth/github", None, &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/auth/oauth/github",
+        None,
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(resp["error"].as_str().unwrap().contains("client_id not configured"));
+    assert!(resp["error"]
+        .as_str()
+        .unwrap()
+        .contains("client_id not configured"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires running PostgreSQL and Redis"]
 async fn oauth_google_redirect_unconfigured() {
     let app = test_app().await;
-    let (status, resp) =
-        send_json(&app, Method::GET, "/api/v1/auth/oauth/google", None, &Value::Null).await;
+    let (status, resp) = send_json(
+        &app,
+        Method::GET,
+        "/api/v1/auth/oauth/google",
+        None,
+        &Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(resp["error"].as_str().unwrap().contains("client_id not configured"));
+    assert!(resp["error"]
+        .as_str()
+        .unwrap()
+        .contains("client_id not configured"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -544,7 +612,10 @@ async fn oauth_github_callback_unconfigured() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(resp["error"].as_str().unwrap().contains("client_id not configured"));
+    assert!(resp["error"]
+        .as_str()
+        .unwrap()
+        .contains("client_id not configured"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -561,7 +632,10 @@ async fn oauth_link_unconfigured() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(resp["error"].as_str().unwrap().contains("client_id not configured"));
+    assert!(resp["error"]
+        .as_str()
+        .unwrap()
+        .contains("client_id not configured"));
 }
 
 // ── Storage config error codes ────────────────────────────────────────
@@ -597,7 +671,11 @@ async fn test_duplicate_storage_config_name_returns_code() {
         &serde_json::json!({"name": "repo", "provider": "github", "token": "x", "repo": "owner/repo"}),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "expected 409, got {status}: {resp}");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "expected 409, got {status}: {resp}"
+    );
     assert_eq!(resp["code"], "storage_config.name_exists");
 }
 

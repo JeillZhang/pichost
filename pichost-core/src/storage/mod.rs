@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use crate::error::StorageError;
+use async_trait::async_trait;
 
 pub mod git;
 pub mod local;
@@ -10,7 +10,8 @@ pub use git::{GitProvider, GitStorage};
 
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
-    async fn put(&self, key: &str, data: &[u8], content_type: &str) -> Result<String, StorageError>;
+    async fn put(&self, key: &str, data: &[u8], content_type: &str)
+        -> Result<String, StorageError>;
     async fn get(&self, key: &str) -> Result<Vec<u8>, StorageError>;
     async fn delete(&self, key: &str) -> Result<(), StorageError>;
     async fn exists(&self, key: &str) -> Result<bool, StorageError>;

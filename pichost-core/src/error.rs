@@ -85,9 +85,7 @@ impl IntoResponse for AppError {
             Self::Upload(m) => (StatusCode::BAD_REQUEST, m.clone()),
             Self::RateLimited => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
             Self::Storage(e) => match e {
-                StorageError::PayloadTooLarge(m) => {
-                    (StatusCode::PAYLOAD_TOO_LARGE, m.clone())
-                }
+                StorageError::PayloadTooLarge(m) => (StatusCode::PAYLOAD_TOO_LARGE, m.clone()),
                 _ => {
                     tracing::warn!("{:?}", self);
                     (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
@@ -98,7 +96,11 @@ impl IntoResponse for AppError {
                 (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
         };
-        (status, Json(serde_json::json!({ "error": msg, "code": self.code() }))).into_response()
+        (
+            status,
+            Json(serde_json::json!({ "error": msg, "code": self.code() })),
+        )
+            .into_response()
     }
 }
 
@@ -127,17 +129,26 @@ mod tests {
 
     #[test]
     fn storage_error_display() {
-        assert_eq!(StorageError::NotFound("a".into()).to_string(), "file not found: a");
+        assert_eq!(
+            StorageError::NotFound("a".into()).to_string(),
+            "file not found: a"
+        );
         assert_eq!(
             StorageError::WriteFailed("w".into()).to_string(),
             "write failed: w"
         );
-        assert_eq!(StorageError::ReadFailed("r".into()).to_string(), "read failed: r");
+        assert_eq!(
+            StorageError::ReadFailed("r".into()).to_string(),
+            "read failed: r"
+        );
         assert_eq!(
             StorageError::ConnectionFailed("c".into()).to_string(),
             "connection failed: c"
         );
-        assert_eq!(StorageError::Config("cfg".into()).to_string(), "config error: cfg");
+        assert_eq!(
+            StorageError::Config("cfg".into()).to_string(),
+            "config error: cfg"
+        );
         assert_eq!(
             StorageError::PayloadTooLarge("big".into()).to_string(),
             "payload too large: big"
@@ -165,7 +176,10 @@ mod tests {
             AppError::Storage(StorageError::ReadFailed("x".into())).to_string(),
             "storage error: read failed: x"
         );
-        assert_eq!(AppError::Internal("x".into()).to_string(), "internal error: x");
+        assert_eq!(
+            AppError::Internal("x".into()).to_string(),
+            "internal error: x"
+        );
     }
 
     #[test]
@@ -180,11 +194,26 @@ mod tests {
 
     #[test]
     fn into_response_status_map() {
-        assert_eq!(status(AppError::Authentication("a".into())), StatusCode::UNAUTHORIZED);
-        assert_eq!(status(AppError::Authorization("a".into())), StatusCode::FORBIDDEN);
-        assert_eq!(status(AppError::NotFound("a".into())), StatusCode::NOT_FOUND);
-        assert_eq!(status(AppError::Validation("a".into())), StatusCode::BAD_REQUEST);
-        assert_eq!(status(AppError::Upload("a".into())), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            status(AppError::Authentication("a".into())),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status(AppError::Authorization("a".into())),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            status(AppError::NotFound("a".into())),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            status(AppError::Validation("a".into())),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            status(AppError::Upload("a".into())),
+            StatusCode::BAD_REQUEST
+        );
         assert_eq!(status(AppError::RateLimited), StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(
             status(AppError::Storage(StorageError::PayloadTooLarge("a".into()))),

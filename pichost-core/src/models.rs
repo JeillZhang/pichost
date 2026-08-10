@@ -104,12 +104,24 @@ pub struct WatermarkConfig {
     pub margin_y: u32,
 }
 
-fn default_font() -> String { "NotoSansSC-Regular".into() }
-fn default_font_size() -> u32 { 48 }
-fn default_color() -> String { "rgba(255, 255, 255, 0.5)".into() }
-fn default_rotation() -> f64 { -30.0 }
-fn default_scale() -> f64 { 0.15 }
-fn default_margin() -> u32 { 20 }
+fn default_font() -> String {
+    "NotoSansSC-Regular".into()
+}
+fn default_font_size() -> u32 {
+    48
+}
+fn default_color() -> String {
+    "rgba(255, 255, 255, 0.5)".into()
+}
+fn default_rotation() -> f64 {
+    -30.0
+}
+fn default_scale() -> f64 {
+    0.15
+}
+fn default_margin() -> u32 {
+    20
+}
 
 /// 用户的存储后端配置
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -216,6 +228,21 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
 }
 
+/// Payload for async image processing tasks (worker queue).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TaskPayload {
+    pub task_id: uuid::Uuid,
+    pub image_id: uuid::Uuid,
+    pub user_id: uuid::Uuid,
+    pub storage_backend: String,
+    pub storage_config_id: Option<uuid::Uuid>,
+    pub storage_backend_name: String,
+    pub source_key: String,
+    pub source_mime: String,
+    pub retry_count: i32,
+    pub max_retries: i32,
+}
+
 #[cfg(test)]
 mod watermark_tests {
     use super::*;
@@ -270,8 +297,7 @@ mod watermark_tests {
 
     #[test]
     fn test_update_profile_request_watermark_absent() {
-        let req: UpdateProfileRequest =
-            serde_json::from_str(r#"{"username": "bob"}"#).unwrap();
+        let req: UpdateProfileRequest = serde_json::from_str(r#"{"username": "bob"}"#).unwrap();
         assert_eq!(req.username, Some("bob".to_string()));
         assert_eq!(req.watermark_config, None); // absent → don't touch
     }
@@ -432,8 +458,7 @@ mod model_tests {
         assert_eq!(detail.path_prefix, Some("pic".into()));
 
         let minimal: GitConfigDetail =
-            serde_json::from_str(r#"{"token_encrypted":"e","repo":"o/r","branch":"b"}"#)
-                .unwrap();
+            serde_json::from_str(r#"{"token_encrypted":"e","repo":"o/r","branch":"b"}"#).unwrap();
         assert!(minimal.path_prefix.is_none());
     }
 

@@ -1,3 +1,4 @@
+use pichost_core::DbType;
 use std::sync::Arc;
 
 use axum::{
@@ -11,7 +12,6 @@ use oauth2::{
     Scope, TokenResponse, TokenUrl,
 };
 use serde::Deserialize;
-use uuid::Uuid;
 
 use crate::app::AppState;
 use crate::i18n_ext::{error_json, error_json_args, JsonBody, Locale};
@@ -55,8 +55,8 @@ pub struct OAuthLinkRequest {
 
 // ── GitHub redirect ──
 
-pub async fn github_redirect(
-    State(state): State<Arc<AppState>>,
+pub async fn github_redirect<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
 ) -> Result<Redirect, (StatusCode, Json<serde_json::Value>)> {
     let client = make_github_client(&state).map_err(|e| client_error_response(locale.0, e))?;
@@ -70,8 +70,8 @@ pub async fn github_redirect(
 
 // ── Google redirect ──
 
-pub async fn google_redirect(
-    State(state): State<Arc<AppState>>,
+pub async fn google_redirect<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
 ) -> Result<Redirect, (StatusCode, Json<serde_json::Value>)> {
     let client = make_google_client(&state).map_err(|e| client_error_response(locale.0, e))?;
@@ -86,19 +86,40 @@ pub async fn google_redirect(
 
 // ── Callbacks ──
 
-pub async fn github_callback(
-    State(state): State<Arc<AppState>>,
+pub async fn github_callback<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Query(query): Query<OAuthCallbackQuery>,
-) -> Result<Json<AuthResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<AuthResponse>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    for<'r> &'r str: sqlx::ColumnIndex<DB::Row>,
+    (uuid::Uuid, String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    str: sqlx::Type<DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     oauth_callback(&state, locale.0, query, "github").await
 }
 
-pub async fn google_callback(
-    State(state): State<Arc<AppState>>,
+pub async fn google_callback<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Query(query): Query<OAuthCallbackQuery>,
-) -> Result<Json<AuthResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<AuthResponse>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid, String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     oauth_callback(&state, locale.0, query, "google").await
 }
 
@@ -110,7 +131,12 @@ fn client_error_response(
         OAuthClientError::MissingClientId(p) => ("auth.oauth_not_configured", p),
         OAuthClientError::MissingClientSecret(p) => ("auth.oauth_secret_not_configured", p),
     };
-    error_json_args(locale, StatusCode::BAD_REQUEST, key, &[provider.to_string()])
+    error_json_args(
+        locale,
+        StatusCode::BAD_REQUEST,
+        key,
+        &[provider.to_string()],
+    )
 }
 
 // ── Client builders (return the fully-configured client inline) ──
@@ -132,14 +158,16 @@ macro_rules! oauth_client {
             .ok_or(OAuthClientError::MissingClientSecret($provider))?;
         BasicClient::new(ClientId::new(cid.clone()))
             .set_client_secret(ClientSecret::new(csec.clone()))
-            .set_auth_uri(
-                AuthUrl::new($auth_url.to_string())
-                    .expect(concat!("invalid ", $provider, " auth URL")),
-            )
-            .set_token_uri(
-                TokenUrl::new($token_url.to_string())
-                    .expect(concat!("invalid ", $provider, " token URL")),
-            )
+            .set_auth_uri(AuthUrl::new($auth_url.to_string()).expect(concat!(
+                "invalid ",
+                $provider,
+                " auth URL"
+            )))
+            .set_token_uri(TokenUrl::new($token_url.to_string()).expect(concat!(
+                "invalid ",
+                $provider,
+                " token URL"
+            )))
             .set_redirect_uri(
                 RedirectUrl::new(format!(
                     "{}/api/v1/auth/oauth/{}/callback",
@@ -150,7 +178,9 @@ macro_rules! oauth_client {
     }};
 }
 
-fn make_github_client(state: &AppState) -> Result<ConfiguredOAuthClient, OAuthClientError> {
+fn make_github_client<DB: DbType>(
+    state: &AppState<DB>,
+) -> Result<ConfiguredOAuthClient, OAuthClientError> {
     Ok(oauth_client!(
         state,
         oauth_github_client_id,
@@ -161,7 +191,9 @@ fn make_github_client(state: &AppState) -> Result<ConfiguredOAuthClient, OAuthCl
     ))
 }
 
-fn make_google_client(state: &AppState) -> Result<ConfiguredOAuthClient, OAuthClientError> {
+fn make_google_client<DB: DbType>(
+    state: &AppState<DB>,
+) -> Result<ConfiguredOAuthClient, OAuthClientError> {
     Ok(oauth_client!(
         state,
         oauth_google_client_id,
@@ -216,8 +248,8 @@ async fn fetch_google_user(token: &str) -> Result<OAuthUserInfo, Box<dyn std::er
 
 // ── Shared exchange-code + fetch-user helper ──
 
-async fn oauth_exchange_and_fetch_user(
-    state: &AppState,
+async fn oauth_exchange_and_fetch_user<DB: DbType>(
+    state: &AppState<DB>,
     locale: Language,
     provider: &str,
     code: String,
@@ -225,7 +257,11 @@ async fn oauth_exchange_and_fetch_user(
     let oauth_client = match provider {
         "github" => make_github_client(state).map_err(|e| client_error_response(locale, e)),
         "google" => make_google_client(state).map_err(|e| client_error_response(locale, e)),
-        _ => Err(error_json(locale, StatusCode::BAD_REQUEST, "auth.unknown_provider")),
+        _ => Err(error_json(
+            locale,
+            StatusCode::BAD_REQUEST,
+            "auth.unknown_provider",
+        )),
     }?;
 
     let http_client = reqwest::ClientBuilder::new()
@@ -233,7 +269,11 @@ async fn oauth_exchange_and_fetch_user(
         .build()
         .map_err(|e| {
             tracing::warn!("Failed to build HTTP client: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "auth.internal_error",
+            )
         })?;
 
     let token = oauth_client
@@ -249,11 +289,19 @@ async fn oauth_exchange_and_fetch_user(
     match provider {
         "github" => fetch_github_user(access_token).await.map_err(|e| {
             tracing::warn!("GitHub user fetch failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.oauth_userinfo_failed")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "auth.oauth_userinfo_failed",
+            )
         }),
         "google" => fetch_google_user(access_token).await.map_err(|e| {
             tracing::warn!("Google user fetch failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.oauth_userinfo_failed")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "auth.oauth_userinfo_failed",
+            )
         }),
         _ => unreachable!(),
     }
@@ -261,13 +309,25 @@ async fn oauth_exchange_and_fetch_user(
 
 // ── OAuth account → user lookup ──
 
-async fn lookup_oauth_user(
-    state: &AppState,
+async fn lookup_oauth_user<DB: DbType>(
+    state: &AppState<DB>,
     locale: Language,
     provider: &str,
     provider_user_id: &str,
-) -> Result<(Uuid, String, Option<String>, bool, Option<i64>), (StatusCode, Json<serde_json::Value>)> {
-    let oauth_row = sqlx::query_as::<_, (Uuid,)>(
+) -> Result<
+    (uuid::Uuid, String, Option<String>, bool, Option<i64>),
+    (StatusCode, Json<serde_json::Value>),
+>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid, String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
+    let oauth_row = sqlx::query_as::<_, (uuid::Uuid,)>(
         "SELECT user_id FROM oauth_accounts WHERE provider = $1 AND provider_user_id = $2",
     )
     .bind(provider)
@@ -276,13 +336,17 @@ async fn lookup_oauth_user(
     .await
     .map_err(|e| {
         tracing::warn!("OAuth account lookup failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "auth.internal_error",
+        )
     })?;
 
     let (user_id,) =
         oauth_row.ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "auth.oauth_no_link"))?;
 
-    sqlx::query_as::<_, (Uuid, String, Option<String>, bool, Option<i64>)>(
+    sqlx::query_as::<_, (uuid::Uuid, String, Option<String>, bool, Option<i64>)>(
         "SELECT id, username, email, is_admin, storage_quota FROM users WHERE id = $1",
     )
     .bind(user_id)
@@ -290,19 +354,32 @@ async fn lookup_oauth_user(
     .await
     .map_err(|e| {
         tracing::warn!("User lookup failed: {e}");
-        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
+        error_json(
+            locale,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "auth.internal_error",
+        )
     })?
     .ok_or_else(|| error_json(locale, StatusCode::NOT_FOUND, "auth.user_not_found"))
 }
 
 // ── Callback handler ──
 
-async fn oauth_callback(
-    state: &AppState,
+async fn oauth_callback<DB: DbType>(
+    state: &AppState<DB>,
     locale: Language,
     query: OAuthCallbackQuery,
     provider: &str,
-) -> Result<Json<AuthResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<AuthResponse>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid, String, Option<String>, bool, Option<i64>): crate::db::DbRow<DB>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let user_info = oauth_exchange_and_fetch_user(state, locale, provider, query.code).await?;
     let (user_id, username, email, is_admin, storage_quota) =
         lookup_oauth_user(state, locale, provider, &user_info.provider_user_id).await?;
@@ -310,24 +387,40 @@ async fn oauth_callback(
     let (access_token_str, refresh_token_str, _ac, _rc) =
         generate_tokens(user_id, is_admin, &state.config).map_err(|e| {
             tracing::warn!("JWT generation failed: {e}");
-            error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
+            error_json(
+                locale,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "auth.internal_error",
+            )
         })?;
 
     Ok(Json(AuthResponse {
         access_token: access_token_str,
         refresh_token: refresh_token_str,
-        user: UserInfo { id: user_id, username, email, is_admin, storage_quota },
+        user: UserInfo {
+            id: user_id,
+            username,
+            email,
+            is_admin,
+            storage_quota,
+        },
     }))
 }
 
 // ── OAuth account linking (authenticated user links a provider) ──
 
-pub async fn oauth_link(
-    State(state): State<Arc<AppState>>,
+pub async fn oauth_link<DB: DbType>(
+    State(state): State<Arc<AppState<DB>>>,
     locale: Locale,
     Extension(user): Extension<AuthUser>,
     JsonBody(body): JsonBody<OAuthLinkRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)>
+where
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+{
     let user_info =
         oauth_exchange_and_fetch_user(&state, locale.0, &body.provider, body.code).await?;
 
@@ -342,11 +435,17 @@ pub async fn oauth_link(
     .await
     .map_err(|e| {
         tracing::warn!("OAuth link insert failed: {e}");
-        error_json(locale.0, StatusCode::INTERNAL_SERVER_ERROR, "auth.internal_error")
+        error_json(
+            locale.0,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "auth.internal_error",
+        )
     })?;
 
     tracing::info!(user_id = %user.id, provider = %body.provider, "oauth account linked");
-    Ok(Json(serde_json::json!({"message": "account linked successfully"})))
+    Ok(Json(
+        serde_json::json!({"message": "account linked successfully"}),
+    ))
 }
 
 #[cfg(test)]
@@ -354,54 +453,72 @@ mod tests {
     use super::*;
     use pichost_core::config::AppConfig;
 
-    /// AppState for unit tests that never touch the DB — lazy pool, no
-    /// PostgreSQL or Redis connection required.
-    fn unit_test_state() -> AppState {
+    /// AppState for unit tests that never touch the DB — in-memory sqlite
+    /// pool, no PostgreSQL or Redis connection required.
+    async fn unit_test_state() -> AppState<sqlx::Sqlite> {
         use pichost_core::StorageRouter;
-        let pool = sqlx::PgPool::connect_lazy(
-            "postgres://pichost:pichost@localhost:5432/pichost",
-        )
-        .expect("lazy pool should build");
+        let pool = crate::db::create_sqlite_pool("sqlite::memory:", 1)
+            .await
+            .expect("sqlite memory pool should build");
+        let cache_pool = crate::cache::create_pool("redis://localhost:6379", 2);
+        let components = crate::app::build_state_components(
+            cache_pool.clone(),
+            crate::cache::create_pool("redis://localhost:6379", 2),
+        );
         AppState {
             pool,
-            cache: Arc::new(crate::cache::Cache::new(crate::cache::create_pool(
-                "redis://localhost:6379",
-                2,
-            ))),
+            queue: components.queue,
+            blacklist: components.blacklist,
+            rate_limiter: components.rate_limiter,
+            invites: components.invites,
+            cache: components.cache,
             config: Arc::new(AppConfig::default()),
-            router: Arc::new(StorageRouter::new(std::collections::HashMap::new(), "local".into())),
+            router: Arc::new(StorageRouter::new(
+                std::collections::HashMap::new(),
+                "local".into(),
+            )),
         }
     }
 
-    async fn test_state() -> AppState {
+    async fn test_state() -> AppState<sqlx::Postgres> {
         use pichost_core::StorageRouter;
-        let pool = crate::db::create_pool("postgres://pichost:pichost@localhost:5432/pichost", 2)
-            .await
-            .expect("pool should connect");
-        crate::db::run_migrations(&pool)
+        let pool =
+            crate::db::create_pg_pool("postgres://pichost:pichost@localhost:5432/pichost", 2)
+                .await
+                .expect("pool should connect");
+        crate::db::run_pg_migrations(&pool)
             .await
             .expect("migrations should run");
+        let cache_pool = crate::cache::create_pool("redis://localhost:6379", 2);
+        let components = crate::app::build_state_components(
+            cache_pool.clone(),
+            crate::cache::create_pool("redis://localhost:6379", 2),
+        );
         AppState {
             pool,
-            cache: Arc::new(crate::cache::Cache::new(crate::cache::create_pool(
-                "redis://localhost:6379",
-                2,
-            ))),
+            queue: components.queue,
+            blacklist: components.blacklist,
+            rate_limiter: components.rate_limiter,
+            invites: components.invites,
+            cache: components.cache,
             config: Arc::new(AppConfig::default()),
-            router: Arc::new(StorageRouter::new(std::collections::HashMap::new(), "local".into())),
+            router: Arc::new(StorageRouter::new(
+                std::collections::HashMap::new(),
+                "local".into(),
+            )),
         }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_make_github_client_without_credentials() {
-        let state = unit_test_state();
+        let state = unit_test_state().await;
         let err = make_github_client(&state).unwrap_err();
         assert!(matches!(err, OAuthClientError::MissingClientId("github")));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_make_google_client_without_credentials() {
-        let state = unit_test_state();
+        let state = unit_test_state().await;
         let err = make_google_client(&state).unwrap_err();
         assert!(matches!(err, OAuthClientError::MissingClientId("google")));
     }
@@ -414,6 +531,9 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.0, StatusCode::NOT_FOUND);
-        assert!(err.1 .0["error"].as_str().unwrap().contains("no account linked"));
+        assert!(err.1 .0["error"]
+            .as_str()
+            .unwrap()
+            .contains("no account linked"));
     }
 }

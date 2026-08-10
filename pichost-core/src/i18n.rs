@@ -90,7 +90,10 @@ impl I18n {
             for lang in [Language::En, Language::ZhCN] {
                 let path = dir.join(lang.as_str()).join("messages.toml");
                 if let Ok(content) = std::fs::read_to_string(&path) {
-                    messages.entry(lang).or_default().extend(parse_toml(&content));
+                    messages
+                        .entry(lang)
+                        .or_default()
+                        .extend(parse_toml(&content));
                 } else {
                     warn!("locale file missing: {:?}", path);
                 }

@@ -7,8 +7,8 @@ mod common;
 
 use axum::http::{Method, StatusCode};
 use common::*;
-use pichost_api::services::upload::{get_user_image, list_user_images, ImageListQuery};
 use deadpool_redis::redis::AsyncCommands;
+use pichost_api::services::upload::{get_user_image, list_user_images, ImageListQuery};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -184,7 +184,7 @@ async fn upload_enqueues_redis_task() {
     let (_, token, _) = create_user(&app, "gapenq").await;
     let results = upload_png(&app, &token, "task.png", &tiny_png()).await;
     let img_id = results[0]["id"].as_str().unwrap();
-    let mut conn = app.state.cache.get_pool().get().await.expect("redis conn");
+    let mut conn = app.redis_pool().get().await.expect("redis conn");
     let tasks: Vec<String> = conn.lrange("pichost:tasks:pending", 0, -1).await.unwrap();
     let mut found = None;
     for t in tasks.iter().rev() {
@@ -260,7 +260,10 @@ async fn upload_dedup_per_storage_config() {
     assert_eq!(status, StatusCode::CREATED);
     let second: Value = serde_json::from_slice(&raw).unwrap();
     assert_eq!(first[0]["id"], second[0]["id"]);
-    assert_eq!(first[0]["storage_config"]["id"].as_str().unwrap(), ids.as_str());
+    assert_eq!(
+        first[0]["storage_config"]["id"].as_str().unwrap(),
+        ids.as_str()
+    );
     assert_eq!(first[0]["storage_config"]["provider"], "local");
 
     let plain = upload_png(&app, &token, "plain.png", &png_variant(10)).await;
@@ -334,7 +337,10 @@ async fn upload_foreign_storage_config_rejected() {
     );
     let (status, resp) = upload_expect_error(&app, Some(&token_b), &ct, body).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(resp["error"].as_str().unwrap().contains("no matching configs"));
+    assert!(resp["error"]
+        .as_str()
+        .unwrap()
+        .contains("no matching configs"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -366,7 +372,10 @@ async fn upload_git_config_failure_returns_500() {
     let (ct, body) = multipart_image("g.png", &tiny_png(), &[("storage_config_ids", &ids)]);
     let (status, resp) = upload_expect_error(&app, Some(&token), &ct, body).await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(resp["error"].as_str().unwrap().contains("resolve storage backend"));
+    assert!(resp["error"]
+        .as_str()
+        .unwrap()
+        .contains("resolve storage backend"));
 }
 
 // ── gallery list ─────
@@ -378,8 +387,11 @@ async fn list_filters_storage_config_and_category() {
     let (_, token, user_id) = create_user(&app, "gapfilt").await;
     let cfg_id = insert_storage_config(&app, user_id, "f-cfg", "local", false, json!({})).await;
     let ids = cfg_id.to_string();
-    let (ct, body) =
-        multipart_image("cfg-img.png", &png_variant(1), &[("storage_config_ids", &ids)]);
+    let (ct, body) = multipart_image(
+        "cfg-img.png",
+        &png_variant(1),
+        &[("storage_config_ids", &ids)],
+    );
     let (status, _, raw) = send_raw(
         &app,
         Method::POST,

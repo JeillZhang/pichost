@@ -7,7 +7,9 @@ use pichost_core::i18n::{I18n, Language};
 use serde_json::Value;
 
 pub fn locale_from_header(value: Option<&HeaderValue>, fallback: Language) -> Language {
-    let Some(v) = value else { return fallback; };
+    let Some(v) = value else {
+        return fallback;
+    };
     v.to_str()
         .ok()
         .and_then(|s| {
@@ -30,21 +32,23 @@ impl Locale {
         Self(locale_from_header(headers.get(ACCEPT_LANGUAGE), fallback))
     }
 }
-impl FromRequestParts<crate::app::AppState> for Locale {
+impl<DB: pichost_core::DbType> FromRequestParts<crate::app::AppState<DB>> for Locale {
     type Rejection = std::convert::Infallible;
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
-        _state: &crate::app::AppState,
+        _state: &crate::app::AppState<DB>,
     ) -> Result<Self, Self::Rejection> {
         Ok(Self::from_parts(&parts.headers))
     }
 }
 
-impl FromRequestParts<std::sync::Arc<crate::app::AppState>> for Locale {
+impl<DB: pichost_core::DbType> FromRequestParts<std::sync::Arc<crate::app::AppState<DB>>>
+    for Locale
+{
     type Rejection = std::convert::Infallible;
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
-        _state: &std::sync::Arc<crate::app::AppState>,
+        _state: &std::sync::Arc<crate::app::AppState<DB>>,
     ) -> Result<Self, Self::Rejection> {
         Ok(Self::from_parts(&parts.headers))
     }
@@ -65,7 +69,10 @@ fn envelope(locale: Language, key: &str, args: &[String], extra: Value) -> Value
     v
 }
 pub fn error_json(locale: Language, status: StatusCode, key: &str) -> (StatusCode, Json<Value>) {
-    (status, Json(envelope(locale, key, &[], serde_json::json!({}))))
+    (
+        status,
+        Json(envelope(locale, key, &[], serde_json::json!({}))),
+    )
 }
 pub fn error_json_args(
     locale: Language,
@@ -73,7 +80,10 @@ pub fn error_json_args(
     key: &str,
     args: &[String],
 ) -> (StatusCode, Json<Value>) {
-    (status, Json(envelope(locale, key, args, serde_json::json!({}))))
+    (
+        status,
+        Json(envelope(locale, key, args, serde_json::json!({}))),
+    )
 }
 pub fn error_json_extra(
     locale: Language,
@@ -92,17 +102,17 @@ where
     S: Send + Sync,
 {
     type Rejection = axum::response::Response;
-    async fn from_request(
-        req: axum::extract::Request,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
         let fallback = I18n::global().language();
         let locale = locale_from_header(req.headers().get(ACCEPT_LANGUAGE), fallback);
         match axum::Json::<T>::from_request(req, state).await {
             Ok(axum::Json(v)) => Ok(JsonBody(v)),
-            Err(rejection) => Err(
-                error_json(locale, rejection.status(), "validation.body_invalid").into_response(),
-            ),
+            Err(rejection) => {
+                Err(
+                    error_json(locale, rejection.status(), "validation.body_invalid")
+                        .into_response(),
+                )
+            }
         }
     }
 }
@@ -117,11 +127,17 @@ mod tests {
     #[test]
     fn locale_from_header_resolution() {
         assert_eq!(
-            locale_from_header(Some(&HeaderValue::from_static("zh-CN,zh;q=0.9")), Language::En),
+            locale_from_header(
+                Some(&HeaderValue::from_static("zh-CN,zh;q=0.9")),
+                Language::En
+            ),
             Language::ZhCN
         );
         assert_eq!(
-            locale_from_header(Some(&HeaderValue::from_static("fr-FR,fr;q=0.9")), Language::En),
+            locale_from_header(
+                Some(&HeaderValue::from_static("fr-FR,fr;q=0.9")),
+                Language::En
+            ),
             Language::En
         );
         assert_eq!(locale_from_header(None, Language::En), Language::En);
@@ -155,7 +171,9 @@ mod tests {
             .await
             .unwrap_err()
             .into_response();
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["code"], "validation.body_invalid");
         assert_eq!(v["error"], "请求体无效");
