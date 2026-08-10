@@ -8,6 +8,20 @@
 - **版本**: 0.19.1 → 0.20.0
 - **验证**: `npx vitest run` ✅, `npm run build` ✅, `npx playwright test e2e/specs/image-detail.spec.ts` ✅
 
+## 轻量模式 (SQLite + 无 Redis) ✅ (本次完成)
+
+参考 `docs/superpowers/plans/2026-08-09-pichost-sqlite-mode.md`（T8 受阻后重新规划 — sqlx 0.8.6 `Any` 驱动不支持 `Uuid`/`DateTime`/`Json`，AnyPool 方案被否决，改用 A′ 泛型架构）。
+
+- **双运行模式**: 标准 (PG+Redis+外部 worker) / 轻量 (SQLite+无 Redis 零外部依赖单进程)，`PICHOST_DATABASE_MODE=sqlite` 切换，lite 模式 `PICHOST_REDIS_URL` 不生效
+- **A′ 泛型架构**: `AppState<DB: DbType>` 泛型状态 + 具体驱动池 `create_pg_pool`/`create_sqlite_pool`（无 AnyPool）+ `configure_app<DB>` 路由装配 + `run_with::<DB>()`/`run_with_sqlite` 双启动器；`DbType`/`DbRow`/`DbQueryResult` 标记 trait 携带泛型边界，`db_error_kind` 映射驱动错误
+- **双迁移目录**: `migrations-sqlite/` 11 个文件 (0001–0011)，`0011` 新增 lite 状态表 `pending_tasks`/`token_blacklist`/`rate_limits`/`invite_codes`；启动时按驱动选择 `run_pg_migrations`/`run_sqlite_migrations`
+- **5 个 state traits + 双实现**: `Queue`/`Blacklist`/`RateLimiter`/`InviteStore`/`Cache` — Redis 实现 (RedisQueue/RedisBlacklist/RedisRateLimiter/RedisInviteStore/Cache) + SQLite 实现 (SqliteQueue/SqliteBlacklist/SqliteRateLimiter/SqliteInviteStore) + 失败放行 `NoopCache`；`build_state_components`/`build_lite_state_components` 组装为 trait 对象
+- **内嵌 worker**: pichost-worker 库化（`process_task` 暴露），`lite_worker_task` 500ms 轮询 dequeue → `process_task` → ack/nack，单进程内完成缩略图/WebP/水印处理（e2e 实测缩略图 ~271ms）
+- **install.sh 交互化**: `--yes` 无人值守 / `--mode postgres|sqlite`（apt 依赖引导）；sqlite 模式跳过 postgresql/redis 依赖检查、不安装 `pichost-worker.service`、`.env` 写入 `sqlite://` URL
+- **.env.example 补全**: i18n 部署变量 `PICHOST_I18N_LANGUAGE` / `PICHOST_I18N_LOCALES_DIR`
+- **版本**: 0.20.0 → 0.21.0（Cargo.toml workspace + web-ui/package.json + Cargo.lock 对齐）
+- **验证**: `cargo test --workspace` ✅ (405 pass, 0 fail，无 infra；新增 `sqlite_e2e_test`/`sqlite_smoke_test` 入默认套件)，`cargo test --workspace -- --include-ignored` ✅ (674 pass + 1 known env 敏感失败 — `config_test` env 隔离问题见待实施)，`cargo clippy --workspace -- -D warnings` ✅，`bash scripts/verify-release.sh` ✅（sqlite 模式冒烟），`bash scripts/tests/docs_check_test.sh` ✅
+
 ## 当前项目涉及特性
 
 参考 `docs/superpowers/specs/2026-07-11-pichost-design.md`，PicHost 是一个面向个人/团队自用的图床系统。
@@ -471,5 +485,6 @@
 |------|------|------|
 | i18n 扩展 | 新增语言 (ja/ko/...) — 后端 `locales/{lang}/messages.toml` + `Language` 枚举扩展，前端 `src/i18n/locales/{lang}.json` + LanguageSwitcher 枚举，键集相等性测试 | i18n 已落地 |
 | 触屏增强 | CategoryTree 长按手势（当前 ⋯ 按钮已覆盖触屏，长按列为后续增强） | 响应式已落地 |
+| 测试基建 | `config_test::database_mode_parses_sqlite_from_env` env 隔离修复 — CI 设置了 `PICHOST_STORAGE_RUSTFS_*` 时 figment 单下划线映射部分填充 `storage.rustfs` 导致 `MissingField("access_key")`（`PichostEnvGuard` 补 rustfs 变量快照/恢复） | 轻量模式已落地 |
 
-当前计划内阶段（P0–P4-I）+ i18n + 响应式布局已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划）。
+当前计划内阶段（P0–P4-I）+ i18n + 响应式布局 + 轻量模式 (SQLite lite mode) 已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划）。

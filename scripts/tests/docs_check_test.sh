@@ -5,4 +5,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 grep -q 'PICHOST_DATABASE_MODE' "$ROOT/README.md"
 grep -q 'sqlite' "$ROOT/AGENTS.md"
+grep -q '0.21.0' "$ROOT/CHANGELOG.md"
+grep -q '轻量模式' "$ROOT/.omo/summary/summary_and_next.md"
 echo "docs_check_test.sh PASS"
