@@ -1,6 +1,7 @@
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
+use uuid::Uuid;
 
 static MIGRATOR: Migrator = sqlx::migrate!("../migrations-sqlite");
 
@@ -20,7 +21,7 @@ async fn sqlite_pool() -> SqlitePool {
 async fn sqlite_quota_and_config_queries() {
     let pool = sqlite_pool().await;
     MIGRATOR.run(&pool).await.unwrap();
-    let uid: String = sqlx::query_scalar(
+    let uid: Uuid = sqlx::query_scalar(
         "INSERT INTO users (username, password_hash) VALUES ('u','h') RETURNING id",
     )
     .fetch_one(&pool)
@@ -44,7 +45,7 @@ async fn sqlite_quota_and_config_queries() {
     .execute(&pool)
     .await
     .unwrap();
-    let cfg_id: String =
+    let cfg_id: Uuid =
         sqlx::query_scalar("SELECT id FROM user_storage_configs WHERE user_id = ? LIMIT 1")
             .bind(&uid)
             .fetch_one(&pool)
@@ -66,7 +67,7 @@ async fn sqlite_quota_and_config_queries() {
 async fn sqlite_stats_and_update_queries() {
     let pool = sqlite_pool().await;
     MIGRATOR.run(&pool).await.unwrap();
-    let uid: String = sqlx::query_scalar(
+    let uid: Uuid = sqlx::query_scalar(
         "INSERT INTO users (username, password_hash) VALUES ('stats','h') RETURNING id",
     )
     .fetch_one(&pool)
@@ -99,7 +100,7 @@ async fn sqlite_stats_and_update_queries() {
 async fn sqlite_admin_stats_queries() {
     let pool = sqlite_pool().await;
     MIGRATOR.run(&pool).await.unwrap();
-    let uid: String = sqlx::query_scalar(
+    let uid: Uuid = sqlx::query_scalar(
         "INSERT INTO users (username, password_hash) VALUES ('admin-stats','h') RETURNING id",
     )
     .fetch_one(&pool)
@@ -137,7 +138,7 @@ async fn sqlite_admin_stats_queries() {
 async fn sqlite_gallery_and_batch_queries() {
     let pool = sqlite_pool().await;
     MIGRATOR.run(&pool).await.unwrap();
-    let uid: String = sqlx::query_scalar(
+    let uid: Uuid = sqlx::query_scalar(
         "INSERT INTO users (username, password_hash) VALUES ('gallery','h') RETURNING id",
     )
     .fetch_one(&pool)
@@ -147,8 +148,8 @@ async fn sqlite_gallery_and_batch_queries() {
     let n: i64 =
         sqlx::query_scalar("SELECT count(*) FROM images WHERE user_id = ? AND id IN (?, ?)")
             .bind(&uid)
-            .bind("00000000-0000-0000-0000-000000000000")
-            .bind("00000000-0000-0000-0000-000000000000")
+            .bind(Uuid::nil())
+            .bind(Uuid::nil())
             .fetch_one(&pool)
             .await
             .unwrap();

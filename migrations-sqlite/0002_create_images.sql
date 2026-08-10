@@ -1,6 +1,6 @@
 -- migrations-sqlite/0002_create_images.sql
 CREATE TABLE images (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    id TEXT PRIMARY KEY DEFAULT (randomblob(16)),
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     public_key TEXT UNIQUE NOT NULL,
     original_name TEXT NOT NULL,

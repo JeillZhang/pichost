@@ -1,6 +1,6 @@
 -- migrations-sqlite/0004_create_upload_tasks.sql
 CREATE TABLE upload_tasks (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    id TEXT PRIMARY KEY DEFAULT (randomblob(16)),
     image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
     task_type TEXT NOT NULL DEFAULT 'all',
     payload TEXT,

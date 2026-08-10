@@ -17,16 +17,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Language::from_str_opt(&config.i18n.language),
         config.i18n.locales_dir.clone(),
     );
-    let cache_pool = cache::create_pool(&config.redis.url, config.redis.pool_size as usize);
-    let queue_pool = cache::create_pool(&config.redis.url, config.redis.pool_size as usize);
 
     match config.database.mode {
         DatabaseMode::Postgres => {
             let pool =
                 db::create_pg_pool(&config.database.url, config.database.max_connections).await?;
             db::run_pg_migrations(&pool).await?;
+            let cache_pool = cache::create_pool(&config.redis.url, config.redis.pool_size as usize);
+            let queue_pool = cache::create_pool(&config.redis.url, config.redis.pool_size as usize);
             app::run_with::<sqlx::Postgres>(config, pool, cache_pool, queue_pool).await
         }
-        DatabaseMode::Sqlite => Err("lite mode not yet assembled (T26)".into()),
+        DatabaseMode::Sqlite => {
+            let pool =
+                db::create_sqlite_pool(&config.database.url, config.database.max_connections)
+                    .await?;
+            db::run_sqlite_migrations(&pool).await?;
+            app::run_with_sqlite(config, pool).await
+        }
     }
 }

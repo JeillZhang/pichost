@@ -1,6 +1,6 @@
 -- migrations-sqlite/0008_user_storage_configs.sql
 CREATE TABLE user_storage_configs (
-    id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    id          TEXT PRIMARY KEY DEFAULT (randomblob(16)),
     user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name        TEXT NOT NULL,
     provider    TEXT NOT NULL,

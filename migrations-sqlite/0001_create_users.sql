@@ -1,6 +1,6 @@
 -- migrations-sqlite/0001_create_users.sql
 CREATE TABLE users (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    id TEXT PRIMARY KEY DEFAULT (randomblob(16)),
     username TEXT UNIQUE NOT NULL,
     email TEXT UNIQUE,
     password_hash TEXT NOT NULL,

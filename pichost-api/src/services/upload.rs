@@ -513,8 +513,6 @@ where
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     sqlx::types::Json<serde_json::Value>:
         for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
-    [uuid::Uuid]: sqlx::Type<DB>,
 {
     if let Some(ids) = storage_config_ids {
         if ids.is_empty() {
@@ -1030,8 +1028,6 @@ where
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     sqlx::types::Json<serde_json::Value>:
         for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
-    [uuid::Uuid]: sqlx::Type<DB>,
 {
     if !infer::is_image(&bytes) {
         return Err(error_json(

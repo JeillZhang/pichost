@@ -254,7 +254,7 @@ fn build_list_sql(
     n += 1;
     let offset = n;
     sql.push_str(&format!(
-        " ORDER BY {sort_col} {order_dir} LIMIT ${limit} OFFSET ${offset}"
+        " ORDER BY i.{sort_col} {order_dir} LIMIT ${limit} OFFSET ${offset}"
     ));
     sql
 }
@@ -296,8 +296,6 @@ where
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     sqlx::types::Json<serde_json::Value>:
         for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
-    [uuid::Uuid]: sqlx::Type<DB>,
 {
     let (bytes, file_name, storage_config_ids) =
         extract_upload_parts(&mut multipart, locale.0).await?;
@@ -375,8 +373,6 @@ where
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     sqlx::types::Json<serde_json::Value>:
         for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
-    [uuid::Uuid]: sqlx::Type<DB>,
 {
     validate_url_not_empty(&payload.url, locale.0)?;
 
@@ -1434,7 +1430,7 @@ mod tests {
     fn test_build_list_sql_no_filters() {
         let sql = build_list_sql("", None, None, "created_at", "DESC");
         assert!(sql.starts_with("SELECT i.id,i.public_key,"));
-        assert!(sql.ends_with(" ORDER BY created_at DESC LIMIT $2 OFFSET $3"));
+        assert!(sql.ends_with(" ORDER BY i.created_at DESC LIMIT $2 OFFSET $3"));
         assert!(!sql.contains("ILIKE"));
     }
 
@@ -1446,7 +1442,7 @@ mod tests {
         assert!(sql.contains(" AND LOWER(i.original_name) LIKE LOWER($2)"));
         assert!(sql.contains(" AND i.storage_config_id = $3"));
         assert!(sql.contains(" AND i.category_id = $4"));
-        assert!(sql.ends_with(" ORDER BY file_size ASC LIMIT $5 OFFSET $6"));
+        assert!(sql.ends_with(" ORDER BY i.file_size ASC LIMIT $5 OFFSET $6"));
         assert_eq!(sql.matches('$').count(), 6);
     }
 

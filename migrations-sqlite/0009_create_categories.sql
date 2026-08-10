@@ -1,6 +1,6 @@
 -- migrations-sqlite/0009_create_categories.sql
 CREATE TABLE categories (
-    id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    id          TEXT PRIMARY KEY DEFAULT (randomblob(16)),
     user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name        TEXT NOT NULL,
     parent_id   TEXT REFERENCES categories(id) ON DELETE CASCADE,

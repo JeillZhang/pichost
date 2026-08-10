@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::http::{HeaderName, HeaderValue};
 use axum::{
@@ -9,12 +10,13 @@ use axum::{
     Router,
 };
 use pichost_core::config::AppConfig;
+use pichost_core::state::NackAction;
 use pichost_core::storage::local::LocalStorage;
 use pichost_core::storage::s3::RustfsStorage;
 use pichost_core::storage::StorageBackend;
 use pichost_core::DbType;
 use pichost_core::StorageRouter;
-use sqlx::Pool;
+use sqlx::{Pool, Sqlite, SqlitePool};
 use tower_http::cors::CorsLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 
@@ -87,6 +89,107 @@ pub fn build_state_components(cache_pool: CachePool, queue_pool: CachePool) -> S
         rate_limiter,
         invites,
         cache,
+    }
+}
+
+/// Assemble the lite-mode (SQLite) trait-object components. No Redis is
+/// involved: every state field is backed by the SQLite pool, and the cache
+/// is a no-op (fail-open reads, no-op writes).
+pub fn build_lite_state_components(pool: SqlitePool) -> StateComponents {
+    let cache: Arc<dyn pichost_core::state::Cache> =
+        Arc::new(pichost_core::state::noop_cache::NoopCache);
+    let queue: Arc<dyn pichost_core::state::Queue> = Arc::new(
+        pichost_core::state::sqlite_queue::SqliteQueue::new(pool.clone()),
+    );
+    let blacklist: Arc<dyn pichost_core::state::Blacklist> = Arc::new(
+        pichost_core::state::sqlite_blacklist::SqliteBlacklist::new(pool.clone()),
+    );
+    let rate_limiter: Arc<dyn pichost_core::state::RateLimiter> =
+        Arc::new(pichost_core::state::sqlite_rate_limiter::SqliteRateLimiter::new(pool.clone()));
+    let invites: Arc<dyn pichost_core::state::InviteStore> = Arc::new(
+        pichost_core::state::sqlite_invite::SqliteInviteStore::new(pool),
+    );
+    StateComponents {
+        queue,
+        blacklist,
+        rate_limiter,
+        invites,
+        cache,
+    }
+}
+
+/// Build a lite-mode `AppState`: SQLite pool + SQLite trait-object components
+/// + storage router, with the embedded worker spawned in-process.
+pub async fn build_lite_app_state(config: AppConfig, pool: SqlitePool) -> Arc<AppState<Sqlite>> {
+    let router = Arc::new(init_storage_backends(&config).await);
+    let components = build_lite_state_components(pool.clone());
+    let state = Arc::new(AppState {
+        pool,
+        queue: components.queue,
+        blacklist: components.blacklist,
+        rate_limiter: components.rate_limiter,
+        invites: components.invites,
+        cache: components.cache,
+        config: Arc::new(config),
+        router: router.clone(),
+    });
+    tokio::spawn(lite_worker_task(
+        state.pool.clone(),
+        state.queue.clone(),
+        router,
+        state.config.clone(),
+    ));
+    state
+}
+
+/// Embedded worker loop for lite mode: dequeue → process → ack/nack. Runs
+/// inside the API process, so no Redis queue and no separate worker binary.
+pub async fn lite_worker_task(
+    pool: SqlitePool,
+    queue: Arc<dyn pichost_core::state::Queue>,
+    router: Arc<StorageRouter>,
+    config: Arc<AppConfig>,
+) {
+    loop {
+        match queue.dequeue(Duration::from_millis(500)).await {
+            Ok(Some(payload)) => {
+                handle_task(&pool, &queue, &router, &config, &payload).await;
+            }
+            Ok(None) => tokio::time::sleep(Duration::from_millis(500)).await,
+            Err(e) => {
+                tracing::warn!(error = %e, "lite worker dequeue failed");
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
+    }
+}
+
+/// Process one dequeued task: run the pipeline, then ack on success or
+/// nack on failure (dead-lettering once retries are exhausted).
+async fn handle_task(
+    pool: &SqlitePool,
+    queue: &Arc<dyn pichost_core::state::Queue>,
+    router: &Arc<StorageRouter>,
+    config: &Arc<AppConfig>,
+    payload: &pichost_core::models::TaskPayload,
+) {
+    let task_id = payload.task_id;
+    match pichost_worker::process_task(pool, router, config, payload).await {
+        Ok(()) => {
+            if let Err(e) = queue.ack(task_id).await {
+                tracing::warn!(%task_id, error = %e, "lite worker ack failed");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(%task_id, error = %e, "lite worker task failed");
+            let action = queue
+                .nack(task_id, payload.retry_count, payload.max_retries)
+                .await
+                .unwrap_or(NackAction::DeadLetter);
+            if action == NackAction::DeadLetter {
+                tracing::warn!(%task_id, "lite worker task dead-lettered");
+            }
+        }
     }
 }
 
@@ -163,8 +266,6 @@ where
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     sqlx::types::Json<serde_json::Value>:
         for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
-    [uuid::Uuid]: sqlx::Type<DB>,
 {
     let protected =
         middleware::from_fn_with_state(state.clone(), crate::middleware::auth::require_auth);
@@ -208,9 +309,6 @@ where
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Vec<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
-    [uuid::Uuid]: sqlx::Type<DB>,
 {
     let protected =
         middleware::from_fn_with_state(state.clone(), crate::middleware::auth::require_auth);
@@ -506,10 +604,7 @@ where
     Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<serde_json::Value>:
         for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Vec<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
-    [uuid::Uuid]: sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
 {
     Router::new()
@@ -611,10 +706,7 @@ where
     Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<serde_json::Value>:
         for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Vec<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
-    [uuid::Uuid]: sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
 {
     setup_security_headers(build_router(state))
@@ -675,10 +767,7 @@ where
     Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<serde_json::Value>:
         for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    Vec<uuid::Uuid>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
-    for<'a, 'q> &'a [uuid::Uuid]: sqlx::Encode<'q, DB>,
-    [uuid::Uuid]: sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
 {
     let router = Arc::new(init_storage_backends(&config).await);
@@ -696,6 +785,20 @@ where
     let app = configure_app::<DB>(state);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     tracing::info!("API on :3000");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+/// Run the API server in lite mode: SQLite state + embedded worker, with no
+/// Redis dependency. The Postgres path (`run_with`) is unchanged.
+pub async fn run_with_sqlite(
+    config: AppConfig,
+    pool: SqlitePool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let state = build_lite_app_state(config, pool).await;
+    let app = configure_app::<Sqlite>(state);
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    tracing::info!("API on :3000 (sqlite lite mode)");
     axum::serve(listener, app).await?;
     Ok(())
 }
