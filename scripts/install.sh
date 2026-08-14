@@ -160,7 +160,7 @@ generate_env() {
     # storage 路径双模式统一(去重后追加;单/双下划线变体都清理)
     sed -i -e '/^PICHOST_STORAGE_LOCAL_BASE_PATH=/d' \
         -e '/^PICHOST_STORAGE__LOCAL_BASE_PATH=/d' "$env_file"
-    printf 'PICHOST_STORAGE_LOCAL_BASE_PATH="%s/storage-local"\n' "$DB_DIR" >> "$env_file"
+    printf 'PICHOST_STORAGE__LOCAL_BASE_PATH="%s/storage-local"\n' "$DB_DIR" >> "$env_file"
     chmod 600 "$env_file"
 }
 
@@ -178,7 +178,7 @@ ensure_jwt_secret() {
     if command -v openssl >/dev/null 2>&1; then
         new_secret="$(openssl rand -hex 32)"
     else
-        new_secret="$(tr -dc 'a-f0-9' < /dev/urandom | head -c 64)"
+        new_secret="$(tr -dc 'a-f0-9' < /dev/urandom | head -c 64 || true)"
     fi
     if [ -n "$secret" ]; then
         echo ">> WARNING: PICHOST_AUTH_JWT_SECRET ($((${#secret})) chars) is too short (<32); replacing it"
@@ -186,7 +186,7 @@ ensure_jwt_secret() {
         echo ">> PICHOST_AUTH_JWT_SECRET missing; generating a random secret"
     fi
     sed -i -e '/^PICHOST_AUTH_JWT_SECRET=/d' -e '/^PICHOST_AUTH__JWT_SECRET=/d' "$env_file"
-    printf 'PICHOST_AUTH_JWT_SECRET=%s\n' "$new_secret" >> "$env_file"
+    printf 'PICHOST_AUTH__JWT_SECRET=%s\n' "$new_secret" >> "$env_file"
     chmod 600 "$env_file"
     echo ">> Generated PICHOST_AUTH_JWT_SECRET written to $env_file"
 }

@@ -113,13 +113,13 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 | `PICHOST_DATABASE_MODE` | — | `postgres` | `postgres` (standard: PG+Redis+external worker) or `sqlite` (lite mode: single process, embedded worker, no Redis) |
 | `PICHOST_DATABASE_URL` | Yes | — | Connection string — PostgreSQL (`postgresql://...`) in standard mode, SQLite (`sqlite:///path/pichost.db`) in lite mode |
 | `PICHOST_REDIS_URL` | Standard mode | — | Redis connection string (not used in sqlite lite mode) |
-| `PICHOST_AUTH_JWT_SECRET` | **Yes** | — | HS256 signing key (min 32 chars) |
+| `PICHOST_AUTH__JWT_SECRET` | **Yes** | — | HS256 signing key (min 32 chars) |
 | `PICHOST_SERVER_PUBLIC_URL` | Production | `http://localhost` | For OAuth callbacks and share links |
 | `PICHOST_AUTH_OAUTH_GITHUB_CLIENT_ID` | OAuth | — | GitHub OAuth App client ID |
 | `PICHOST_AUTH_OAUTH_GITHUB_CLIENT_SECRET` | OAuth | — | GitHub OAuth App secret |
 | `PICHOST_AUTH_OAUTH_GOOGLE_CLIENT_ID` | OAuth | — | Google OAuth client ID |
 | `PICHOST_AUTH_OAUTH_GOOGLE_CLIENT_SECRET` | OAuth | — | Google OAuth client secret |
-| `PICHOST_STORAGE_LOCAL_BASE_PATH` | Local storage | `./storage-local` | File storage directory |
+| `PICHOST_STORAGE__LOCAL_BASE_PATH` | Local storage | `./storage-local` | File storage directory |
 | `PICHOST_STORAGE_RUSTFS_ENDPOINT` | RustFS | — | S3-compatible endpoint URL (MinIO, etc.) |
 | `PICHOST_STORAGE_RUSTFS_BUCKET` | RustFS | — | Bucket name |
 | `PICHOST_STORAGE_RUSTFS_REGION` | RustFS | `us-east-1` | Region |

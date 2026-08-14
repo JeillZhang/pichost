@@ -39,10 +39,10 @@
 - All env vars use `PICHOST_` prefix. Key vars:
   - `PICHOST_DATABASE_MODE` — `postgres` (default) | `sqlite`; sqlite selects lite mode: single-process API with embedded worker, no Redis
   - `PICHOST_DATABASE_URL`, `PICHOST_REDIS_URL` — runtime connections (lite mode URL example: `sqlite:///path/pichost.db`; `PICHOST_REDIS_URL` unused in sqlite mode)
-  - `PICHOST_AUTH_JWT_SECRET` — JWT signing key
+  - `PICHOST_AUTH__JWT_SECRET` — JWT signing key
   - `PICHOST_SERVER_PUBLIC_URL` — for OAuth callbacks and link generation
   - OAuth: `PICHOST_AUTH_OAUTH_GITHUB_CLIENT_ID`, `..._SECRET`, same for Google
-  - `PICHOST_STORAGE_LOCAL_BASE_PATH` — local storage dir; `PICHOST_STORAGE_RUSTFS_ENDPOINT`/`..._BUCKET`/`..._REGION`/`..._ACCESS_KEY`/`..._SECRET_KEY` — S3-compatible storage
+  - `PICHOST_STORAGE__LOCAL_BASE_PATH` — local storage dir; `PICHOST_STORAGE_RUSTFS_ENDPOINT`/`..._BUCKET`/`..._REGION`/`..._ACCESS_KEY`/`..._SECRET_KEY` — S3-compatible storage
   - `PICHOST_STORAGE_MAX_USER_CONFIGS` — max Git storage configs per user (default 5)
   - `PICHOST_TOKEN_ENCRYPTION_KEY` — AES-256-GCM key for Git token encryption (base64-encoded, 32 bytes)
   - Rate limit overrides: `PICHOST_RATE_LIMIT_AUTH_MAX`, `PICHOST_RATE_LIMIT_UPLOAD_MAX`, `PICHOST_RATE_LIMIT_GENERAL_MAX`, `PICHOST_RATE_LIMIT_PUBLIC_MAX`

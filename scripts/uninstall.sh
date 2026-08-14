@@ -42,7 +42,7 @@ fi
 # 2. data/ 处置:tty 且非 --keep-data 时确认
 if [ "$KEEP_DATA" -eq 0 ] && [ -d "$INSTALL_DIR/data" ] && [ -t 0 ]; then
     read -r -p ">> $INSTALL_DIR/data 含全部图片与数据库,确认删除? [y/N] " ans || true
-    [ "$ans" = "y" ] || [ "$ans" = "Y" ] || { echo ">> 取消;使用 --keep-data 保留数据"; exit 1; }
+    [ "${ans:-}" = "y" ] || [ "${ans:-}" = "Y" ] || { echo ">> 取消;使用 --keep-data 保留数据"; exit 1; }
 fi
 
 # 3. Remove binaries and static files

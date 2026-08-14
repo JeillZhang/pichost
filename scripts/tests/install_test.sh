@@ -16,7 +16,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 grep -q 'PICHOST_DATABASE_MODE=sqlite' "$TMP/pc/.env"
 grep -Fq "sqlite://$TMP/pi/data/pichost.db" "$TMP/pc/.env"
-grep -Fq "PICHOST_STORAGE_LOCAL_BASE_PATH=\"$TMP/pi/data/storage-local\"" "$TMP/pc/.env"
+grep -Fq "PICHOST_STORAGE__LOCAL_BASE_PATH=\"$TMP/pi/data/storage-local\"" "$TMP/pc/.env"
 [ -d "$TMP/pi/data" ] || { echo "FAIL: data/ dir missing"; exit 1; }
 ! grep -q 'Wants=.*postgresql' "$TMP/pc/pichost-api.service"
 
@@ -28,7 +28,7 @@ grep -Fq "sqlite://$TMP/pi2/data/pichost.db" "$TMP/pc2/.env"
 # ③ 幂等重跑:关键行各恰 1 次
 (cd "$PKG_DIR" && bash scripts/install.sh --yes --mode sqlite "$TMP/pi" "$TMP/pc")
 [ "$(grep -c '^PICHOST_DATABASE_MODE=' "$TMP/pc/.env")" -eq 1 ] || { echo "FAIL: dup MODE line"; exit 1; }
-[ "$(grep -c '^PICHOST_STORAGE_LOCAL_BASE_PATH=' "$TMP/pc/.env")" -eq 1 ] || { echo "FAIL: dup STORAGE line"; exit 1; }
+[ "$(grep -c '^PICHOST_STORAGE__LOCAL_BASE_PATH=' "$TMP/pc/.env")" -eq 1 ] || { echo "FAIL: dup STORAGE line"; exit 1; }
 [ "$(grep -c '^PICHOST_DATABASE_URL=' "$TMP/pc/.env")" -eq 1 ] || { echo "FAIL: dup URL line"; exit 1; }
 
 # ④ postgres 模式:URL 必须被清理/替换,不得残留 sqlite URL(防止 .env.example 翻转后串配置)

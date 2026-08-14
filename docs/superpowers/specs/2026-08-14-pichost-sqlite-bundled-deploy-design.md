@@ -201,9 +201,9 @@ uninstall.sh [--keep-data] [INSTALL_DIR] [CONFIG_DIR]
 
 ## 7. TODO 跟踪
 
-- [ ] S1 install.sh 改造
-- [ ] S2 uninstall.sh 改造
-- [ ] S3 verify-release.sh 适配
-- [ ] S4 .env.example 默认值
-- [ ] S5 文档同步 + 版本 0.22.0
-- [ ] S6 全量验证
+- [x] S1 install.sh 改造
+- [x] S2 uninstall.sh 改造
+- [x] S3 verify-release.sh 适配
+- [x] S4 .env.example 默认值
+- [x] S5 文档同步 + 版本 0.22.0
+- [x] S6 全量验证
