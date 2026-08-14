@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.21.0** — SQLite lite mode (dual DB modes: standard PostgreSQL+Redis / lightweight SQLite single-instance with embedded worker, zero external dependencies). Image detail zoom viewer — fullscreen lightbox with cursor-anchored wheel zoom, drag pan, pinch gestures, toolbar + keyboard controls. Responsive layout — Mobile-first web UI (hamburger nav drawer, category sheet, touch-friendly menus, bottom-sheet dialogs, cardified admin tables), i18n complete (English/简体中文 switching, localized API errors).
+**v0.22.0** — SQLite-first deployment (single-directory install: DB + storage under <INSTALL_DIR>/data, sqlite default mode)
 
 ## Stack
 
@@ -288,13 +288,19 @@ Default compute layout: 2 API replicas (least_conn), 2 worker replicas (independ
 ### systemd (bare metal)
 
 ```bash
-sudo ./scripts/install.sh          # interactive; installs binaries to /opt/pichost, configures systemd units
-sudo ./scripts/uninstall.sh        # removes installation and services
+# install:  [--yes] [--mode postgres|sqlite] [INSTALL_DIR] [CONFIG_DIR]
+#           INSTALL_DIR = software dir (default /opt/pichost); CONFIG_DIR = config dir (default /etc/pichost)
+#           default mode is sqlite (interactive prompt recommends SQLite; --yes / non-tty → sqlite)
+sudo ./scripts/install.sh [--yes] [--mode sqlite] /opt/pichost /etc/pichost
+
+# uninstall: [--keep-data] [INSTALL_DIR] [CONFIG_DIR]
+#            default wipes INSTALL_DIR including data/; --keep-data preserves data/
+sudo ./scripts/uninstall.sh /opt/pichost /etc/pichost
 ```
 
-`install.sh` is interactive: `--yes` for unattended install, `--mode postgres|sqlite` to force a DB mode (auto-detected otherwise). **SQLite mode needs no PostgreSQL/Redis** — `.env` gets a `sqlite://` URL, no `pichost-worker.service` is installed, and the worker runs embedded in the API process (zero external dependencies).
+`install.sh` is interactive: `--yes` for unattended install, `--mode postgres|sqlite` to force a DB mode (**sqlite is the default**). **SQLite mode needs no PostgreSQL/Redis** — `.env` gets a `sqlite://` URL pointing at `sqlite:///opt/pichost/data/pichost.db`, no `pichost-worker.service` is installed, and the worker runs embedded in the API process (zero external dependencies). DB and storage live in a single directory under the install dir: `<INSTALL_DIR>/data/pichost.db` + `<INSTALL_DIR>/data/storage-local` (`PICHOST_STORAGE_LOCAL_BASE_PATH`).
 
-Units: `pichost-api.service` (API) + `pichost-worker.service` (worker, standard mode only), run as user `pichost` with `EnvironmentFile=/etc/pichost/.env`. Release artifacts (`.tar.gz`) are built by GitHub Actions on `v*` tags. Run `bash scripts/verify-release.sh` locally before tagging — it mirrors the release build→package steps, dry-runs `install.sh` in a systemd-free container, and smoke-tests sqlite mode.
+Units: `pichost-api.service` (API) + `pichost-worker.service` (worker, standard mode only), run as user `pichost` with `EnvironmentFile=/etc/pichost/.env`. Release artifacts (`.tar.gz`) are built by GitHub Actions on `v*` tags. Run `bash scripts/verify-release.sh` locally before tagging — it mirrors the release build→package steps, dry-runs `install.sh` (2-arg contract) in a systemd-free container, and asserts the default sqlite mode.
 
 ### Production checklist
 
@@ -304,6 +310,7 @@ Units: `pichost-api.service` (API) + `pichost-worker.service` (worker, standard 
 4. Configure OAuth credentials (GitHub/Google) if you want OAuth login.
 5. **Put a CDN in front of Nginx** — see `docs/superpowers/guides/cdn-setup.md`.
 6. Scale `deploy.replicas` in docker-compose.yml as needed.
+7. **Back up `/opt/pichost/data/`** (bare-metal installs) — contains `pichost.db` and all uploaded images; `uninstall.sh` wipes it by default (use `--keep-data` to preserve).
 
 ### Volume management
 
