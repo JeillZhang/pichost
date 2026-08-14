@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Versions before 0.7.0 are not documented here.
 
+## [0.22.0] - 2026-08-14
+
+### Added
+
+- SQLite-first bare-metal deployment: single-directory install (`<INSTALL_DIR>/data/pichost.db` + `data/storage-local`), `install.sh` defaults to sqlite mode (interactive menu: SQLite recommended / PostgreSQL opt-in)
+- `uninstall.sh --keep-data` to preserve image data on uninstall (default wipes `INSTALL_DIR` including `data/`)
+
+### Changed
+
+- `install.sh` positional contract: `[INSTALL_DIR] [CONFIG_DIR]` (DATA_DIR arg removed)
+- `.env.example` defaults to sqlite (`PICHOST_DATABASE_MODE=sqlite`, `sqlite:///opt/pichost/data/pichost.db`)
+- `verify-release.sh` install dry-run uses the 2-arg contract and asserts sqlite default
+
 ## [0.21.0] - 2026-08-09
 
 ### Added

@@ -15,4 +15,8 @@ grep -q '\[INSTALL_DIR\] \[CONFIG_DIR\]' "$ROOT/AGENTS.md" \
   || { echo "FAIL: AGENTS missing new install.sh signature"; exit 1; }
 grep -q '0.22.0' "$ROOT/AGENTS.md" \
   || { echo "FAIL: AGENTS version not 0.22.0"; exit 1; }
+grep -q '0.22.0' "$ROOT/CHANGELOG.md" \
+  || { echo "FAIL: CHANGELOG missing 0.22.0"; exit 1; }
+grep -q 'SQLite 优先' "$ROOT/.omo/summary/summary_and_next.md" \
+  || { echo "FAIL: summary missing sqlite-first section"; exit 1; }
 echo "docs_check_test.sh PASS"
