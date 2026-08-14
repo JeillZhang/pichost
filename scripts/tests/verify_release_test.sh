@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
+# scripts/tests/verify_release_test.sh — verify-release dry-run 契约 + .env.example 默认翻转断言
 set -euo pipefail
-# verify_release_test.sh — verify-release.sh sqlite 冒烟 + .env.example 变量断言（T28）
 # 用法: bash scripts/tests/verify_release_test.sh
-# 断言:
-#   - verify-release.sh 含 sqlite 冒烟分支（PICHOST_DATABASE_MODE=sqlite + 临时文件 URL）
-#   - .env.example 含 PICHOST_DATABASE_MODE 与 i18n 变量
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
-# 断言 verify-release.sh 含 sqlite 冒烟分支（check_binary_sqlite 或 PICHOST_DATABASE_MODE=sqlite 出现）
-grep -q 'PICHOST_DATABASE_MODE=sqlite' "$ROOT/scripts/verify-release.sh" \
-  || { echo "FAIL: verify-release.sh missing sqlite smoke"; exit 1; }
-grep -q 'sqlite://' "$ROOT/scripts/verify-release.sh" \
-  || { echo "FAIL: verify-release.sh missing sqlite temp-file URL"; exit 1; }
-# 断言 .env.example 含新变量
-grep -q 'PICHOST_DATABASE_MODE' "$ROOT/.env.example" \
-  || { echo "FAIL: .env.example missing PICHOST_DATABASE_MODE"; exit 1; }
-grep -q 'PICHOST_I18N_LANGUAGE' "$ROOT/.env.example" \
-  || { echo "FAIL: .env.example missing PICHOST_I18N_LANGUAGE"; exit 1; }
-grep -q 'PICHOST_I18N_LOCALES_DIR' "$ROOT/.env.example" \
-  || { echo "FAIL: .env.example missing PICHOST_I18N_LOCALES_DIR"; exit 1; }
+# ① verify-release.sh:install dry-run 为双位置参数(无 DATA_DIR)
+grep -q 'scripts/install.sh /opt/pichost /etc/pichost' "$ROOT/scripts/verify-release.sh" \
+  || { echo "FAIL: verify-release.sh dry-run not 2-arg"; exit 1; }
+# ② 全脚本目录不得残留旧 DATA_DIR 路径(--exclude-dir=tests:本文件自身的 grep 模式不误伤)
+! grep -rq --exclude-dir=tests '/var/lib/pichost' "$ROOT/scripts/" \
+  || { echo "FAIL: stale /var/lib/pichost in scripts"; exit 1; }
+# ③ .env.example 默认 sqlite(取消注释)+ data/ URL + 注释 Redis + storage 路径
+grep -q '^PICHOST_DATABASE_MODE=sqlite' "$ROOT/.env.example" \
+  || { echo "FAIL: .env.example not sqlite by default"; exit 1; }
+grep -q 'sqlite:///opt/pichost/data/pichost.db' "$ROOT/.env.example" \
+  || { echo "FAIL: .env.example missing data/ sqlite URL"; exit 1; }
+grep -q '^# PICHOST_REDIS_URL' "$ROOT/.env.example" \
+  || { echo "FAIL: .env.example Redis not commented"; exit 1; }
+grep -q 'PICHOST_STORAGE__LOCAL_BASE_PATH=/opt/pichost/data/storage-local' "$ROOT/.env.example" \
+  || { echo "FAIL: .env.example storage path not data/"; exit 1; }
 echo "verify_release_test.sh PASS"

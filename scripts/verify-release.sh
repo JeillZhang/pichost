@@ -178,9 +178,12 @@ if [ "$SKIP_INSTALL" -eq 0 ]; then
     if command -v docker &>/dev/null; then
         echo ">> running install.sh inside a systemd-free container (ubuntu:24.04)"
         docker run --rm -v "$PKG_DIR:/$PKG_NAME:ro" ubuntu:24.04 \
-            bash -c "cd /$PKG_NAME && bash scripts/install.sh /opt/pichost /var/lib/pichost /etc/pichost"
+            bash -c "cd /$PKG_NAME && bash scripts/install.sh /opt/pichost /etc/pichost \
+                && test -d /opt/pichost/data \
+                && grep -q '^PICHOST_DATABASE_MODE=sqlite' /etc/pichost/.env \
+                && grep -q 'sqlite:///opt/pichost/data/pichost.db' /etc/pichost/.env"
     elif ! command -v systemctl &>/dev/null || [ "$(id -u)" = "0" ]; then
-        (cd "$PKG_DIR" && bash scripts/install.sh /opt/pichost /var/lib/pichost /etc/pichost)
+        (cd "$PKG_DIR" && bash scripts/install.sh /opt/pichost /etc/pichost)
     else
         echo ">> SKIP: host has systemd and is not root; run 'sudo bash $0' or use Docker for the install dry-run"
     fi
