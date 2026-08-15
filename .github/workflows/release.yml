@@ -63,6 +63,10 @@ jobs:
         run: cargo test --workspace
       - name: Lint
         run: cargo clippy --workspace -- -D warnings
+      - name: Install packaging tools
+        run: |
+          cargo install cargo-deb
+          cargo install cargo-generate-rpm
       - name: Package
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
@@ -81,9 +85,10 @@ jobs:
           cd dist && tar czf "${PKG_NAME}.tar.gz" "$PKG_NAME"
           # 原生包(已 build release 二进制;--no-build 复用,不重复编译)
           cd .. && (cd pichost-api && cargo deb --target ${{ matrix.target }} --no-build --output ../dist/pichost.deb)
-          (cd pichost-api && cargo generate-rpm --target ${{ matrix.target }} -o ../dist/pichost.rpm) 2>/dev/null || true
+          (cd pichost-api && cargo generate-rpm --target ${{ matrix.target }} -o ../dist/pichost.rpm)
           cd dist && mv pichost.deb "pichost-${VERSION}-${{ matrix.arch }}.deb"
-          mv pichost.rpm "pichost-${VERSION}-${{ matrix.arch }}.rpm" 2>/dev/null || true
+          mv pichost.rpm "pichost-${VERSION}-${{ matrix.arch }}.rpm"
+          test -f "pichost-${VERSION}-${{ matrix.arch }}.rpm"
           ls -la
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -183,6 +188,8 @@ jobs:
           case "$TAG" in *-rc.*|*-beta*|*-alpha*|*-pre*) echo "suite=testing";; *) echo "suite=stable";; esac \
             >> "$GITHUB_OUTPUT"
       - name: Assemble and sign repositories
+        env:
+          GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
         run: |
           mkdir -p debs rpms/x86_64 rpms/aarch64
           find artifacts -name '*.deb' -exec cp {} debs/ \;

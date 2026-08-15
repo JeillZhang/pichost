@@ -24,6 +24,8 @@ grep -q 'source /usr/share/pichost/install-lib.sh' "$ROOT/packaging/rpm/postinst
   || { echo "FAIL: %post missing lib source"; exit 1; }
 grep -q 'ensure_pkg_jwt' "$ROOT/packaging/rpm/postinstall.sh" \
   || { echo "FAIL: %post missing jwt"; exit 1; }
+grep -q 'try-restart' "$ROOT/packaging/rpm/postinstall.sh" \
+  || { echo "FAIL: %post missing upgrade restart"; exit 1; }
 
 # ④ preun/postun 断言
 bash -n "$ROOT/packaging/rpm/preuninstall.sh"

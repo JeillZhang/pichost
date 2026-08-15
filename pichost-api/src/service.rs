@@ -118,6 +118,19 @@ fn uninstall_service() -> windows_service::Result<()> {
 }
 
 #[cfg(windows)]
+/// 若环境未显式配置 PICHOST_STATIC_DIR,则从可执行文件所在目录推导 dist(NSIS 安装布局)
+fn ensure_static_dir() {
+    if std::env::var_os("PICHOST_STATIC_DIR").is_some() {
+        return;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            std::env::set_var("PICHOST_STATIC_DIR", dir.join("dist"));
+        }
+    }
+}
+
+#[cfg(windows)]
 fn run_service() -> windows_service::Result<()> {
     use windows_service::service::{
         ServiceControl, ServiceControlAccept, ServiceState, ServiceType,
@@ -156,6 +169,7 @@ fn run_service() -> windows_service::Result<()> {
                 }
             }
         }
+        ensure_static_dir();
         handler.set_service_status(ServiceStatus {
             current_state: ServiceState::Running,
             ..status
