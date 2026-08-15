@@ -58,7 +58,15 @@ jobs:
             cargo build --release --target ${{ matrix.target }} -p pichost-api -p pichost-worker
           fi
       - name: Strip binaries
-        run: strip target/${{ matrix.target }}/release/pichost-api target/${{ matrix.target }}/release/pichost-worker
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            for bin in pichost-api pichost-worker; do
+              zig objcopy --strip-all "target/${{ matrix.target }}/release/$bin" "$bin.stripped"
+              mv "$bin.stripped" "target/${{ matrix.target }}/release/$bin"
+            done
+          else
+            strip target/${{ matrix.target }}/release/pichost-api target/${{ matrix.target }}/release/pichost-worker
+          fi
       - name: Test
         run: cargo test --workspace
       - name: Lint
