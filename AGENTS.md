@@ -13,7 +13,7 @@
 |---|---|---|
 | Build all | `cargo build --workspace` | |
 | Check only api | `cargo check -p pichost-api` | Fast compile-check |
-| Test all | `cargo test --workspace` | 416 pass without infra; 688 pass, 0 fail with `-- --include-ignored` (Docker PG+Redis+MinIO, see Testing) |
+| Test all | `cargo test --workspace` | 433 pass without infra; 705 pass, 0 fail with `-- --include-ignored` (Docker PG+Redis+MinIO, see Testing) |
 | Lint | `cargo clippy --workspace -- -D warnings` | Zero warnings required |
 | Run API server | `cargo run -p pichost-api` | Standard mode requires PostgreSQL + Redis; lite mode: `PICHOST_DATABASE_MODE=sqlite` + `PICHOST_DATABASE_URL=sqlite:///path/pichost.db` (embedded worker, no Redis). First start with no users + interactive TTY runs the setup wizard; force with `--setup` (non-TTY skips with a warning) |
 | Frontend dev | `cd web-ui && npm run dev` | Vite proxies `/api`, `/u` → `localhost:3000` |
@@ -58,7 +58,7 @@
 ## CRATE BOUNDARIES
 
 - **pichost-core** (`pichost_core`): Domain models, config, error types, `StorageBackend` trait + `LocalStorage`/`RustfsStorage`/`GitStorage` impls + `StorageRouter`. Also `db` module (per-driver `create_pg_pool`/`create_sqlite_pool`, `run_pg_migrations`/`run_sqlite_migrations`, `DbType`/`DbRow`/`DbQueryResult` markers, `db_error_kind` mapping) and `state` module (5 state traits — `Queue`/`Blacklist`/`RateLimiter`/`InviteStore`/`Cache` — with SQLite impls `SqliteQueue`/`SqliteBlacklist`/`SqliteRateLimiter`/`SqliteInviteStore` + `NoopCache`). No web/framework deps.
-- **pichost-api** (`pichost_api`): Axum server — routes, middleware, services, DB pool, Redis cache, system config service (config.toml read/write, backups, connection tests), first-run setup wizard module (`setup/` — prompts/env_writer/admin + `--setup` CLI flag). Generic `AppState<DB: DbType>` + `configure_app<DB>` router assembly; `run_with::<DB>()` (standard, Redis state components) / `run_with_sqlite` (lite mode, SQLite components + embedded worker). Redis trait impls (`RedisBlacklist`/`RedisRateLimiter`/`RedisInviteStore`/`Cache`) live here. Depends on `pichost-core`. Extra deps: `toml_edit` (0.22), `regex` (1), `thiserror`, `tempfile` (dev).
+- **pichost-api** (`pichost_api`): Axum server — routes, middleware, services, DB pool, Redis cache, system config service (config.toml read/write, backups, connection tests), first-run setup wizard module (`setup/` — prompts/env_writer/admin + `--setup` CLI flag). Generic `AppState<DB: DbType>` + `configure_app<DB>` router assembly; `run_with::<DB>()` (standard, Redis state components) / `run_with_sqlite` (lite mode, SQLite components + embedded worker). Redis trait impls (`RedisBlacklist`/`RedisRateLimiter`/`RedisInviteStore`/`Cache`) live here. Depends on `pichost-core`. Extra deps: `toml_edit` (0.22), `regex` (1), `dialoguer` (0.12), `thiserror`, `tempfile` (dev).
 - **pichost-worker**: Background image processing — thumbnail/WebP generation via Redis queue. Library + binary: `pichost_worker::process_task` is exposed so lite mode can run the worker embedded in the API process (`RedisQueue` lives here). Depends on `pichost-core`.
 
 ## Architecture Notes
@@ -213,7 +213,7 @@ All paths below are relative to `/api/v1/` prefix unless otherwise noted. The `/
 
 ## Testing
 
-- **Full suite**: `cargo test --workspace` →  **416 pass, 0 fail** without infra (272 DB/Redis/S3 tests `#[ignore]`-gated). With Docker PG+Redis+MinIO running: `cargo test --workspace -- --include-ignored` → **688 pass, 0 fail**. Env-sensitive config tests are hermetic via `PichostEnvGuard` (snapshot/restore of `PICHOST_*` vars), and the rustfs storage tests run against live MinIO with `PICHOST_STORAGE_RUSTFS_*` set.
+- **Full suite**: `cargo test --workspace` →  **433 pass, 0 fail** without infra (272 DB/Redis/S3 tests `#[ignore]`-gated). With Docker PG+Redis+MinIO running: `cargo test --workspace -- --include-ignored` → **705 pass, 0 fail**. Env-sensitive config tests are hermetic via `PichostEnvGuard` (snapshot/restore of `PICHOST_*` vars), and the rustfs storage tests run against live MinIO with `PICHOST_STORAGE_RUSTFS_*` set.
 - **CI**: every PR to `main` runs the full suite automatically via `.github/workflows/smoke-test.yml` (see the smoke test design guide `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md`). New API features must add a smoke test before coding (TDD).
 - **Coverage**: `cargo llvm-cov --workspace --ignore-filename-regex 'tests/|test_' -- --include-ignored` → **91.56% line coverage**. `cargo-llvm-cov` must be installed (`cargo install cargo-llvm-cov`).
 - **Test infrastructure**: `pichost-api/tests/common/mod.rs` harness builds a real `AppState` (PG+Redis) + production router (`configure_app`) and drives it via `tower::ServiceExt::oneshot`. The router-assembly functions live in `pichost-api/src/app.rs` (moved from `main.rs`) so integration tests exercise the exact production routing.

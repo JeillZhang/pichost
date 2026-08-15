@@ -120,14 +120,14 @@ cd web-ui && npm install && npm run dev  # → http://localhost:5173
 ### Test & Lint
 
 ```bash
-cargo test --workspace                      # 416 pass without infra (DB tests #[ignore]-gated)
-cargo test --workspace -- --include-ignored  # 688 pass, 0 fail with Docker PG+Redis+MinIO (see AGENTS.md Testing)
+cargo test --workspace                      # 433 pass without infra (DB tests #[ignore]-gated)
+cargo test --workspace -- --include-ignored  # 705 pass, 0 fail with Docker PG+Redis+MinIO (see AGENTS.md Testing)
 cargo clippy --workspace -- -D warnings      # zero warnings required
 cargo llvm-cov --workspace -- --include-ignored  # 91.56% line coverage (needs Docker PG+Redis+MinIO)
 cd web-ui && npm run build                   # tsc -b && vite build
 ```
 
-The full 678-test suite runs automatically on every PR to `main` via `.github/workflows/smoke-test.yml` (PG+Redis+MinIO service containers + clippy gate). See `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md` for the smoke test design guide.
+The full 705-test suite runs automatically on every PR to `main` via `.github/workflows/smoke-test.yml` (PG+Redis+MinIO service containers + clippy gate). See `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md` for the smoke test design guide.
 
 Run a single test: `cargo test -p pichost-api test_image_list`
 

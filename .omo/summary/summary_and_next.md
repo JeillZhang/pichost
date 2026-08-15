@@ -2,7 +2,7 @@
 
 ## 首次安装终端初始化向导 ✅ (本次完成)
 
-- **setup 模块** (`pichost-api/src/setup/`, `pub mod setup`): `prompts.rs` (`Prompt` trait + `DialoguerPrompts`)、`env_writer.rs` (幂等 `.env` upsert — 已有键保留/缺失键替换;探测顺序 `PICHOST_ENV_FILE` → `/etc/pichost/.env` → CWD `.env`;JWT 密钥生成/校验、public URL 校验)、`admin.rs` (首个管理员创建流程,复用 `services::user_ops` 提取的 `count_users`/创建辅助)
+- **setup 模块** (`pichost-api/src/setup/`, `pub mod setup`): `prompts.rs` (`Prompt` trait + `DialoguerPrompts`)、`env_writer.rs` (幂等 `.env` upsert — 已有键保留/缺失键写入;探测顺序 `PICHOST_ENV_FILE` → `/etc/pichost/.env` → CWD `.env`;JWT 密钥生成/校验、public URL 校验)、`admin.rs` (首个管理员创建流程,复用 `services::user_ops` 提取的 `count_users`/创建辅助)
 - **`--setup` CLI 标志** (cli.rs): 强制运行向导;启动路径 `maybe_run` 挂接 `run_with::<DB>()`/`run_with_sqlite` 双模式
 - **触发行为**: `should_run_wizard(user_count == 0 || forced)` → `decide_tty`:TTY → 运行;非 TTY + `--setup` → 报错;非 TTY (systemd/Docker) → `setup.warn_notty` WARN 日志并跳过(经 Web UI 注册首个用户)
 - **向导阶段 1**: 写入 `PICHOST_I18N_LANGUAGE` (+ JWT 密钥缺失/非法时生成 `PICHOST_AUTH__JWT_SECRET`,未设置时提示 `PICHOST_SERVER__PUBLIC_URL`) → 重载配置 + i18n → 用户数为 0 时创建首个管理员。纯启动流程,无 API 端点变更

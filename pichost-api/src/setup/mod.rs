@@ -62,7 +62,7 @@ where
     if !should_run_wizard(user_ops::count_users(pool).await?, forced) {
         return Ok(None);
     }
-    let lang = choose_language(config);
+    let mut lang = choose_language(config);
     match decide_tty(forced, std::io::stdin().is_terminal())? {
         TtyDecision::SkipWarn => {
             let msg = I18n::global().t(lang, "setup.warn_notty");
@@ -73,6 +73,14 @@ where
         TtyDecision::Run => {}
     }
     let mut prompts = prompts::DialoguerPrompts;
+    println!("{}", I18n::global().t(lang, "setup.welcome"));
+    let items = ["en", "zh-CN"];
+    let default = match lang {
+        Language::En => 0,
+        _ => 1,
+    };
+    let choice = prompts.select(&I18n::global().t(lang, "setup.language"), &items, default)?;
+    lang = if choice == 0 { Language::En } else { Language::ZhCN };
     run_wizard(pool, config, lang, &mut prompts).await
 }
 
@@ -117,8 +125,7 @@ fn phase1_config(
     let i18n = I18n::global();
     let mut updates: Vec<(String, String)> =
         vec![("PICHOST_I18N_LANGUAGE".into(), lang.as_str().into())];
-    let jwt = std::env::var("PICHOST_AUTH__JWT_SECRET").ok();
-    if jwt.is_none_or(|s| !env_writer::validate_jwt_secret(&s)) {
+    if !env_writer::validate_jwt_secret(&config.auth.jwt_secret) {
         updates.push(("PICHOST_AUTH__JWT_SECRET".into(), env_writer::generate_jwt_secret()));
         println!("{}", i18n.t(lang, "setup.jwt_generated"));
     } else {

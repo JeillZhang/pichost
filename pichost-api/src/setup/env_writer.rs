@@ -72,11 +72,33 @@ pub fn apply_env_file(path: &Path, updates: &[(&str, &str)]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&tmp, new_content)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    // 先清陈旧 tmp(或恶意预置的符号链接本身,而非其目标),防 CWE-377/59
+    let _ = std::fs::remove_file(&tmp);
+    if let Err(e) = write_env_tmp(&tmp, new_content.as_bytes()) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
-    std::fs::rename(&tmp, path)
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// 以 O_EXCL + 0600 权限创建临时文件并写入,避免先写后 chmod 的权限窗口。
+#[cfg(unix)]
+fn write_env_tmp(tmp: &Path, content: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(tmp)?;
+    file.write_all(content)
+}
+
+#[cfg(not(unix))]
+fn write_env_tmp(tmp: &Path, content: &[u8]) -> io::Result<()> {
+    std::fs::write(tmp, content)
 }
