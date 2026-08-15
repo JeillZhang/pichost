@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.24.0** — First-run setup wizard + native packages & software repos (deb/rpm/exe, apt/rpm/Homebrew/winget)
+**v1.0.0** — First-run setup wizard + native packages & software repos (deb/rpm/exe, apt/rpm/Homebrew/winget)
 
 ## Stack
 
@@ -112,7 +112,7 @@ PICHOST_STATIC_DIR=./web-ui/dist \
 
 ```bash
 # Download pichost-<ver>-<arch>.tar.gz from the GitHub release, then:
-tar xzf pichost-0.24.0-x86_64.tar.gz && cd pichost-0.24.0-x86_64
+tar xzf pichost-1.0.0-x86_64.tar.gz && cd pichost-1.0.0-x86_64
 sudo ./scripts/install.sh [--yes] [--mode postgres|sqlite] [/opt/pichost] [/etc/pichost]
 ```
 

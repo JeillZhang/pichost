@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Versions before 0.7.0 are not documented here.
 
-## [0.24.0] - 2026-08-15
+## [1.0.0] - 2026-08-15
 
 ### Added
 

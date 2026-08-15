@@ -9,7 +9,7 @@
 - **i18n**: 新增 `setup.*` 键 (en/zh-CN)
 - **测试**: `pichost-api/tests/setup_wizard_test.rs` — decide_tty/should_run_wizard/probe 顺序/env upsert 等纯逻辑单测
 - **验证**: `cargo test --workspace` ✅ (433 pass, 0 fail),`cargo clippy --workspace -- -D warnings` ✅,`bash scripts/tests/docs_check_test.sh` ✅,`cd web-ui && npm run build` ✅
-- **版本**: 0.23.0 → **0.24.0** (Cargo.toml workspace + web-ui/package.json + Cargo.lock 对齐,CHANGELOG 更新)
+- **版本**: 0.24.0 → **1.0.0** (Cargo.toml workspace + web-ui/package.json + Cargo.lock 对齐,CHANGELOG 更新,首个 1.x 正式发布)
 
 ## 原生安装包与软件仓库分发 ✅ (本次完成)
 
@@ -516,4 +516,4 @@
 | 触屏增强 | CategoryTree 长按手势（当前 ⋯ 按钮已覆盖触屏，长按列为后续增强） | 响应式已落地 |
 | 测试基建 | ~~`config_test::database_mode_parses_sqlite_from_env` env 隔离修复~~ — 已完成 (0433326): `PichostEnvGuard` 全量快照/恢复 `PICHOST_*`，678 pass / 0 fail | 轻量模式已落地 |
 
-当前计划内阶段（P0–P4-I）+ i18n + 响应式布局 + 轻量模式 (SQLite lite mode) + 原生安装包与软件仓库分发 (0.23.0) + 首次安装终端初始化向导 (0.24.0) 已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划，例如首版 `v0.24.0` 发布后验证 apt/rpm/brew/winget 安装链路）。
+当前计划内阶段（P0–P4-I）+ i18n + 响应式布局 + 轻量模式 (SQLite lite mode) + 原生安装包与软件仓库分发 (0.23.0) + 首次安装终端初始化向导 (0.24.0) 已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划，例如首版 `v1.0.0` 发布后验证 apt/rpm/brew/winget 安装链路）。
