@@ -57,13 +57,13 @@ jobs:
           else
             cargo build --release --target ${{ matrix.target }} -p pichost-api -p pichost-worker
           fi
+      - name: Install cross strip tools
+        if: matrix.arch == 'arm64'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils-aarch64-linux-gnu
       - name: Strip binaries
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            for bin in pichost-api pichost-worker; do
-              zig objcopy --strip-all "target/${{ matrix.target }}/release/$bin" "$bin.stripped"
-              mv "$bin.stripped" "target/${{ matrix.target }}/release/$bin"
-            done
+            aarch64-linux-gnu-strip target/${{ matrix.target }}/release/pichost-api target/${{ matrix.target }}/release/pichost-worker
           else
             strip target/${{ matrix.target }}/release/pichost-api target/${{ matrix.target }}/release/pichost-worker
           fi
