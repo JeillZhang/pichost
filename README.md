@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.23.0** — Native packages + software repos (deb/rpm/exe, apt/rpm/Homebrew/winget)
+**v0.24.0** — First-run setup wizard + native packages & software repos (deb/rpm/exe, apt/rpm/Homebrew/winget)
 
 ## Stack
 
@@ -71,32 +71,73 @@ account. Non-TTY environments (systemd/Docker) skip the wizard with a
 warning — register the first user via the web UI instead. Re-run anytime
 with `pichost-api --setup`.
 
+## Installation & Running
+
+After building the workspace (`cargo build --workspace` + `cd web-ui && npm run build`) or downloading a release artifact, PicHost can be installed/run in these ways:
+
+| Option | Artifact | Platform | Reference |
+|--------|----------|----------|-----------|
+| Docker Compose | `docker-compose.yml` (dev) / `docker-compose.prod.yml` (prod) | Linux / macOS | [Deployment → Docker](#docker-recommended) |
+| Bare binaries | `pichost-api` + `pichost-worker` + `web-ui/dist` | Linux / macOS / Windows | [Run the binaries directly](#run-the-binaries-directly) |
+| Release tarball | `pichost-<ver>-<arch>.tar.gz` (linux) / `pichost-<ver>-darwin-universal.tar.gz` (macOS) | Linux / macOS | [systemd (bare metal)](#systemd-bare-metal) |
+| deb package | `pichost-<ver>-<arch>.deb` | Debian / Ubuntu | [Quick Start (Native packages)](#quick-start-native-packages) |
+| rpm package | `pichost-<ver>-<arch>.rpm` | Fedora / RHEL | [Quick Start (Native packages)](#quick-start-native-packages) |
+| Homebrew tap | `jeillzhang/tap/pichost` | macOS | [Quick Start (Native packages)](#quick-start-native-packages) |
+| winget / NSIS | `PicHost.PicHost` | Windows | [Quick Start (Native packages)](#quick-start-native-packages) |
+
+### Run the binaries directly
+
+The API serves the frontend itself via `PICHOST_STATIC_DIR`, so **no Nginx is required**:
+
+```bash
+# Standard mode — needs PostgreSQL + Redis, plus a separate pichost-worker
+PICHOST_AUTH_JWT_SECRET=<32+ random chars> \
+PICHOST_SERVER_PUBLIC_URL=https://your.domain \
+PICHOST_STATIC_DIR=./web-ui/dist \
+./pichost-api
+
+# Lite mode — zero external dependencies (SQLite + embedded worker)
+PICHOST_DATABASE_MODE=sqlite \
+PICHOST_DATABASE_URL=sqlite:///opt/pichost/pichost.db \
+PICHOST_AUTH_JWT_SECRET=<32+ random chars> \
+PICHOST_STATIC_DIR=./web-ui/dist \
+./pichost-api
+```
+
+- **CLI**: `pichost-api [--setup|--install-service|--uninstall-service|--service]` — `--setup` force-runs the first-run wizard; the last three are Windows-only (register / unregister / run as a Windows service).
+- **First start**: with no users and an interactive terminal the setup wizard configures JWT secret / public URL / language and creates the first admin; non-TTY environments (systemd/Docker) skip it with a warning — register via the web UI.
+- **Standard mode** also needs `PICHOST_REDIS_URL` and a running `pichost-worker` binary (consumes the Redis queue to generate thumbnails / WebP / watermarks).
+
+### Release tarball (manual install)
+
+```bash
+# Download pichost-<ver>-<arch>.tar.gz from the GitHub release, then:
+tar xzf pichost-0.24.0-x86_64.tar.gz && cd pichost-0.24.0-x86_64
+sudo ./scripts/install.sh [--yes] [--mode postgres|sqlite] [/opt/pichost] [/etc/pichost]
+```
+
+The tarball bundles both binaries, `web-ui/dist`, both migration dirs, the nginx config, `.env.example` and the systemd units — or run `./pichost-api` straight from the extracted directory (see above).
+
 ## Architecture
 
+```mermaid
+flowchart TB
+    Browser["Browser / Client"] -->|"HTTP :80"| Nginx["Nginx :80<br/>static files · proxy cache<br/>rate limiting"]
+    Nginx -->|"least_conn upstream"| API1["API replica 1<br/>(:3000)"]
+    Nginx -->|"least_conn upstream"| API2["API replica 2<br/>(:3000)"]
+    API1 --> PG[("PostgreSQL 18<br/>data, quotas")]
+    API2 --> PG
+    API1 --> Redis[("Redis 8<br/>cache · queue · rate limits<br/>token blacklist")]
+    API2 --> Redis
+    API1 --> Storage[("Storage<br/>local ./storage-local/<br/>or S3 via RustFS")]
+    API2 --> Storage
+    Redis -->|"BRPOP"| W1["Worker 1<br/>(thumbnails, WebP)"]
+    Redis -->|"BRPOP"| W2["Worker 2<br/>(thumbnails, WebP)"]
+    W1 --> Storage
+    W2 --> Storage
 ```
-Browser / Client
-       │
-       ▼
-   Nginx :80
-   ├── Static files (web-ui/dist)
-   ├── Proxy cache (images: 50 MB / 1 hr)
-   ├── Rate limiting (API 60r/m, public 200r/m)
-   └── Upstream least_conn ──┬── API replica 1 (:3000)
-                             └── API replica 2 (:3000)
-                                    │
-              ┌─────────────────────┼──────────────────┐
-              ▼                     ▼                  ▼
-         PostgreSQL 18          Redis 8           Local Storage
-         (data, quotas)    (cache, queue,       (./storage-local/)
-                            rate limits,         or S3 via RustFS
-                            token blacklist)
-                                    │
-                                    ▼
-                           Worker queue (BRPOP)
-                           ├── Worker 1
-                           └── Worker 2
-                           (thumbnails, WebP conversion)
-```
+
+Standard-mode topology (Docker / bare metal). In **lite mode** (`PICHOST_DATABASE_MODE=sqlite`) the single API process replaces all of PostgreSQL / Redis / the external workers: SQLite holds data + state tables, and the worker runs embedded in-process with zero external dependencies.
 
 ## Local Development
 
