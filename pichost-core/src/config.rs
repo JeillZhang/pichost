@@ -24,6 +24,9 @@ pub struct AppConfig {
     /// 每用户最多可创建的存储配置数。（None = 默认 5）
     #[serde(default)]
     pub storage_max_user_configs: Option<u32>,
+    /// 静态资源目录(env PICHOST_STATIC_DIR);None 时运行期回退 ./dist(目录不存在则不挂载)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub static_dir: Option<PathBuf>,
     #[serde(default)]
     pub i18n: I18nConfig,
 }
@@ -274,6 +277,7 @@ impl Default for AppConfig {
             rate_limit: RateLimitConfig::default(),
             token_encryption_key: None,
             storage_max_user_configs: None,
+            static_dir: None,
             i18n: I18nConfig::default(),
         }
     }
