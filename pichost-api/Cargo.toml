@@ -36,6 +36,9 @@ regex = "1"
 thiserror.workspace = true
 async-trait.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.7"
+
 [dev-dependencies]
 serde_urlencoded = "0.7"
 tempfile = "3"
@@ -48,3 +51,42 @@ rand.workspace = true
 [[bin]]
 name = "pichost-api"
 path = "src/main.rs"
+
+[package.metadata.deb]
+name = "pichost"
+section = "web"
+priority = "optional"
+maintainer = "Jeill Zhang <jeillzhang@users.noreply.github.com>"
+homepage = "https://github.com/JeillZhang/pichost"
+license = "MIT"
+depends = "$auto"
+assets = [
+    ["target/release/pichost-api", "usr/bin/", "755"],
+    ["target/release/pichost-worker", "usr/bin/", "755"],
+    ["../web-ui/dist/", "usr/share/pichost/web-ui/"],
+    ["../migrations/", "usr/share/pichost/migrations/"],
+    ["../migrations-sqlite/", "usr/share/pichost/migrations-sqlite/"],
+    ["../packaging/common/install-lib.sh", "usr/share/pichost/", "644"],
+    ["../scripts/pichost-api.service", "lib/systemd/system/", "644"],
+    ["../scripts/pichost-worker.service", "lib/systemd/system/", "644"],
+]
+maintainer-scripts = "../packaging/deb"
+
+[package.metadata.generate-rpm]
+name = "pichost"
+summary = "Self-hosted image hosting server (SQLite-first)"
+license = "MIT"
+url = "https://github.com/JeillZhang/pichost"
+assets = [
+    ["target/release/pichost-api", "usr/bin/", "755"],
+    ["target/release/pichost-worker", "usr/bin/", "755"],
+    ["../web-ui/dist/", "usr/share/pichost/web-ui/"],
+    ["../migrations/", "usr/share/pichost/migrations/"],
+    ["../migrations-sqlite/", "usr/share/pichost/migrations-sqlite/"],
+    ["../packaging/common/install-lib.sh", "usr/share/pichost/", "644"],
+    ["../scripts/pichost-api.service", "usr/lib/systemd/system/", "644"],
+    ["../scripts/pichost-worker.service", "usr/lib/systemd/system/", "644"],
+]
+postinstall_script = "packaging/rpm/postinstall.sh"
+preuninstall_script = "packaging/rpm/preuninstall.sh"
+postuninstall_script = "packaging/rpm/postuninstall.sh"

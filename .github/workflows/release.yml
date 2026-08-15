@@ -29,6 +29,9 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
             arch: amd64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04
+            arch: arm64
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
@@ -43,14 +46,27 @@ jobs:
           cache-dependency-path: web-ui/package-lock.json
       - name: Build frontend
         run: cd web-ui && npm ci && npm run build
+      - name: Install Zig
+        if: matrix.arch == 'arm64'
+        uses: mlugg/setup-zig@v1
       - name: Build backend
-        run: cargo build --release --target ${{ matrix.target }} -p pichost-api -p pichost-worker
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            cargo install cargo-zigbuild
+            cargo zigbuild --release --target ${{ matrix.target }} -p pichost-api -p pichost-worker
+          else
+            cargo build --release --target ${{ matrix.target }} -p pichost-api -p pichost-worker
+          fi
       - name: Strip binaries
         run: strip target/${{ matrix.target }}/release/pichost-api target/${{ matrix.target }}/release/pichost-worker
       - name: Test
         run: cargo test --workspace
       - name: Lint
         run: cargo clippy --workspace -- -D warnings
+      - name: Install packaging tools
+        run: |
+          cargo install cargo-deb
+          cargo install cargo-generate-rpm
       - name: Package
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
@@ -67,14 +83,147 @@ jobs:
           cp scripts/pichost-api.service scripts/pichost-worker.service dist/$PKG_NAME/scripts/
           cp README.md dist/$PKG_NAME/
           cd dist && tar czf "${PKG_NAME}.tar.gz" "$PKG_NAME"
+          # 原生包(已 build release 二进制;--no-build 复用,不重复编译)
+          cd .. && (cd pichost-api && cargo deb --target ${{ matrix.target }} --no-build --output ../dist/pichost.deb)
+          (cd pichost-api && cargo generate-rpm --target ${{ matrix.target }} -o ../dist/pichost.rpm)
+          cd dist && mv pichost.deb "pichost-${VERSION}-${{ matrix.arch }}.deb"
+          mv pichost.rpm "pichost-${VERSION}-${{ matrix.arch }}.rpm"
+          test -f "pichost-${VERSION}-${{ matrix.arch }}.rpm"
+          ls -la
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: pichost-${{ matrix.arch }}
+          path: dist/*
+  macos:
+    name: Build macOS universal2
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web-ui/package-lock.json
+      - run: cd web-ui && npm ci && npm run build
+      - run: cargo build --release --target aarch64-apple-darwin -p pichost-api -p pichost-worker
+      - run: cargo build --release --target x86_64-apple-darwin -p pichost-api -p pichost-worker
+      - name: Create universal binaries
+        run: |
+          lipo -create -output pichost-api-universal \
+            target/aarch64-apple-darwin/release/pichost-api \
+            target/x86_64-apple-darwin/release/pichost-api
+          lipo -create -output pichost-worker-universal \
+            target/aarch64-apple-darwin/release/pichost-worker \
+            target/x86_64-apple-darwin/release/pichost-worker
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          PKG_NAME="pichost-${VERSION}-darwin-universal"
+          mkdir -p dist/$PKG_NAME/web-ui
+          cp pichost-api-universal pichost-worker-universal dist/$PKG_NAME/
+          cp -r web-ui/dist/. dist/$PKG_NAME/web-ui/
+          cp -r migrations dist/$PKG_NAME/
+          cp -r migrations-sqlite dist/$PKG_NAME/
+          cd dist && tar czf "${PKG_NAME}.tar.gz" "$PKG_NAME"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pichost-darwin-universal
           path: dist/*.tar.gz
+  windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web-ui/package-lock.json
+      - run: cd web-ui && npm ci && npm run build
+      - run: cargo build --release --target x86_64-pc-windows-msvc -p pichost-api -p pichost-worker
+      - name: Install NSIS
+        run: choco install nsis -y
+      - name: Build installer
+        run: |
+          mkdir staging
+          copy target\x86_64-pc-windows-msvc\release\pichost-api.exe staging\
+          copy target\x86_64-pc-windows-msvc\release\pichost-worker.exe staging\
+          xcopy web-ui\dist staging\dist\ /E /I /Y
+          xcopy migrations staging\migrations\ /E /I /Y
+          xcopy migrations-sqlite staging\migrations-sqlite\ /E /I /Y
+          makensis -NOCD /DINSTALLER_VERSION=${{ github.ref_name }} /DstagingDir=staging packaging\windows\installer.nsi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pichost-windows
+          path: PicHost-setup-*.exe
+  publish-repo:
+    name: Publish apt/rpm repos + homebrew tap
+    needs: [build, macos, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Install repo tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq dpkg-dev createrepo-c gnupg2
+      - name: Import GPG signing key
+        id: import-gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.APT_GPG_PASSPHRASE }}
+          git_user_signingkey: true
+      - name: Determine suite
+        id: suite
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          case "$TAG" in *-rc.*|*-beta*|*-alpha*|*-pre*) echo "suite=testing";; *) echo "suite=stable";; esac \
+            >> "$GITHUB_OUTPUT"
+      - name: Assemble and sign repositories
+        env:
+          GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          mkdir -p debs rpms/x86_64 rpms/aarch64
+          find artifacts -name '*.deb' -exec cp {} debs/ \;
+          find artifacts -name '*-amd64.rpm' -exec cp {} rpms/x86_64/ \;
+          find artifacts -name '*-arm64.rpm' -exec cp {} rpms/aarch64/ \;
+          GPG_SIGN=1 GPG_FINGERPRINT="${{ steps.import-gpg.outputs.fingerprint }}" \
+            bash scripts/publish-repo.sh repo-out debs rpms "${{ steps.suite.outputs.suite }}"
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          external_repository: jeillzhang/pichost-repo
+          publish_branch: gh-pages
+          publish_dir: ./repo-out
+          external_token: ${{ secrets.PICHOST_REPO_PAT }}
+          enable_jekyll: false
+      - name: Update homebrew tap formula
+        env:
+          PICHOST_REPO_PAT: ${{ secrets.PICHOST_REPO_PAT }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          SHA="$(sha256sum artifacts/pichost-darwin-universal/*.tar.gz | cut -d' ' -f1)"
+          git clone "https://x-access-token:${PICHOST_REPO_PAT}@github.com/jeillzhang/homebrew-tap.git" tap
+          sed -e "s|__TAG__|${TAG}|g" \
+              -e "s|__VERSION__|${VERSION}|g" \
+              -e "s|__SHA256__|${SHA}|g" \
+              packaging/homebrew/pichost.rb.tpl > tap/pichost.rb
+          cd tap && git config user.email "ci@users.noreply.github.com" \
+            && git config user.name "pichost-ci" \
+            && git add pichost.rb && git commit -m "pichost ${VERSION}" \
+            && git push origin main
   release:
     name: Create Release
-    needs: build
+    needs: [build, macos, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -95,11 +244,16 @@ jobs:
             ### Architecture Support
             | Arch | Filename |
             |------|----------|
-            | x86_64 (amd64) | `pichost-${{ github.ref_name }}-amd64.tar.gz` |
+            | x86_64 (amd64) | `pichost-${{ github.ref_name }}-amd64.tar.gz` / `.deb` / `.rpm` |
+            | aarch64 (arm64) | `pichost-${{ github.ref_name }}-arm64.tar.gz` / `.deb` / `.rpm` |
+            | macOS (universal2) | `pichost-${{ github.ref_name }}-darwin-universal.tar.gz` |
+            | Windows (x86_64) | `PicHost-setup-${{ github.ref_name }}.exe` |
             ### Changes
             See [CHANGELOG](https://github.com/JeillZhang/pichost/blob/main/CHANGELOG.md)
           files: |
-            pichost-amd64/dist/*.tar.gz
+            pichost-*/dist/*
+            pichost-darwin-universal/dist/*.tar.gz
+            pichost-windows/PicHost-setup-*.exe
           # Inputs win when manually dispatched; otherwise derive from the tag name
           draft: ${{ inputs.draft == 'true' || contains(github.ref_name, '-draft') }}
           prerelease: ${{ inputs.prerelease == 'true' || contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-pre') }}

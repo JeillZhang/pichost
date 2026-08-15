@@ -1,0 +1,17 @@
+# packaging/winget/manifest.yaml — winget-pkgs 清单参考(首次人工提交后 wingetcreate update 自动维护)
+# 首次提交路径: 将本清单按实际版本复制到 manifests/p/PicHost/PicHost/<version>/,
+# 用 wingetcreate new 引导生成并以实际 exe 计算 InstallerSha256, 提交 PR 到 microsoft/winget-pkgs。
+# 之后 .github/workflows/winget.yml 在 release published 时自动执行 wingetcreate update 维护同一清单。
+PackageIdentifier: PicHost.PicHost
+PackageVersion: 0.23.0
+InstallerType: exe
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/JeillZhang/pichost/releases/download/v0.23.0/PicHost-setup-v0.23.0.exe
+    InstallerSha256: <computed-at-submit-time>
+    InstallerSwitches:
+      Silent: /S
+      SilentWithProgress: /S
+    Scope: machine
+ManifestType: singleton
+ManifestVersion: 1.9.0
