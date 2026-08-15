@@ -90,9 +90,47 @@ jobs:
         with:
           name: pichost-${{ matrix.arch }}
           path: dist/*
+  macos:
+    name: Build macOS universal2
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web-ui/package-lock.json
+      - run: cd web-ui && npm ci && npm run build
+      - run: cargo build --release --target aarch64-apple-darwin -p pichost-api -p pichost-worker
+      - run: cargo build --release --target x86_64-apple-darwin -p pichost-api -p pichost-worker
+      - name: Create universal binaries
+        run: |
+          lipo -create -output pichost-api-universal \
+            target/aarch64-apple-darwin/release/pichost-api \
+            target/x86_64-apple-darwin/release/pichost-api
+          lipo -create -output pichost-worker-universal \
+            target/aarch64-apple-darwin/release/pichost-worker \
+            target/x86_64-apple-darwin/release/pichost-worker
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          PKG_NAME="pichost-${VERSION}-darwin-universal"
+          mkdir -p dist/$PKG_NAME/web-ui
+          cp pichost-api-universal pichost-worker-universal dist/$PKG_NAME/
+          cp -r web-ui/dist dist/$PKG_NAME/web-ui/
+          cp -r migrations dist/$PKG_NAME/
+          cp -r migrations-sqlite dist/$PKG_NAME/
+          cd dist && tar czf "${PKG_NAME}.tar.gz" "$PKG_NAME"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pichost-darwin-universal
+          path: dist/*.tar.gz
   release:
     name: Create Release
-    needs: build
+    needs: [build, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -115,10 +153,12 @@ jobs:
             |------|----------|
             | x86_64 (amd64) | `pichost-${{ github.ref_name }}-amd64.tar.gz` / `.deb` / `.rpm` |
             | aarch64 (arm64) | `pichost-${{ github.ref_name }}-arm64.tar.gz` / `.deb` / `.rpm` |
+            | macOS (universal2) | `pichost-${{ github.ref_name }}-darwin-universal.tar.gz` |
             ### Changes
             See [CHANGELOG](https://github.com/JeillZhang/pichost/blob/main/CHANGELOG.md)
           files: |
             pichost-*/dist/*
+            pichost-darwin-universal/dist/*.tar.gz
           # Inputs win when manually dispatched; otherwise derive from the tag name
           draft: ${{ inputs.draft == 'true' || contains(github.ref_name, '-draft') }}
           prerelease: ${{ inputs.prerelease == 'true' || contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-pre') }}

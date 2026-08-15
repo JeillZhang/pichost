@@ -14,4 +14,17 @@ grep -q 'cargo clippy --workspace -- -D warnings' "$WF" \
   || { echo "FAIL: clippy gate lost"; exit 1; }
 grep -q 'cargo test --workspace' "$WF" || { echo "FAIL: test gate lost"; exit 1; }
 grep -q 'upload-artifact' "$WF" || { echo "FAIL: artifact upload lost"; exit 1; }
+
+# macos job 与 formula 模板断言
+grep -q 'macos-14' "$WF" || { echo "FAIL: macos runner missing"; exit 1; }
+grep -q 'aarch64-apple-darwin' "$WF" || { echo "FAIL: arm64-darwin target missing"; exit 1; }
+grep -q 'x86_64-apple-darwin' "$WF" || { echo "FAIL: x86_64-darwin target missing"; exit 1; }
+grep -q 'lipo -create' "$WF" || { echo "FAIL: lipo missing"; exit 1; }
+grep -q 'darwin-universal.tar.gz' "$WF" || { echo "FAIL: universal tarball missing"; exit 1; }
+FML="$ROOT/packaging/homebrew/pichost.rb.tpl"
+grep -q '__VERSION__' "$FML" || { echo "FAIL: formula version placeholder missing"; exit 1; }
+grep -q '__SHA256__' "$FML" || { echo "FAIL: formula sha placeholder missing"; exit 1; }
+grep -q 'service do' "$FML" || { echo "FAIL: formula service block missing"; exit 1; }
+grep -q 'PICHOST_STATIC_DIR' "$FML" || { echo "FAIL: formula env missing"; exit 1; }
+grep -q -- '--help' "$FML" || { echo "FAIL: formula test missing"; exit 1; }
 echo "release_ci_test.sh PASS"
