@@ -1,5 +1,6 @@
 pub mod app;
 pub mod cache;
+pub mod cli;
 pub mod db;
 pub mod i18n_ext;
 pub mod metrics;

@@ -2,8 +2,36 @@ use pichost_api::{app, cache, db};
 use pichost_core::config::{load_config, DatabaseMode};
 use pichost_core::i18n::{I18n, Language};
 
+mod cli;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cmd = match cli::parse_cli_args(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        Ok(c) => c,
+        Err(usage) => {
+            eprintln!("{usage}");
+            std::process::exit(2);
+        }
+    };
+    match cmd {
+        cli::CliCommand::Run => {}
+        cli::CliCommand::Help => {
+            println!("{}", cli::USAGE);
+            return Ok(());
+        }
+        other => {
+            #[cfg(windows)]
+            {
+                crate::service::dispatch_cli(other).await;
+            }
+            #[cfg(not(windows))]
+            {
+                eprintln!("error: {:?} is only supported on Windows", other);
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Load .env file (sibling of Cargo.toml, i.e. project root at runtime)
     let _ = dotenvy::dotenv();
 
