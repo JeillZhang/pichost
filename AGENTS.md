@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.23.0` — Native packaging + software repos (deb/rpm/Homebrew/winget: FHS-layout packages, API static serving via `PICHOST_STATIC_DIR`, apt/rpm repos + Homebrew tap + winget manifest published by release CI) + SQLite-first deployment (single-directory install: DB + storage under `<INSTALL_DIR>/data`, sqlite default mode) + SQLite lite mode (dual DB modes: standard PostgreSQL+Redis / lightweight SQLite with embedded in-process worker, zero external dependencies) + image detail zoom viewer (fullscreen lightbox: wheel/drag/pinch zoom, toolbar + keyboard controls) + responsive layout complete (mobile-first: hamburger nav, category sheet, touch menus, bottom-sheet dialogs, cardified admin tables) + i18n complete (en/zh-CN via i18next + LanguageSwitcher, localized API errors with error codes (`{"error","code"}` envelope + Accept-Language negotiation), deployment language config (`PICHOST_I18N_LANGUAGE` + admin config hot reload).
+- Version: `0.24.0` — Native packaging + software repos (deb/rpm/Homebrew/winget: FHS-layout packages, API static serving via `PICHOST_STATIC_DIR`, apt/rpm repos + Homebrew tap + winget manifest published by release CI) + SQLite-first deployment (single-directory install: DB + storage under `<INSTALL_DIR>/data`, sqlite default mode) + SQLite lite mode (dual DB modes: standard PostgreSQL+Redis / lightweight SQLite with embedded in-process worker, zero external dependencies) + image detail zoom viewer (fullscreen lightbox: wheel/drag/pinch zoom, toolbar + keyboard controls) + responsive layout complete (mobile-first: hamburger nav, category sheet, touch menus, bottom-sheet dialogs, cardified admin tables) + i18n complete (en/zh-CN via i18next + LanguageSwitcher, localized API errors with error codes (`{"error","code"}` envelope + Accept-Language negotiation), deployment language config (`PICHOST_I18N_LANGUAGE` + admin config hot reload)) + first-run setup wizard (terminal wizard on initial startup: JWT/public URL/language written to `.env` + first admin creation, `--setup` force flag, non-TTY WARN skip).
 
 ## Key Commands
 
@@ -15,7 +15,7 @@
 | Check only api | `cargo check -p pichost-api` | Fast compile-check |
 | Test all | `cargo test --workspace` | 416 pass without infra; 688 pass, 0 fail with `-- --include-ignored` (Docker PG+Redis+MinIO, see Testing) |
 | Lint | `cargo clippy --workspace -- -D warnings` | Zero warnings required |
-| Run API server | `cargo run -p pichost-api` | Standard mode requires PostgreSQL + Redis; lite mode: `PICHOST_DATABASE_MODE=sqlite` + `PICHOST_DATABASE_URL=sqlite:///path/pichost.db` (embedded worker, no Redis) |
+| Run API server | `cargo run -p pichost-api` | Standard mode requires PostgreSQL + Redis; lite mode: `PICHOST_DATABASE_MODE=sqlite` + `PICHOST_DATABASE_URL=sqlite:///path/pichost.db` (embedded worker, no Redis). First start with no users + interactive TTY runs the setup wizard; force with `--setup` (non-TTY skips with a warning) |
 | Frontend dev | `cd web-ui && npm run dev` | Vite proxies `/api`, `/u` → `localhost:3000` |
 | Frontend build | `cd web-ui && npm run build` | `tsc -b && vite build` |
 | Verify release pkg | `bash scripts/verify-release.sh` | Local simulation of release.yml build→package→install dry-run (2-arg contract, asserts default sqlite mode); run before tagging `v*` |
@@ -51,13 +51,14 @@
   - `PICHOST_I18N_LANGUAGE` — deployment default UI language (default `"en"`, e.g. `"zh-CN"`)
   - `PICHOST_I18N_LOCALES_DIR` — optional external locale override dir (per-language subdirs, merge-override)
   - `PICHOST_STATIC_DIR` — static frontend assets dir served by the API (default `./dist`; unset or missing dir → not mounted, e.g. FHS packages point it at `/usr/share/pichost/dist`)
+  - `PICHOST_ENV_FILE` — first-run setup wizard `.env` write target override (probe order: `PICHOST_ENV_FILE` → `/etc/pichost/.env` → CWD `.env`)
 - **Config separator**: `.env.example` uses `__` double-underscore for nested keys (`PICHOST_AUTH__JWT_SECRET` → `auth.jwt_secret`). Single `_` also works for 2-segment flat keys (`PICHOST_DATABASE_URL` → `database.url`). Docker compose (both `docker-compose.yml` and `docker-compose.prod.yml`) uses single `_`.
 - No `config.toml` in repo — env vars are the intended override mechanism.
 
 ## CRATE BOUNDARIES
 
 - **pichost-core** (`pichost_core`): Domain models, config, error types, `StorageBackend` trait + `LocalStorage`/`RustfsStorage`/`GitStorage` impls + `StorageRouter`. Also `db` module (per-driver `create_pg_pool`/`create_sqlite_pool`, `run_pg_migrations`/`run_sqlite_migrations`, `DbType`/`DbRow`/`DbQueryResult` markers, `db_error_kind` mapping) and `state` module (5 state traits — `Queue`/`Blacklist`/`RateLimiter`/`InviteStore`/`Cache` — with SQLite impls `SqliteQueue`/`SqliteBlacklist`/`SqliteRateLimiter`/`SqliteInviteStore` + `NoopCache`). No web/framework deps.
-- **pichost-api** (`pichost_api`): Axum server — routes, middleware, services, DB pool, Redis cache, system config service (config.toml read/write, backups, connection tests). Generic `AppState<DB: DbType>` + `configure_app<DB>` router assembly; `run_with::<DB>()` (standard, Redis state components) / `run_with_sqlite` (lite mode, SQLite components + embedded worker). Redis trait impls (`RedisBlacklist`/`RedisRateLimiter`/`RedisInviteStore`/`Cache`) live here. Depends on `pichost-core`. Extra deps: `toml_edit` (0.22), `regex` (1), `thiserror`, `tempfile` (dev).
+- **pichost-api** (`pichost_api`): Axum server — routes, middleware, services, DB pool, Redis cache, system config service (config.toml read/write, backups, connection tests), first-run setup wizard module (`setup/` — prompts/env_writer/admin + `--setup` CLI flag). Generic `AppState<DB: DbType>` + `configure_app<DB>` router assembly; `run_with::<DB>()` (standard, Redis state components) / `run_with_sqlite` (lite mode, SQLite components + embedded worker). Redis trait impls (`RedisBlacklist`/`RedisRateLimiter`/`RedisInviteStore`/`Cache`) live here. Depends on `pichost-core`. Extra deps: `toml_edit` (0.22), `regex` (1), `thiserror`, `tempfile` (dev).
 - **pichost-worker**: Background image processing — thumbnail/WebP generation via Redis queue. Library + binary: `pichost_worker::process_task` is exposed so lite mode can run the worker embedded in the API process (`RedisQueue` lives here). Depends on `pichost-core`.
 
 ## Architecture Notes
@@ -133,6 +134,11 @@
 - Admin config API (6 JWT+Admin endpoints under `/admin/config`): GET current config (sensitive fields masked), PUT write with auto-backup, POST test connections, POST backup, GET backups list, POST restore.
 - Frontend: `SystemConfig.tsx` component (Database/Redis/Server/Security/Localization/Backups sections, test-connection buttons, save/restore) wired to a "Config" tab in the Admin page.
 - Design tokens `--color-success` / `--color-success-hover` / `--color-success-subtle` added to theme.css.
+
+### First-run setup wizard
+- Module `pichost-api/src/setup/` (declared `pub mod setup` in lib.rs): `prompts.rs` (`Prompt` trait + `DialoguerPrompts`), `env_writer.rs` (idempotent `.env` upsert — replaces/keeps existing keys, probes `PICHOST_ENV_FILE` → `/etc/pichost/.env` → CWD `.env`), `admin.rs` (first-admin creation flow reusing `services::user_ops` helpers).
+- `pichost-api --setup` CLI flag (cli.rs) forces the wizard; otherwise it runs on first start when `user_count == 0`. Behavior: `maybe_run` → `should_run_wizard(user_count == 0 || forced)` → `decide_tty`: TTY → run; non-TTY + forced → error; non-TTY (systemd/Docker) → `setup.warn_notty` WARN log and skip (register via web UI).
+- Wizard phase 1 writes `PICHOST_I18N_LANGUAGE` (+ generates `PICHOST_AUTH__JWT_SECRET` if missing/invalid, prompts `PICHOST_SERVER__PUBLIC_URL` if unset) to the `.env` target, reloads config + i18n, then creates the first admin account if no users exist. No API endpoint changes — startup-flow only.
 
 ### 国际化 (i18n)
 - **Backend module** (`pichost-core/src/i18n.rs`): `Language` enum (En/ZhCN), `I18n` struct with `t(locale, key)` / `t_args(locale, key, args)` fallback chain (locale → en → key). Global singleton `RwLock<Option<Arc<I18n>>>` with lazy 5s mtime hot-check via `I18n::global()`, plus `init_global`/`reload_global`/`maybe_reload`.
