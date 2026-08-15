@@ -125,35 +125,34 @@ git commit -m "feat: add --setup cli flag and dialoguer dependency"
 
 ---
 
-### Task T1: Extract user-creation helpers into `services/user_ops.rs`
+### Task T1: Create `services/user_ops.rs` helper module
+
+**Breaking:** false(纯新增模块,无消费方改动)
 
 **Files:**
 - Create: `pichost-api/src/services/user_ops.rs`(含 `#[cfg(test)]` 单元测试)
 - Modify: `pichost-api/src/services/mod.rs`(声明 `pub mod user_ops;`)
-- Modify: `pichost-api/src/routes/auth.rs`(3 个私有助手改为薄包装)
-- Modify: `pichost-api/src/routes/users.rs`(`hash_new_password` 改为薄包装)
 
 **Interfaces:**
-- Produces(供 T5 消费):
+- Produces(供 T2/T6 消费):
   - `pub fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error>`
-  - `pub async fn count_users<DB: DbType>(pool: &Pool<DB>) -> Result<i64, sqlx::Error>`(where 子句同 auth.rs 现状)
-  - `pub async fn insert_user<DB: DbType>(pool: &Pool<DB>, username: &str, email: &Option<String>, hash: &str, is_admin: bool, storage_quota: Option<i64>) -> Result<Uuid, sqlx::Error>`(where 子句同 auth.rs 现状;唯一冲突经 `db_error_kind` 判定)
+  - `pub async fn count_users<DB: DbType>(pool: &Pool<DB>) -> Result<i64, sqlx::Error>`(where 子句同 auth.rs `count_existing_users` 现状)
+  - `pub async fn insert_user<DB: DbType>(pool: &Pool<DB>, username: &str, email: &Option<String>, hash: &str, is_admin: bool, storage_quota: Option<i64>) -> Result<Uuid, sqlx::Error>`(where 子句同 auth.rs `insert_user` 现状;唯一冲突经 `db_error_kind` 判定)
 - Consumes: 无(纯提取)
 
 **Acceptance Criteria:**
 - given: `hash_password("secret123")`
   when: 调用
   then: 返回以 `$argon2id$` 开头的字符串,且可用同密码 `verify_password` 通过、错密码失败
-- given: 注册/改密集成测试套件(既有 auth_test / users_test)
-  when: 提取后全量运行
-  then: 全部通过(行为零变化)
-- given: `insert_user` 插入重复用户名
-  when: 调用并检查 `db_error_kind(&err)`
-  then: 返回 `DbErrorKind::UniqueViolation`
+- given: 新模块编译
+  when: `cargo check -p pichost-api`
+  then: 零错误(泛型函数在 PG/SQLite 双驱动下均可实例化)
+- given: `cargo test -p pichost-api user_ops`
+  when: 运行
+  then: 单元测试全 PASS
 
 **Regression:**
-- `cargo test -p pichost-api --test auth_test`
-- `cargo test -p pichost-api --test users_test`
+- `cargo test -p pichost-api`(crate 编译与既有测试零回归)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -255,6 +254,58 @@ where
 }
 ```
 
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cargo test -p pichost-api user_ops && cargo clippy --workspace -- -D warnings`
+Expected: 1 PASS,clippy 零警告
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add pichost-api/src/services/user_ops.rs pichost-api/src/services/mod.rs
+git commit -m "refactor: add shared user creation helpers in services/user_ops"
+```
+
+**Verify:**
+- `cargo test -p pichost-api user_ops -- --exact`
+- `cargo clippy --workspace -- -D warnings`
+
+---
+
+### Task T2: Rewire auth and users routes to use `user_ops` helpers
+
+**Breaking:** false(行为保持重构;路由签名与错误信封逐字节不变)
+
+**Files:**
+- Modify: `pichost-api/src/routes/auth.rs`(3 个私有助手改为薄包装)
+- Modify: `pichost-api/src/routes/users.rs`(`hash_new_password` 改为薄包装)
+
+**Interfaces:**
+- Consumes: T1(`user_ops::{hash_password, count_users, insert_user}`)
+- Produces: 无新公共接口(行为与现状完全一致)
+
+**Acceptance Criteria:**
+- given: 既有注册集成测试(auth_test)
+  when: 提取后全量运行
+  then: 全部通过(注册/邀请码/首个用户 auto-admin 行为零变化)
+- given: 既有改密集成测试(users_test)
+  when: 运行
+  then: 全部通过(密码规则/校验行为零变化)
+- given: `insert_user` 包装层错误映射
+  when: 触发 UniqueViolation
+  then: 仍返回 409 + `auth.username_exists`(由 auth_test 重复用户名用例覆盖)
+
+**Regression:**
+- `cargo test -p pichost-api --test auth_test`
+- `cargo test -p pichost-api --test users_test`
+
+- [ ] **Step 1: 运行既有回归建立绿基线(无新测试——行为必须逐字节保持,以既有测试为规格)**
+
+Run: `cargo test -p pichost-api --test auth_test && cargo test -p pichost-api --test users_test`
+Expected: 全 PASS(若此处 FAIL,先修复既有问题再继续)
+
+- [ ] **Step 2: 实现薄包装(实现即本任务的"impl_code";第 1 步绿基线即其规格)**
+
 `pichost-api/src/routes/auth.rs` 三个私有助手替换为薄包装(签名不变,错误信封映射留在原层):
 
 ```rust
@@ -298,7 +349,7 @@ async fn insert_user<DB: DbType>(
     locale: Language,
 ) -> Result<Uuid, (StatusCode, Json<serde_json::Value>)>
 where
-    /* 保持原 where 子句不变(逐字保留) */
+    /* 保持原 where 子句不变(逐字保留,见 auth.rs L246-257) */
 {
     crate::services::user_ops::insert_user(
         &state.pool,
@@ -333,29 +384,31 @@ fn hash_new_password(
 }
 ```
 
-删除 users.rs 不再使用的 `SaltString`/`PasswordHasher`/`OsRng` import(保留 `PasswordHash`/`Argon2`/`PasswordVerifier` 供 `verify_current_password` 使用)。
+删除 users.rs 不再使用的 `SaltString`/`PasswordHasher`/`OsRng` import(保留 `PasswordHash`/`Argon2`/`PasswordVerifier` 供 `verify_current_password` 使用;该组 import 位于同一行,按需裁剪)。
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 3: Run tests to verify they pass**
 
 Run: `cargo test -p pichost-api --test auth_test && cargo test -p pichost-api --test users_test && cargo test -p pichost-api user_ops && cargo clippy --workspace -- -D warnings`
 Expected: 全 PASS(198 路由测试零回归),clippy 零警告
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add pichost-api/src/services/user_ops.rs pichost-api/src/services/mod.rs pichost-api/src/routes/auth.rs pichost-api/src/routes/users.rs
-git commit -m "refactor: extract user creation helpers into services/user_ops"
+git add pichost-api/src/routes/auth.rs pichost-api/src/routes/users.rs
+git commit -m "refactor: rewire auth and users routes to shared user_ops helpers"
 ```
 
 **Verify:**
-- `cargo test -p pichost-api user_ops -- --exact`
 - `cargo test -p pichost-api --test auth_test`
 - `cargo test -p pichost-api --test users_test`
+- `cargo test -p pichost-api user_ops -- --exact`
 - `cargo clippy --workspace -- -D warnings`
 
 ---
 
-### Task T2: Add `Prompt` trait with dialoguer and mock implementations
+### Task T3: Add `Prompt` trait with dialoguer and mock implementations
+
+**Breaking:** false(纯新增模块;lib.rs 仅追加模块声明)
 
 **Files:**
 - Create: `pichost-api/src/setup/mod.rs`(仅声明 `pub mod prompts;`)
@@ -363,7 +416,7 @@ git commit -m "refactor: extract user creation helpers into services/user_ops"
 - Modify: `pichost-api/src/lib.rs`(声明 `pub mod setup;`)
 
 **Interfaces:**
-- Produces(供 T5/T6 消费,均为 `pub` 以便 tests/ 外部集成测试使用):
+- Produces(供 T6/T7 消费,均为 `pub` 以便 tests/ 外部集成测试使用):
   - `pub trait Prompt` — `select(&mut self, prompt, items: &[&str], default: usize) -> Result<usize, Box<dyn Error + Send + Sync>>`、`input(&mut self, prompt, default: Option<&str>) -> Result<String, Box<dyn Error + Send + Sync>>`、`password(&mut self, prompt, confirm_prompt: Option<&str>) -> Result<String, Box<dyn Error + Send + Sync>>`、`confirm(&mut self, prompt, default: bool) -> Result<bool, Box<dyn Error + Send + Sync>>`
   - `pub struct DialoguerPrompts`(impl Prompt,委托 dialoguer 0.12)
   - `pub enum MockReply { Select(usize), Input(String), Password(String), Confirm(bool) }`
@@ -602,7 +655,9 @@ git commit -m "feat: add Prompt trait with dialoguer and mock implementations"
 
 ---
 
-### Task T3: Add `EnvWriter` for idempotent `.env` updates
+### Task T4: Add `EnvWriter` for idempotent `.env` updates
+
+**Breaking:** false(纯新增模块)
 
 **Files:**
 - Modify: `pichost-api/src/setup/mod.rs`(声明 `pub mod env_writer;`)
@@ -610,7 +665,7 @@ git commit -m "feat: add Prompt trait with dialoguer and mock implementations"
 - Test: `pichost-api/tests/env_writer_test.rs`
 
 **Interfaces:**
-- Produces(供 T5 消费,`pub` 供外部测试):
+- Produces(供 T6 消费,`pub` 供外部测试):
   - `pub fn upsert_env(content: &str, updates: &[(&str, &str)]) -> String` — 删除目标键的单/双下划线变体行,保留其他行,末尾追加规范形式
   - `pub fn probe_env_path(explicit: Option<&Path>, system_dir: &Path, cwd: &Path) -> Option<PathBuf>` — explicit 优先(即使不存在也返回);其次 `system_dir/.env` 存在;其次 `cwd/.env` 存在;否则 None
   - `pub fn validate_jwt_secret(secret: &str) -> bool` — `len() >= 32`
@@ -794,7 +849,11 @@ pub fn apply_env_file(path: &Path, updates: &[(&str, &str)]) -> io::Result<()> {
         String::new()
     };
     let new_content = upsert_env(&content, updates);
-    let tmp = path.with_extension("env.tmp");
+    // 显式 .env.tmp 临时名(避免 with_extension 对点文件的非预期拼接)
+    let tmp = path.with_extension("tmp");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(&tmp, new_content)?;
     #[cfg(unix)]
     {
@@ -823,7 +882,9 @@ git commit -m "feat: add EnvWriter for idempotent .env updates"
 
 ---
 
-### Task T4: Add `setup.*` i18n message keys (en + zh-CN)
+### Task T5: Add `setup.*` i18n message keys (en + zh-CN)
+
+**Breaking:** false(i18n 目录新增键,键集相等性测试把关)
 
 **Files:**
 - Modify: `pichost-core/src/i18n/locales/en/messages.toml`(追加 20 键)
@@ -831,7 +892,7 @@ git commit -m "feat: add EnvWriter for idempotent .env updates"
 - Test: `pichost-core/src/i18n.rs`(追加 1 个键集断言测试)
 
 **Interfaces:**
-- Produces(供 T5 消费): `setup.welcome`、`setup.language`、`setup.jwt_generated`、`setup.jwt_configured`、`setup.public_url`、`setup.public_url_skip`、`setup.admin_confirm`、`setup.admin_skip`、`setup.username`、`setup.password`、`setup.password_confirm`、`setup.email`、`setup.invalid_username`、`setup.invalid_url`、`setup.invalid_email`、`setup.invalid_password`、`setup.username_taken`、`setup.complete`、`setup.warn_notty`、`setup.env_path`
+- Produces(供 T6 消费): `setup.welcome`、`setup.language`、`setup.jwt_generated`、`setup.jwt_configured`、`setup.public_url`、`setup.public_url_skip`、`setup.admin_confirm`、`setup.admin_skip`、`setup.username`、`setup.password`、`setup.password_confirm`、`setup.email`、`setup.invalid_username`、`setup.invalid_url`、`setup.invalid_email`、`setup.invalid_password`、`setup.username_taken`、`setup.complete`、`setup.warn_notty`、`setup.env_path`
 
 **Acceptance Criteria:**
 - given: 两语言文件
@@ -868,7 +929,7 @@ fn setup_keys_present_in_both_locales() {
 }
 ```
 
-(若 `parse_toml` 不在测试模块作用域,按 i18n.rs 既有测试的引用方式引入;`EMBEDDED_EN`/`EMBEDDED_ZH` 为模块顶层常量。)
+(i18n.rs 测试模块内已 `use super::*`(既有模式);`parse_toml` 与 `EMBEDDED_EN`/`EMBEDDED_ZH` 均为模块顶层可见,直接引用即可。)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -945,7 +1006,9 @@ git commit -m "feat: add setup.* i18n keys for first-run wizard"
 
 ---
 
-### Task T5: Implement wizard orchestration and admin creation
+### Task T6: Implement wizard orchestration and admin creation
+
+**Breaking:** false(纯新增模块 + 新测试文件)
 
 **Files:**
 - Modify: `pichost-api/src/setup/mod.rs`(编排:maybe_run / run_wizard / phase1_config / resolve_env_path)
@@ -953,8 +1016,8 @@ git commit -m "feat: add setup.* i18n keys for first-run wizard"
 - Test: `pichost-api/tests/setup_wizard_test.rs`(SQLite 内存池,无需 Docker)
 
 **Interfaces:**
-- Consumes: T1(`user_ops::{count_users, insert_user, hash_password}`)、T2(`Prompt`/`DialoguerPrompts`/`MockPrompts`/`MockReply`)、T3(`env_writer::{apply_env_file, generate_jwt_secret, probe_env_path, validate_jwt_secret, validate_public_url}`)、T4(`setup.*` 键)
-- Produces(供 T6 消费,`pub`):
+- Consumes: T1、T2(`user_ops::{count_users, insert_user, hash_password}`)、T3(`Prompt`/`DialoguerPrompts`/`MockPrompts`/`MockReply`)、T4(`env_writer::{apply_env_file, generate_jwt_secret, probe_env_path, validate_jwt_secret, validate_public_url}`)、T5(`setup.*` 键)
+- Produces(供 T7 消费,`pub`):
   - `pub enum TtyDecision { Run, SkipWarn, ForcedError }`
   - `pub fn decide_tty(forced: bool, is_tty: bool) -> Result<TtyDecision, &'static str>`
   - `pub fn should_run_wizard(user_count: i64, forced: bool) -> bool`
@@ -997,6 +1060,7 @@ use pichost_api::services::user_ops;
 use pichost_core::config::AppConfig;
 use pichost_core::db::{create_sqlite_pool, run_sqlite_migrations};
 use pichost_core::i18n::Language;
+use serial_test::serial;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
@@ -1013,6 +1077,8 @@ fn base_config() -> AppConfig {
     cfg
 }
 
+/// 两个 run_wizard 测试均写/删全局 env(PICHOST_ENV_FILE 等),必须串行,
+/// 避免并发互踩(serial_test 为既有 dev-dependency,AGENTS.md 约定)。
 #[test]
 fn gate_pure_functions() {
     assert!(should_run_wizard(0, false));
@@ -1025,6 +1091,7 @@ fn gate_pure_functions() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
 async fn run_wizard_writes_env_and_creates_admin() {
     let pool = sqlite_pool().await;
     let dir = TempDir::new().unwrap();
@@ -1063,6 +1130,7 @@ async fn run_wizard_writes_env_and_creates_admin() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
 async fn run_wizard_skips_admin_when_users_exist() {
     let pool = sqlite_pool().await;
     let dir = TempDir::new().unwrap();
@@ -1141,7 +1209,18 @@ pub async fn create_admin_flow<DB: DbType>(
     prompts: &mut dyn Prompt,
 ) -> Result<bool, Box<dyn Error + Send + Sync>>
 where
-    /* where 子句与 user_ops::insert_user 相同(逐字复制) */
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     let i18n = I18n::global();
     if !prompts.confirm(&i18n.t(lang, "setup.admin_confirm"), true)? {
@@ -1246,7 +1325,19 @@ pub async fn maybe_run<DB: DbType>(
     forced: bool,
 ) -> Result<Option<AppConfig>, Box<dyn Error + Send + Sync>>
 where
-    /* where 子句同 T1 user_ops 函数(逐字复制) */
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    (i64,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     if !should_run_wizard(user_ops::count_users(pool).await?, forced) {
         return Ok(None);
@@ -1272,7 +1363,7 @@ pub async fn run_wizard<DB: DbType>(
     prompts: &mut dyn Prompt,
 ) -> Result<Option<AppConfig>, Box<dyn Error + Send + Sync>>
 where
-    /* where 子句同 maybe_run(逐字复制) */
+    /* where 子句同 maybe_run(上方逐字复制,含 uuid::Uuid 与 (i64,) 绑定) */
 {
     phase1_config(config, lang, prompts)?;
     let new_config = load_config()?;
@@ -1358,7 +1449,9 @@ git commit -m "feat: first-run wizard orchestration and admin creation"
 
 ---
 
-### Task T6: Wire wizard into PG and sqlite startup paths
+### Task T7: Wire wizard into PG and sqlite startup paths
+
+**Breaking:** false(`run_lite_from_env()` 无参包装保留,Windows service.rs 调用点零改动;新增 `run_lite_from_env_forced`)
 
 **Files:**
 - Modify: `pichost-api/src/main.rs`(CLI 分发 + run_app 双分支接线)
@@ -1366,7 +1459,7 @@ git commit -m "feat: first-run wizard orchestration and admin creation"
 - Test: `pichost-api/tests/setup_wizard_test.rs`(追加 maybe_run 入口 3 测)
 
 **Interfaces:**
-- Consumes: T5(`setup::maybe_run`)
+- Consumes: T6(`setup::maybe_run`)
 - Produces:
   - `pub async fn run_lite_from_env_forced(forced: bool) -> Result<(), Box<dyn Error>>`(lib.rs;原 `run_lite_from_env()` 改为 `run_lite_from_env_forced(false).await` 一行包装,Windows service.rs 调用点零改动)
   - `main.rs`:`Run → run_app(false)`、`Setup → run_app(true)`;PG 分支 `maybe_run` 后 `cfg.unwrap_or(config)` 传入 `run_with`;sqlite 分支 `run_lite_from_env_forced(forced)`
@@ -1459,7 +1552,12 @@ pub async fn run_lite_from_env_forced(forced: bool) -> Result<(), Box<dyn std::e
 
 ```rust
 use pichost_api::{app, cache, db, run_lite_from_env_forced};
-// ...其余 import 不变
+use pichost_core::config::{load_config, DatabaseMode};
+use pichost_core::i18n::{I18n, Language};
+
+mod cli;
+#[cfg(windows)]
+mod service;
 
 match cmd {
     cli::CliCommand::Run => return run_app(false).await,
@@ -1514,7 +1612,11 @@ git commit -m "feat: wire first-run wizard into startup paths"
 
 ---
 
-### Task T7: Bump version to 0.24.0
+### Task T8: Bump version to 0.24.0
+
+**Breaking:** false(版本元数据变更)
+
+> TDD 豁免说明:版本变更无红-绿测试周期,以 `scripts/tests/version_check_test.sh` 为绿门(既有脚本)。
 
 **Files:**
 - Modify: `Cargo.toml`(workspace `version = "0.23.0"` → `"0.24.0"`)
@@ -1595,7 +1697,11 @@ git commit -m "chore: bump version to 0.24.0"
 
 ---
 
-### Task T8: Sync docs and run full verification
+### Task T9: Sync docs and run full verification
+
+**Breaking:** false(纯文档)
+
+> TDD 豁免说明:文档同步无红-绿测试周期,以 `scripts/tests/docs_check_test.sh` + 全量门禁为绿门(既有脚本)。
 
 **Files:**
 - Modify: `README.md`(Quick Start 首次启动向导说明;配置表新增 `PICHOST_ENV_FILE`;Features 勾选)
@@ -1603,7 +1709,7 @@ git commit -m "chore: bump version to 0.24.0"
 - Modify: `.omo/summary/summary_and_next.md`(新阶段小节 + 待实施表)
 
 **Interfaces:**
-- Consumes: T7(版本 0.24.0)
+- Consumes: T8(版本 0.24.0)
 - Produces: 文档同步提交(`docs: auto-sync ...` 单提交,AGENTS.md 强制)
 
 **Acceptance Criteria:**
