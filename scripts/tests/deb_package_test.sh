@@ -44,4 +44,16 @@ secret="${jwt#*=}"; secret="${secret%\"}"; secret="${secret#\"}"
 # ⑤ postinst 内容断言
 grep -q 'source /usr/share/pichost/install-lib.sh' "$ROOT/packaging/deb/postinst" \
   || { echo "FAIL: postinst missing lib source"; exit 1; }
+
+# ⑥ prerm/postrm 语法与分支断言
+bash -n "$ROOT/packaging/deb/prerm"
+bash -n "$ROOT/packaging/deb/postrm"
+grep -q 'systemctl stop pichost-api pichost-worker' "$ROOT/packaging/deb/prerm" \
+  || { echo "FAIL: prerm missing stop"; exit 1; }
+grep -q 'purge' "$ROOT/packaging/deb/postrm" \
+  || { echo "FAIL: postrm missing purge branch"; exit 1; }
+grep -q 'rm -rf /var/lib/pichost' "$ROOT/packaging/deb/postrm" \
+  || { echo "FAIL: postrm missing data wipe"; exit 1; }
+grep -q 'upgrade' "$ROOT/packaging/deb/postrm" \
+  || { echo "FAIL: postrm missing upgrade guard"; exit 1; }
 echo "deb_package_test.sh PASS"

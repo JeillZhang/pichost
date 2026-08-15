@@ -1,0 +1,15 @@
+#!/bin/bash
+set -e
+# deb maintainer script (postrm):remove 清单元;purge 清数据;upgrade 不动
+case "$1" in
+    remove)
+        rm -f /lib/systemd/system/pichost-api.service /lib/systemd/system/pichost-worker.service
+        systemctl daemon-reload 2>/dev/null || true
+        ;;
+    purge)
+        rm -rf /var/lib/pichost
+        rm -f /etc/pichost/.env
+        rm -f /lib/systemd/system/pichost-api.service /lib/systemd/system/pichost-worker.service
+        ;;
+esac
+exit 0
