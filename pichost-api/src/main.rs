@@ -14,7 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     match cmd {
-        cli::CliCommand::Run => {}
+        cli::CliCommand::Run => return run_app().await,
         cli::CliCommand::Help => {
             println!("{}", cli::USAGE);
             return Ok(());
@@ -31,7 +31,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+}
 
+async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
     // Load .env file (sibling of Cargo.toml, i.e. project root at runtime)
     let _ = dotenvy::dotenv();
 
