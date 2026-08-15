@@ -41,4 +41,15 @@ grep -q -- '--install-service' "$NSI" || { echo "FAIL: nsi install-service missi
 grep -q -- '--uninstall-service' "$NSI" || { echo "FAIL: nsi uninstall-service missing"; exit 1; }
 grep -q 'ProgramData' "$NSI" || { echo "FAIL: nsi data retention missing"; exit 1; }
 grep -q 'RequestExecutionLevel' "$NSI" || { echo "FAIL: nsi admin missing"; exit 1; }
+
+# publish-repo job 与 tap 更新断言
+grep -q 'publish-repo' "$WF" || { echo "FAIL: publish job missing"; exit 1; }
+grep -q 'APT_GPG_PRIVATE_KEY' "$WF" || { echo "FAIL: gpg secret missing"; exit 1; }
+grep -q 'publish-repo.sh' "$WF" || { echo "FAIL: publish script call missing"; exit 1; }
+grep -q 'peaceiris/actions-gh-pages' "$WF" || { echo "FAIL: pages action missing"; exit 1; }
+grep -q 'jeillzhang/pichost-repo' "$WF" || { echo "FAIL: pages repo missing"; exit 1; }
+grep -q 'PICHOST_REPO_PAT' "$WF" || { echo "FAIL: PAT secret missing"; exit 1; }
+grep -q 'homebrew-tap' "$WF" || { echo "FAIL: tap update missing"; exit 1; }
+grep -q '__SHA256__' "$WF" || { echo "FAIL: formula sha substitution missing"; exit 1; }
+grep -q 'testing' "$WF" || { echo "FAIL: prerelease suite routing missing"; exit 1; }
 echo "release_ci_test.sh PASS"

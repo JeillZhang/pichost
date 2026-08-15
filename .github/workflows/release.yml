@@ -158,6 +158,61 @@ jobs:
         with:
           name: pichost-windows
           path: PicHost-setup-*.exe
+  publish-repo:
+    name: Publish apt/rpm repos + homebrew tap
+    needs: [build, macos, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Install repo tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq dpkg-dev createrepo-c gnupg2
+      - name: Import GPG signing key
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.APT_GPG_PASSPHRASE }}
+          git_user_signingkey: true
+      - name: Determine suite
+        id: suite
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          case "$TAG" in *-rc.*|*-beta*|*-alpha*|*-pre*) echo "suite=testing";; *) echo "suite=stable";; esac \
+            >> "$GITHUB_OUTPUT"
+      - name: Assemble and sign repositories
+        run: |
+          mkdir -p debs rpms/x86_64 rpms/aarch64
+          find artifacts -name '*.deb' -exec cp {} debs/ \;
+          find artifacts -name '*-amd64.rpm' -exec cp {} rpms/x86_64/ \;
+          find artifacts -name '*-arm64.rpm' -exec cp {} rpms/aarch64/ \;
+          GPG_SIGN=1 GPG_FINGERPRINT="${{ steps.import-gpg.outputs.fingerprint }}" \
+            bash scripts/publish-repo.sh repo-out debs rpms "${{ steps.suite.outputs.suite }}"
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          external_repository: jeillzhang/pichost-repo
+          publish_branch: gh-pages
+          publish_dir: ./repo-out
+          external_token: ${{ secrets.PICHOST_REPO_PAT }}
+          enable_jekyll: false
+      - name: Update homebrew tap formula
+        env:
+          PICHOST_REPO_PAT: ${{ secrets.PICHOST_REPO_PAT }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          SHA="$(sha256sum artifacts/pichost-darwin-universal/*.tar.gz | cut -d' ' -f1)"
+          git clone "https://x-access-token:${PICHOST_REPO_PAT}@github.com/jeillzhang/homebrew-tap.git" tap
+          sed -e "s|__TAG__|${TAG}|g" \
+              -e "s|__VERSION__|${VERSION}|g" \
+              -e "s|__SHA256__|${SHA}|g" \
+              packaging/homebrew/pichost.rb.tpl > tap/pichost.rb
+          cd tap && git config user.email "ci@users.noreply.github.com" \
+            && git config user.name "pichost-ci" \
+            && git add pichost.rb && git commit -m "pichost ${VERSION}" \
+            && git push origin main
   release:
     name: Create Release
     needs: [build, macos, windows]
