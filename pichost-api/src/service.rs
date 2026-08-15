@@ -86,15 +86,14 @@ fn install_service() -> windows_service::Result<()> {
     };
     use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
     let exe = std::env::current_exe().expect("current exe");
-    let bin = format!("\"{}\" --service", exe.display());
     let info = ServiceInfo {
         name: SERVICE_NAME.into(),
         display_name: "PicHost".into(),
         service_type: ServiceType::OWN_PROCESS,
         start_type: ServiceStartType::AutoStart,
         error_control: ServiceErrorControl::Normal,
-        binary_path: bin.into(),
-        launch_arguments: vec![],
+        executable_path: exe,
+        launch_arguments: vec!["--service".into()],
         dependencies: vec![],
         account_name: None,
         account_password: None,
@@ -131,56 +130,70 @@ fn ensure_static_dir() {
 }
 
 #[cfg(windows)]
-fn run_service() -> windows_service::Result<()> {
+windows_service::define_windows_service!(ffi_service_main, service_main);
+
+#[cfg(windows)]
+fn service_main(arguments: Vec<std::ffi::OsString>) {
+    if let Err(e) = run_service_inner(arguments) {
+        eprintln!("error: service run failed: {e}");
+    }
+}
+
+#[cfg(windows)]
+fn run_service_inner(_arguments: Vec<std::ffi::OsString>) -> windows_service::Result<()> {
+    use std::time::Duration;
     use windows_service::service::{
-        ServiceControl, ServiceControlAccept, ServiceState, ServiceType,
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
     };
-    use windows_service::service_control_handler::{
-        self, ServiceControlHandlerResult, ServiceStatus,
+    use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
+
+    let status = ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: ServiceState::StartPending,
+        controls_accepted: ServiceControlAccept::STOP,
+        exit_code: ServiceExitCode::NO_ERROR,
+        checkpoint: 0,
+        wait_hint: Duration::from_secs(5),
+        process_id: None,
     };
-    use windows_service::service_dispatcher;
+    let handler = service_control_handler::register(SERVICE_NAME, |event| match event {
+        ServiceControl::Stop => ServiceControlHandlerResult::NoError,
+        _ => ServiceControlHandlerResult::NotImplemented,
+    })?;
+    handler.set_service_status(status.clone())?;
 
-    fn main_service() -> windows_service::Result<()> {
-        let status = ServiceStatus {
-            service_type: ServiceType::OWN_PROCESS,
-            current_state: ServiceState::StartPending,
-            controls_accepted: ServiceControlAccept::STOP,
-            exit_code: 0,
-            checkpoint: 0,
-            wait_hint: 5000,
-            process_id: None,
-        };
-        let handler = service_control_handler::register(SERVICE_NAME, |event| match event {
-            ServiceControl::Stop => ServiceControlHandlerResult::NoError,
-            _ => ServiceControlHandlerResult::NotImplemented,
-        })?;
-        handler.set_service_status(status)?;
-
-        let base = service_data_dir();
-        let env_path = base.join(".env");
-        let data_dir = base.join("data");
-        if let Err(e) = ensure_service_env(&env_path, &data_dir) {
-            eprintln!("error: env bootstrap failed: {e}");
-        }
-        if env_path.exists() {
-            for line in std::fs::read_to_string(&env_path).unwrap_or_default().lines() {
-                if let Some((k, v)) = line.split_once('=') {
-                    std::env::set_var(k.trim(), v.trim().trim_matches('"'));
-                }
+    let base = service_data_dir();
+    let env_path = base.join(".env");
+    let data_dir = base.join("data");
+    if let Err(e) = ensure_service_env(&env_path, &data_dir) {
+        eprintln!("error: env bootstrap failed: {e}");
+    }
+    if env_path.exists() {
+        for line in std::fs::read_to_string(&env_path).unwrap_or_default().lines() {
+            if let Some((k, v)) = line.split_once('=') {
+                std::env::set_var(k.trim(), v.trim().trim_matches('"'));
             }
         }
-        ensure_static_dir();
-        handler.set_service_status(ServiceStatus {
-            current_state: ServiceState::Running,
-            ..status
-        })?;
-
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("tokio runtime");
-        rt.block_on(crate::run_lite_from_env());
-        Ok(())
     }
-    service_dispatcher::start(SERVICE_NAME, main_service)
+    ensure_static_dir();
+    handler.set_service_status(ServiceStatus {
+        current_state: ServiceState::Running,
+        ..status
+    })?;
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+    if let Err(e) = rt.block_on(crate::run_lite_from_env()) {
+        eprintln!("error: server run failed: {e}");
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn run_service() -> windows_service::Result<()> {
+    use windows_service::service_dispatcher;
+    service_dispatcher::start(SERVICE_NAME, ffi_service_main)
 }
