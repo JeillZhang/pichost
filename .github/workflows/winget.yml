@@ -1,0 +1,19 @@
+name: Submit to WinGet
+on:
+  release:
+    types: [published]
+jobs:
+  winget:
+    name: Submit PicHost to winget-pkgs
+    runs-on: windows-latest
+    if: ${{ !github.event.release.prerelease }}
+    env:
+      WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+    steps:
+      - name: Submit package using wingetcreate
+        run: |
+          $assets = '${{ toJSON(github.event.release.assets) }}' | ConvertFrom-Json
+          $url = ($assets | Where-Object { $_.name -like 'PicHost-setup-*.exe' } | Select-Object -First 1).browser_download_url
+          $version = $env:GITHUB_REF_NAME.Trim('v')
+          curl.exe -JLO https://aka.ms/wingetcreate/latest
+          .\wingetcreate.exe update PicHost.PicHost --version $version --urls $url --submit

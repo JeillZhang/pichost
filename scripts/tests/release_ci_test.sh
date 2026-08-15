@@ -53,4 +53,17 @@ grep -q 'PICHOST_REPO_PAT' "$WF" || { echo "FAIL: PAT secret missing"; exit 1; }
 grep -q 'homebrew-tap' "$WF" || { echo "FAIL: tap update missing"; exit 1; }
 grep -q '__SHA256__' "$WF" || { echo "FAIL: formula sha substitution missing"; exit 1; }
 grep -q 'testing' "$WF" || { echo "FAIL: prerelease suite routing missing"; exit 1; }
+
+# winget workflow 与 manifest 断言
+WINGET="$ROOT/.github/workflows/winget.yml"
+grep -q 'release' "$WINGET" || { echo "FAIL: winget trigger missing"; exit 1; }
+grep -q 'windows-latest' "$WINGET" || { echo "FAIL: winget runner missing"; exit 1; }
+grep -q 'WINGET_CREATE_GITHUB_TOKEN' "$WINGET" || { echo "FAIL: winget token missing"; exit 1; }
+grep -q 'wingetcreate.exe update PicHost.PicHost' "$WINGET" \
+  || { echo "FAIL: winget update missing"; exit 1; }
+grep -q -- '--submit' "$WINGET" || { echo "FAIL: winget submit missing"; exit 1; }
+MAN="$ROOT/packaging/winget/manifest.yaml"
+grep -q 'PicHost.PicHost' "$MAN" || { echo "FAIL: manifest id missing"; exit 1; }
+grep -q 'exe' "$MAN" || { echo "FAIL: manifest type missing"; exit 1; }
+grep -q '/S' "$MAN" || { echo "FAIL: manifest silent switch missing"; exit 1; }
 echo "release_ci_test.sh PASS"
