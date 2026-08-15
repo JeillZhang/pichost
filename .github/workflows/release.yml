@@ -29,6 +29,9 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
             arch: amd64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04
+            arch: arm64
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
@@ -44,7 +47,13 @@ jobs:
       - name: Build frontend
         run: cd web-ui && npm ci && npm run build
       - name: Build backend
-        run: cargo build --release --target ${{ matrix.target }} -p pichost-api -p pichost-worker
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            cargo install cargo-zigbuild
+            cargo zigbuild --release --target ${{ matrix.target }} -p pichost-api -p pichost-worker
+          else
+            cargo build --release --target ${{ matrix.target }} -p pichost-api -p pichost-worker
+          fi
       - name: Strip binaries
         run: strip target/${{ matrix.target }}/release/pichost-api target/${{ matrix.target }}/release/pichost-worker
       - name: Test
@@ -67,11 +76,17 @@ jobs:
           cp scripts/pichost-api.service scripts/pichost-worker.service dist/$PKG_NAME/scripts/
           cp README.md dist/$PKG_NAME/
           cd dist && tar czf "${PKG_NAME}.tar.gz" "$PKG_NAME"
+          # 原生包(已 build release 二进制;--no-build 复用,不重复编译)
+          cd .. && (cd pichost-api && cargo deb --target ${{ matrix.target }} --no-build --output ../dist/pichost.deb)
+          (cd pichost-api && cargo generate-rpm --target ${{ matrix.target }} -o ../dist/pichost.rpm) 2>/dev/null || true
+          cd dist && mv pichost.deb "pichost-${VERSION}-${{ matrix.arch }}.deb"
+          mv pichost.rpm "pichost-${VERSION}-${{ matrix.arch }}.rpm" 2>/dev/null || true
+          ls -la
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: pichost-${{ matrix.arch }}
-          path: dist/*.tar.gz
+          path: dist/*
   release:
     name: Create Release
     needs: build
@@ -95,11 +110,12 @@ jobs:
             ### Architecture Support
             | Arch | Filename |
             |------|----------|
-            | x86_64 (amd64) | `pichost-${{ github.ref_name }}-amd64.tar.gz` |
+            | x86_64 (amd64) | `pichost-${{ github.ref_name }}-amd64.tar.gz` / `.deb` / `.rpm` |
+            | aarch64 (arm64) | `pichost-${{ github.ref_name }}-arm64.tar.gz` / `.deb` / `.rpm` |
             ### Changes
             See [CHANGELOG](https://github.com/JeillZhang/pichost/blob/main/CHANGELOG.md)
           files: |
-            pichost-amd64/dist/*.tar.gz
+            pichost-*/dist/*
           # Inputs win when manually dispatched; otherwise derive from the tag name
           draft: ${{ inputs.draft == 'true' || contains(github.ref_name, '-draft') }}
           prerelease: ${{ inputs.prerelease == 'true' || contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-pre') }}
