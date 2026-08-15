@@ -10,7 +10,7 @@
 - **必读上下文**: 规格文档 `docs/superpowers/specs/2026-08-15-pichost-first-run-wizard-design.md`、`AGENTS.md`(crate 边界 / 函数 ≤50 行 / 行 ≤120 字符 / 测试约定)、`.omo/summary/summary_and_next.md`
 - **推荐执行模式**: `superpowers:subagent-driven-development`(每个任务一个 fresh subagent + 任务间评审);备选 `executing-plans`
 - **强制验证**: 每任务收尾 `cargo clippy --workspace -- -D warnings`;最终 `cargo test --workspace` + `cargo test --workspace -- --include-ignored`(有 Docker 时)+ `cd web-ui && npm run build`
-- **版本提醒**: 代码任务全部完成后执行 T7(workspace Cargo.toml + web-ui/package.json + CHANGELOG 对齐 0.24.0),随后 T8 文档同步(README/AGENTS/summary)并以 `docs: auto-sync ...` 单提交(AGENTS.md 强制)
+- **版本提醒**: 代码任务全部完成后执行 T8(workspace Cargo.toml + web-ui/package.json + CHANGELOG 对齐 0.24.0),随后 T9 文档同步(README/AGENTS/summary)并以 `docs: auto-sync ...` 单提交(AGENTS.md 强制)
 - **提交风格**: 语义化英文 commit(`feat:` / `refactor:` / `test:` / `docs:` / `chore:`);每个任务独立提交
 - **TDD 顺序**: 每个任务先写 test_code → 验证失败(红)→ 写 impl_code → 验证通过(绿)→ commit
 
@@ -35,6 +35,8 @@
 ---
 
 ### Task T0: Add dialoguer dependency and `--setup` CLI flag
+
+**Breaking:** false(新增依赖与 CLI 变体,既有命令行为不变)
 
 **Files:**
 - Modify: `pichost-api/Cargo.toml` ([dependencies] 新增一行)
@@ -1363,7 +1365,19 @@ pub async fn run_wizard<DB: DbType>(
     prompts: &mut dyn Prompt,
 ) -> Result<Option<AppConfig>, Box<dyn Error + Send + Sync>>
 where
-    /* where 子句同 maybe_run(上方逐字复制,含 uuid::Uuid 与 (i64,) 绑定) */
+    for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
+    for<'q> <DB as sqlx::Database>::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    (uuid::Uuid,): crate::db::DbRow<DB>,
+    (i64,): crate::db::DbRow<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    str: sqlx::Type<DB>,
+    for<'q> &'q str: sqlx::Encode<'q, DB>,
+    uuid::Uuid: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<String>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    Option<i64>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    String: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
+    i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
     phase1_config(config, lang, prompts)?;
     let new_config = load_config()?;
