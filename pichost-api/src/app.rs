@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,6 +19,7 @@ use pichost_core::DbType;
 use pichost_core::StorageRouter;
 use sqlx::{Pool, Sqlite, SqlitePool};
 use tower_http::cors::CorsLayer;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::cache::{Cache, CachePool, RedisInviteStore};
@@ -615,7 +617,8 @@ where
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
 {
-    Router::new()
+    let config = state.config.clone();
+    let router = Router::new()
         .nest("/api/v1/auth", auth_routes(state.clone()))
         .nest("/api/v1/images", upload_routes(state.clone()))
         .nest("/api/v1/images", image_routes(state.clone()))
@@ -631,7 +634,27 @@ where
         ))
         .layer(CorsLayer::permissive())
         .layer(DefaultBodyLimit::max(52_428_800))
-        .with_state(state)
+        .with_state(state);
+    let static_dir = resolve_static_dir(&config);
+    mount_static_fallback(router, &static_dir)
+}
+
+/// 挂载 SPA 静态服务:目录存在时 ServeDir + index.html fallback;否则原样返回(≤50 行)
+pub fn mount_static_fallback(router: Router, dir: &Path) -> Router {
+    if !dir.is_dir() {
+        tracing::warn!("static dir {:?} not found; SPA serving disabled", dir);
+        return router;
+    }
+    let index = dir.join("index.html");
+    router.fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index)))
+}
+
+/// Resolve the SPA static directory from config, defaulting to ./dist.
+fn resolve_static_dir(config: &AppConfig) -> PathBuf {
+    config
+        .static_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("./dist"))
 }
 
 async fn metrics_handler() -> String {
