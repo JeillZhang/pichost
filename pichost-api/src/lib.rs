@@ -12,6 +12,7 @@ pub mod setup;
 
 use pichost_core::config::load_config;
 use pichost_core::i18n::{I18n, Language};
+use std::io::IsTerminal;
 
 /// SQLite lite 模式启动链路(前台 run_app 与 Windows 服务共用;无强制向导)
 pub async fn run_lite_from_env() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,7 +29,7 @@ pub async fn run_lite_from_env_forced(forced: bool) -> Result<(), Box<dyn std::e
     let pool =
         db::create_sqlite_pool(&config.database.url, config.database.max_connections).await?;
     db::run_sqlite_migrations(&pool).await?;
-    let config = crate::setup::maybe_run(&pool, &config, forced)
+    let config = crate::setup::maybe_run(&pool, &config, forced, std::io::stdin().is_terminal())
         .await
         .map_err(|e| -> Box<dyn std::error::Error> { e })?
         .unwrap_or(config);

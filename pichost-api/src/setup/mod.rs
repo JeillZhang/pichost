@@ -3,7 +3,6 @@ pub mod env_writer;
 pub mod prompts;
 
 use std::error::Error;
-use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use pichost_core::config::{load_config, AppConfig};
@@ -43,6 +42,7 @@ pub async fn maybe_run<DB: DbType>(
     pool: &Pool<DB>,
     config: &AppConfig,
     forced: bool,
+    stdin_is_tty: bool,
 ) -> Result<Option<AppConfig>, Box<dyn Error + Send + Sync>>
 where
     for<'c> &'c mut <DB as sqlx::Database>::Connection: sqlx::Executor<'c, Database = DB>,
@@ -63,7 +63,7 @@ where
         return Ok(None);
     }
     let mut lang = choose_language(config);
-    match decide_tty(forced, std::io::stdin().is_terminal())? {
+    match decide_tty(forced, stdin_is_tty)? {
         TtyDecision::SkipWarn => {
             let msg = I18n::global().t(lang, "setup.warn_notty");
             tracing::warn!("{msg}");

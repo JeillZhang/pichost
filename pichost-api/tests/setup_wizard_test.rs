@@ -166,14 +166,14 @@ async fn create_admin_flow_reprompts_on_conflict() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn maybe_run_non_tty_first_run_skips() {
     let pool = sqlite_pool().await;
-    let result = maybe_run(&pool, &base_config(), false).await.unwrap();
+    let result = maybe_run(&pool, &base_config(), false, false).await.unwrap();
     assert!(result.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn maybe_run_forced_non_tty_errors() {
     let pool = sqlite_pool().await;
-    let err = maybe_run(&pool, &base_config(), true).await.unwrap_err();
+    let err = maybe_run(&pool, &base_config(), true, false).await.unwrap_err();
     assert!(err.to_string().contains("interactive terminal"));
 }
 
@@ -182,6 +182,6 @@ async fn maybe_run_existing_users_short_circuits() {
     let pool = sqlite_pool().await;
     let hash = user_ops::hash_password("password123").unwrap();
     user_ops::insert_user(&pool, "someone", &None, &hash, false, None).await.unwrap();
-    let result = maybe_run(&pool, &base_config(), false).await.unwrap();
+    let result = maybe_run(&pool, &base_config(), false, false).await.unwrap();
     assert!(result.is_none());
 }

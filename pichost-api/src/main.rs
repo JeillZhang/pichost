@@ -1,6 +1,7 @@
 use pichost_api::{app, cache, db, run_lite_from_env_forced};
 use pichost_core::config::{load_config, DatabaseMode};
 use pichost_core::i18n::{I18n, Language};
+use std::io::IsTerminal;
 
 mod cli;
 #[cfg(windows)]
@@ -59,10 +60,15 @@ async fn run_app(forced: bool) -> Result<(), Box<dyn std::error::Error>> {
             db::run_pg_migrations(&pool).await?;
             let cache_pool = cache::create_pool(&config.redis.url, config.redis.pool_size as usize);
             let queue_pool = cache::create_pool(&config.redis.url, config.redis.pool_size as usize);
-            let config = pichost_api::setup::maybe_run(&pool, &config, forced)
-                .await
-                .map_err(|e| -> Box<dyn std::error::Error> { e })?
-                .unwrap_or(config);
+            let config = pichost_api::setup::maybe_run(
+                &pool,
+                &config,
+                forced,
+                std::io::stdin().is_terminal(),
+            )
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error> { e })?
+            .unwrap_or(config);
             app::run_with::<sqlx::Postgres>(config, pool, cache_pool, queue_pool).await
         }
         DatabaseMode::Sqlite => run_lite_from_env_forced(forced).await,
