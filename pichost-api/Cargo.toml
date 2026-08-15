@@ -51,3 +51,23 @@ rand.workspace = true
 [[bin]]
 name = "pichost-api"
 path = "src/main.rs"
+
+[package.metadata.deb]
+name = "pichost"
+section = "web"
+priority = "optional"
+maintainer = "Jeill Zhang <jeillzhang@users.noreply.github.com>"
+homepage = "https://github.com/JeillZhang/pichost"
+license = "MIT"
+depends = "$auto"
+assets = [
+    ["target/release/pichost-api", "usr/bin/", "755"],
+    ["target/release/pichost-worker", "usr/bin/", "755"],
+    ["../web-ui/dist/", "usr/share/pichost/web-ui/"],
+    ["../migrations/", "usr/share/pichost/migrations/"],
+    ["../migrations-sqlite/", "usr/share/pichost/migrations-sqlite/"],
+    ["../packaging/common/install-lib.sh", "usr/share/pichost/", "644"],
+    ["../scripts/pichost-api.service", "lib/systemd/system/", "644"],
+    ["../scripts/pichost-worker.service", "lib/systemd/system/", "644"],
+]
+maintainer-scripts = "packaging/deb"
