@@ -63,7 +63,9 @@ flowchart TD
     I --> J{"首次运行?<br/>user_count == 0 或 forced"}
     J -->|"否"| K["正常启动<br/>(run_with / run_with_sqlite)"]
     J -->|"是"| L{"stdin 是 TTY?"}
-    L -->|"否"| M["跳过 + WARN 日志<br/>(提示 --setup 或 Web 注册)"]
+    L -->|"否"| M{"forced?"}
+    M -->|"是"| M1["报错退出<br/>(--setup 需要交互终端)"]
+    M -->|"否"| M2["跳过 + WARN 日志<br/>(提示 --setup 或 Web 注册)"]
     L -->|"是"| N["向导两阶段"]
     N --> O["阶段1: 配置交互<br/>→ 原子写 .env<br/>→ std::env::set_var 生效<br/>→ 重载 config + I18n"]
     O --> P["阶段2: 创建管理员(可跳过)"]
@@ -141,6 +143,7 @@ pub trait Prompt {
 ```
 maybe_run(pool, config, forced):
   if !forced && count_users(pool) > 0 → return (非首次,跳过)
+  if !std::io::stdin().is_terminal() && forced → 返回错误("--setup 需要交互终端"),进程非 0 退出
   if !std::io::stdin().is_terminal() → WARN 日志("首次启动检测到未初始化,但无交互终端;跳过初始化向导。"
       "请运行 `pichost-api --setup` 或在浏览器中注册首个用户。") → return
   打印欢迎横幅 + 语言 Select(用当前配置语言渲染初始界面)
@@ -179,6 +182,7 @@ maybe_run(pool, config, forced):
 - `setup/admin.rs` 通过同一助手创建管理员:`is_admin=true`、`storage_prefix=users/{uuid}`(镜像 `create_user_and_tokens` L386-391)、quota 取 `config.upload.storage_quota_default`(≤0 → NULL)——与 Web 注册完全一致的用户不变量
 - 冲突(用户名/邮箱重复)→ 向导内重新提示,不中断
 - 现有 auth 注册集成测试全量回归保障提取无行为变化
+- **S1 明确包含** `routes/users.rs` 的 `hash_new_password` 私有副本替换为共享助手(消除第二份重复实现,行为不变,由现有改密测试回归)——user_ops 提取是一次完整的 DRY 收敛,不是只改 auth.rs
 
 ### 3.4 i18n 后端消息目录
 
@@ -225,6 +229,7 @@ setup.warn_notty     # 无终端跳过警告
 - 前端 web-ui / 安装脚本 / 数据库迁移
 
 **已知注意事项**:
+- `--setup` 强制模式 + 无 TTY → **明确报错退出**(非静默跳过),避免"用户显式请求向导却被忽略"的困惑;自动触发 + 无 TTY 才是跳过 + WARN
 - 向导写 `.env` 需要目标位置写权限(系统安装下 `/etc/pichost/.env` 属 pichost 用户,install.sh 已 chown;权限不足时给出明确错误而非静默失败)
 - `dotenvy::dotenv()` 只在进程启动时加载一次;向导的 `set_var` 同步保证当前进程与后续 `load_config()` 一致,已覆盖
 - 已初始化实例(用户数 > 0)运行 `--setup`:配置步骤仍可用,管理员步骤自动跳过(不重复创建)
