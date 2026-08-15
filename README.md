@@ -113,8 +113,8 @@ cd web-ui && npm install && npm run dev  # → http://localhost:5173
 ### Test & Lint
 
 ```bash
-cargo test --workspace                      # 406 pass without infra (DB tests #[ignore]-gated)
-cargo test --workspace -- --include-ignored  # 678 pass, 0 fail with Docker PG+Redis+MinIO (see AGENTS.md Testing)
+cargo test --workspace                      # 416 pass without infra (DB tests #[ignore]-gated)
+cargo test --workspace -- --include-ignored  # 688 pass, 0 fail with Docker PG+Redis+MinIO (see AGENTS.md Testing)
 cargo clippy --workspace -- -D warnings      # zero warnings required
 cargo llvm-cov --workspace -- --include-ignored  # 91.56% line coverage (needs Docker PG+Redis+MinIO)
 cd web-ui && npm run build                   # tsc -b && vite build

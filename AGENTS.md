@@ -13,7 +13,7 @@
 |---|---|---|
 | Build all | `cargo build --workspace` | |
 | Check only api | `cargo check -p pichost-api` | Fast compile-check |
-| Test all | `cargo test --workspace` | 406 pass without infra; 678 pass, 0 fail with `-- --include-ignored` (Docker PG+Redis+MinIO, see Testing) |
+| Test all | `cargo test --workspace` | 416 pass without infra; 688 pass, 0 fail with `-- --include-ignored` (Docker PG+Redis+MinIO, see Testing) |
 | Lint | `cargo clippy --workspace -- -D warnings` | Zero warnings required |
 | Run API server | `cargo run -p pichost-api` | Standard mode requires PostgreSQL + Redis; lite mode: `PICHOST_DATABASE_MODE=sqlite` + `PICHOST_DATABASE_URL=sqlite:///path/pichost.db` (embedded worker, no Redis) |
 | Frontend dev | `cd web-ui && npm run dev` | Vite proxies `/api`, `/u` → `localhost:3000` |
@@ -207,7 +207,7 @@ All paths below are relative to `/api/v1/` prefix unless otherwise noted. The `/
 
 ## Testing
 
-- **Full suite**: `cargo test --workspace` → **406 pass, 0 fail** without infra (272 DB/Redis/S3 tests `#[ignore]`-gated). With Docker PG+Redis+MinIO running: `cargo test --workspace -- --include-ignored` → **678 pass, 0 fail**. Env-sensitive config tests are hermetic via `PichostEnvGuard` (snapshot/restore of `PICHOST_*` vars), and the rustfs storage tests run against live MinIO with `PICHOST_STORAGE_RUSTFS_*` set.
+- **Full suite**: `cargo test --workspace` →  **416 pass, 0 fail** without infra (272 DB/Redis/S3 tests `#[ignore]`-gated). With Docker PG+Redis+MinIO running: `cargo test --workspace -- --include-ignored` → **688 pass, 0 fail**. Env-sensitive config tests are hermetic via `PichostEnvGuard` (snapshot/restore of `PICHOST_*` vars), and the rustfs storage tests run against live MinIO with `PICHOST_STORAGE_RUSTFS_*` set.
 - **CI**: every PR to `main` runs the full suite automatically via `.github/workflows/smoke-test.yml` (see the smoke test design guide `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md`). New API features must add a smoke test before coding (TDD).
 - **Coverage**: `cargo llvm-cov --workspace --ignore-filename-regex 'tests/|test_' -- --include-ignored` → **91.56% line coverage**. `cargo-llvm-cov` must be installed (`cargo install cargo-llvm-cov`).
 - **Test infrastructure**: `pichost-api/tests/common/mod.rs` harness builds a real `AppState` (PG+Redis) + production router (`configure_app`) and drives it via `tower::ServiceExt::oneshot`. The router-assembly functions live in `pichost-api/src/app.rs` (moved from `main.rs`) so integration tests exercise the exact production routing.
