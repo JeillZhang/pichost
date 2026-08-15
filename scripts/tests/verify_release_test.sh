@@ -19,4 +19,11 @@ grep -q '^# PICHOST_REDIS_URL' "$ROOT/.env.example" \
   || { echo "FAIL: .env.example Redis not commented"; exit 1; }
 grep -q 'PICHOST_STORAGE__LOCAL_BASE_PATH=/opt/pichost/data/storage-local' "$ROOT/.env.example" \
   || { echo "FAIL: .env.example storage path not data/"; exit 1; }
+# ④ deb 冒烟步骤断言(T16)
+grep -q 'deb smoke\|cargo deb' "$ROOT/scripts/verify-release.sh" \
+  || { echo "FAIL: verify-release missing deb step"; exit 1; }
+grep -q 'dpkg -i' "$ROOT/scripts/verify-release.sh" \
+  || { echo "FAIL: verify-release missing dpkg install"; exit 1; }
+grep -q 'curl.*/health' "$ROOT/scripts/verify-release.sh" \
+  || { echo "FAIL: verify-release missing health check"; exit 1; }
 echo "verify_release_test.sh PASS"

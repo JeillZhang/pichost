@@ -189,6 +189,28 @@ if [ "$SKIP_INSTALL" -eq 0 ]; then
     fi
 fi
 
+# --- [8/8] deb 构建 + 安装冒烟(SQLite + 静态服务即开即用;缺工具不阻断) ---
+echo ""
+echo "==> [8/8] deb smoke (cargo deb build + dpkg install in container)"
+if command -v cargo-deb >/dev/null 2>&1 && command -v docker >/dev/null 2>&1; then
+    cargo deb -p pichost-api --no-build --output "$DIST_DIR/pichost-smoke.deb"
+    docker run --rm -v "$DIST_DIR:/pkg:ro" ubuntu:24.04 bash -c "
+        set -e
+        apt-get update -qq && apt-get install -y -qq sqlite3 >/dev/null 2>&1 || true
+        dpkg -i /pkg/pichost-smoke.deb
+        mkdir -p /tmp/smoke && chown -R pichost:pichost /tmp/smoke
+        su -s /bin/bash pichost -c 'PICHOST_DATABASE_MODE=sqlite PICHOST_DATABASE_URL=sqlite:///tmp/smoke/pichost.db \
+            PICHOST_STORAGE__LOCAL_BASE_PATH=/tmp/smoke/storage PICHOST_AUTH__JWT_SECRET=0123456789abcdef0123456789abcdef \
+            PICHOST_STATIC_DIR=/usr/share/pichost/web-ui PICHOST_SERVER_PUBLIC_URL=http://localhost:3000 \
+            /usr/bin/pichost-api &'
+        sleep 4
+        curl -fsS http://localhost:3000/api/health | grep -q ok
+        curl -fsS http://localhost:3000/ | grep -qi '<!doctype html'
+    "
+else
+    echo "WARN: cargo-deb and/or docker not installed; deb smoke skipped"
+fi
+
 echo ""
 echo "=============================================="
 echo " VERIFICATION PASSED"
