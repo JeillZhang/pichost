@@ -1,8 +1,10 @@
-use pichost_api::{app, cache, db};
+use pichost_api::{app, cache, db, run_lite_from_env};
 use pichost_core::config::{load_config, DatabaseMode};
 use pichost_core::i18n::{I18n, Language};
 
 mod cli;
+#[cfg(windows)]
+mod service;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,11 +25,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(windows)]
             {
                 crate::service::dispatch_cli(other).await;
+                Ok(())
             }
             #[cfg(not(windows))]
             {
                 eprintln!("error: {:?} is only supported on Windows", other);
-                std::process::exit(1);
+                std::process::exit(1)
             }
         }
     }
@@ -57,12 +60,6 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
             let queue_pool = cache::create_pool(&config.redis.url, config.redis.pool_size as usize);
             app::run_with::<sqlx::Postgres>(config, pool, cache_pool, queue_pool).await
         }
-        DatabaseMode::Sqlite => {
-            let pool =
-                db::create_sqlite_pool(&config.database.url, config.database.max_connections)
-                    .await?;
-            db::run_sqlite_migrations(&pool).await?;
-            app::run_with_sqlite(config, pool).await
-        }
+        DatabaseMode::Sqlite => run_lite_from_env().await,
     }
 }

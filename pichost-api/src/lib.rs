@@ -6,4 +6,21 @@ pub mod i18n_ext;
 pub mod metrics;
 pub mod middleware;
 pub mod routes;
+pub mod service;
 pub mod services;
+
+use pichost_core::config::load_config;
+use pichost_core::i18n::{I18n, Language};
+
+/// SQLite lite 模式启动链路(前台 run_app 与 Windows 服务共用)
+pub async fn run_lite_from_env() -> Result<(), Box<dyn std::error::Error>> {
+    let config = load_config()?;
+    I18n::init_global(
+        Language::from_str_opt(&config.i18n.language),
+        config.i18n.locales_dir.clone(),
+    );
+    let pool =
+        db::create_sqlite_pool(&config.database.url, config.database.max_connections).await?;
+    db::run_sqlite_migrations(&pool).await?;
+    app::run_with_sqlite(config, pool).await
+}

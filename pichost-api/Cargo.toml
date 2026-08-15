@@ -36,6 +36,9 @@ regex = "1"
 thiserror.workspace = true
 async-trait.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.7"
+
 [dev-dependencies]
 serde_urlencoded = "0.7"
 tempfile = "3"
