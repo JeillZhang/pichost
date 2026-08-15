@@ -1,5 +1,16 @@
 # PicHost 项目进度
 
+## 首次安装终端初始化向导 ✅ (本次完成)
+
+- **setup 模块** (`pichost-api/src/setup/`, `pub mod setup`): `prompts.rs` (`Prompt` trait + `DialoguerPrompts`)、`env_writer.rs` (幂等 `.env` upsert — 已有键保留/缺失键写入;探测顺序 `PICHOST_ENV_FILE` → `/etc/pichost/.env` → CWD `.env`;JWT 密钥生成/校验、public URL 校验)、`admin.rs` (首个管理员创建流程,复用 `services::user_ops` 提取的 `count_users`/创建辅助)
+- **`--setup` CLI 标志** (cli.rs): 强制运行向导;启动路径 `maybe_run` 挂接 `run_with::<DB>()`/`run_with_sqlite` 双模式
+- **触发行为**: `should_run_wizard(user_count == 0 || forced)` → `decide_tty`:TTY → 运行;非 TTY + `--setup` → 报错;非 TTY (systemd/Docker) → `setup.warn_notty` WARN 日志并跳过(经 Web UI 注册首个用户)
+- **向导阶段 1**: 写入 `PICHOST_I18N_LANGUAGE` (+ JWT 密钥缺失/非法时生成 `PICHOST_AUTH__JWT_SECRET`,未设置时提示 `PICHOST_SERVER__PUBLIC_URL`) → 重载配置 + i18n → 用户数为 0 时创建首个管理员。纯启动流程,无 API 端点变更
+- **i18n**: 新增 `setup.*` 键 (en/zh-CN)
+- **测试**: `pichost-api/tests/setup_wizard_test.rs` — decide_tty/should_run_wizard/probe 顺序/env upsert 等纯逻辑单测
+- **验证**: `cargo test --workspace` ✅ (433 pass, 0 fail),`cargo clippy --workspace -- -D warnings` ✅,`bash scripts/tests/docs_check_test.sh` ✅,`cd web-ui && npm run build` ✅
+- **版本**: 0.23.0 → **0.24.0** (Cargo.toml workspace + web-ui/package.json + Cargo.lock 对齐,CHANGELOG 更新)
+
 ## 原生安装包与软件仓库分发 ✅ (本次完成)
 
 - **安装包**: deb (amd64+arm64) / rpm (x86_64+aarch64) / NSIS exe / Homebrew universal2 tarball,release.yml 双架构矩阵 (linux zigbuild、macOS lipo、Windows x86_64)
@@ -505,4 +516,4 @@
 | 触屏增强 | CategoryTree 长按手势（当前 ⋯ 按钮已覆盖触屏，长按列为后续增强） | 响应式已落地 |
 | 测试基建 | ~~`config_test::database_mode_parses_sqlite_from_env` env 隔离修复~~ — 已完成 (0433326): `PichostEnvGuard` 全量快照/恢复 `PICHOST_*`，678 pass / 0 fail | 轻量模式已落地 |
 
-当前计划内阶段（P0–P4-I）+ i18n + 响应式布局 + 轻量模式 (SQLite lite mode) + 原生安装包与软件仓库分发 (0.23.0) 已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划，例如首版 `v0.23.0` 发布后验证 apt/rpm/brew/winget 安装链路）。
+当前计划内阶段（P0–P4-I）+ i18n + 响应式布局 + 轻量模式 (SQLite lite mode) + 原生安装包与软件仓库分发 (0.23.0) + 首次安装终端初始化向导 (0.24.0) 已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划，例如首版 `v0.24.0` 发布后验证 apt/rpm/brew/winget 安装链路）。

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{PasswordHash, PasswordVerifier},
     Argon2,
 };
 use axum::{
@@ -177,18 +177,10 @@ fn hash_password(
     password: &str,
     locale: Language,
 ) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
-    let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
-        .map(|h| h.to_string())
-        .map_err(|e| {
-            tracing::warn!("Password hashing failed: {e}");
-            error_json(
-                locale,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "common.internal_error",
-            )
-        })
+    crate::services::user_ops::hash_password(password).map_err(|e| {
+        tracing::warn!("Password hashing failed: {e}");
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })
 }
 
 async fn revoke_old_tokens(
@@ -221,17 +213,10 @@ where
     usize: sqlx::ColumnIndex<DB::Row>,
     (i64,): crate::db::DbRow<DB>,
 {
-    sqlx::query_scalar("SELECT COUNT(*) FROM users")
-        .fetch_one(pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!("User count query failed: {e}");
-            error_json(
-                locale,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "common.internal_error",
-            )
-        })
+    crate::services::user_ops::count_users(pool).await.map_err(|e| {
+        tracing::warn!("User count query failed: {e}");
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
+    })
 }
 
 async fn insert_user<DB: DbType>(
@@ -256,27 +241,21 @@ where
     bool: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     i64: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
 {
-    sqlx::query_scalar(
-        "INSERT INTO users (username, email, password_hash, is_admin, storage_quota) \
-         VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    crate::services::user_ops::insert_user(
+        &state.pool,
+        username,
+        email,
+        hash,
+        is_admin,
+        storage_quota,
     )
-    .bind(username)
-    .bind(email)
-    .bind(hash)
-    .bind(is_admin)
-    .bind(storage_quota)
-    .fetch_one(&state.pool)
     .await
     .map_err(|e| {
         if pichost_core::db::db_error_kind(&e) == pichost_core::db::DbErrorKind::UniqueViolation {
             return error_json(locale, StatusCode::CONFLICT, "auth.username_exists");
         }
         tracing::warn!("User registration db error: {e}");
-        error_json(
-            locale,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "common.internal_error",
-        )
+        error_json(locale, StatusCode::INTERNAL_SERVER_ERROR, "common.internal_error")
     })
 }
 

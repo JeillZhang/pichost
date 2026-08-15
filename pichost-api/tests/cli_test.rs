@@ -26,6 +26,12 @@ fn service_flags_parse() {
 }
 
 #[test]
+fn parses_setup_flag() {
+    let args: Vec<String> = vec!["--setup".into()];
+    assert_eq!(parse_cli_args(&args), Ok(CliCommand::Setup));
+}
+
+#[test]
 fn unknown_or_multi_args_error() {
     assert!(parse_cli_args(&args(&["--bogus"])).is_err());
     assert!(parse_cli_args(&args(&["--service", "extra"])).is_err());

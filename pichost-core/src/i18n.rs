@@ -262,6 +262,24 @@ mod tests {
     }
 
     #[test]
+    fn setup_keys_present_in_both_locales() {
+        let en = super::parse_toml(super::EMBEDDED_EN);
+        let zh = super::parse_toml(super::EMBEDDED_ZH);
+        let keys = [
+            "setup.welcome", "setup.language", "setup.jwt_generated", "setup.jwt_configured",
+            "setup.public_url", "setup.public_url_skip", "setup.admin_confirm", "setup.admin_skip",
+            "setup.username", "setup.password", "setup.password_confirm", "setup.email",
+            "setup.invalid_username", "setup.invalid_url", "setup.invalid_email",
+            "setup.invalid_password", "setup.username_taken", "setup.complete", "setup.warn_notty",
+            "setup.env_path",
+        ];
+        for k in keys {
+            assert!(en.get(k).is_some_and(|v| !v.is_empty()), "en missing {k}");
+            assert!(zh.get(k).is_some_and(|v| !v.is_empty()), "zh missing {k}");
+        }
+    }
+
+    #[test]
     fn maybe_reload_detects_external_change() {
         let dir = std::env::temp_dir().join("pichost-i18n-hot");
         let zh_dir = dir.join("zh-CN");

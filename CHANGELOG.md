@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Versions before 0.7.0 are not documented here.
 
+## [0.24.0] - 2026-08-15
+
+### Added
+
+- First-run terminal setup wizard: on initial startup (no users) with an
+  interactive terminal, guide configuration of JWT secret / public URL /
+  UI language and create the first administrator account
+- `pichost-api --setup` flag to force-run the wizard; non-TTY environments
+  skip with a warning (forced mode errors out)
+- `.env` writes are idempotent (single/double underscore variant dedup)
+  and atomic (temp file + rename); `PICHOST_ENV_FILE` env var overrides
+  the probe order (`PICHOST_ENV_FILE` → `/etc/pichost/.env` → CWD `.env`)
+
 ## [0.23.0] - 2026-08-15
 
 ### Added

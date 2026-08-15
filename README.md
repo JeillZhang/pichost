@@ -64,6 +64,13 @@ winget install PicHost.PicHost
 
 Native packages use the FHS layout (`/usr/bin` + `/usr/share/pichost` + `/var/lib/pichost` + `/etc/pichost`) — see [Deployment](#deployment) for the difference from the single-directory `install.sh` layout.
 
+On first start (no users yet) with an interactive terminal, `pichost-api`
+runs a setup wizard: it configures the JWT secret, public URL and UI
+language (written to `.env`), then offers to create the first admin
+account. Non-TTY environments (systemd/Docker) skip the wizard with a
+warning — register the first user via the web UI instead. Re-run anytime
+with `pichost-api --setup`.
+
 ## Architecture
 
 ```
@@ -113,14 +120,14 @@ cd web-ui && npm install && npm run dev  # → http://localhost:5173
 ### Test & Lint
 
 ```bash
-cargo test --workspace                      # 416 pass without infra (DB tests #[ignore]-gated)
-cargo test --workspace -- --include-ignored  # 688 pass, 0 fail with Docker PG+Redis+MinIO (see AGENTS.md Testing)
+cargo test --workspace                      # 433 pass without infra (DB tests #[ignore]-gated)
+cargo test --workspace -- --include-ignored  # 705 pass, 0 fail with Docker PG+Redis+MinIO (see AGENTS.md Testing)
 cargo clippy --workspace -- -D warnings      # zero warnings required
 cargo llvm-cov --workspace -- --include-ignored  # 91.56% line coverage (needs Docker PG+Redis+MinIO)
 cd web-ui && npm run build                   # tsc -b && vite build
 ```
 
-The full 678-test suite runs automatically on every PR to `main` via `.github/workflows/smoke-test.yml` (PG+Redis+MinIO service containers + clippy gate). See `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md` for the smoke test design guide.
+The full 705-test suite runs automatically on every PR to `main` via `.github/workflows/smoke-test.yml` (PG+Redis+MinIO service containers + clippy gate). See `docs/superpowers/specs/2026-08-02-pichost-smoke-test-design.md` for the smoke test design guide.
 
 Run a single test: `cargo test -p pichost-api test_image_list`
 
@@ -150,6 +157,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 | `PICHOST_I18N_LANGUAGE` | — | `en` | Default UI language (`en` / `zh-CN`) |
 | `PICHOST_I18N_LOCALES_DIR` | — | — | Optional external locale override directory (per-language subdirs, merge-override) |
 | `PICHOST_STATIC_DIR` | — | `./dist` | Static frontend assets dir served by the API (`web-ui/dist`); unset/missing dir = not mounted |
+| `PICHOST_ENV_FILE` | — | — | Wizard `.env` write target override (probe order: `PICHOST_ENV_FILE` → `/etc/pichost/.env` → CWD `.env`) |
 | `DATABASE_URL` | Docker only | — | sqlx CLI helper (not consumed by app) |
 
 **Important**: `DATABASE_URL` and `PICHOST_DATABASE_URL` are separate vars. Only `PICHOST_DATABASE_URL` is consumed at runtime. Both are set in docker-compose for convenience.
@@ -253,6 +261,7 @@ All API error responses use `{"error": <localized message>, "code": <error key>}
 - [x] **Responsive layout** — mobile-first adaptation: hamburger nav drawer (MobileNav), category filter drawer (Sheet), touch-friendly category ⋯ menu, shared Modal/ConfirmDialog with bottom-sheet on small screens, admin table card-ification, global horizontal-overflow guard, responsive gallery grid (2/3/3/4/5 columns), popover viewport clamping
 - [x] **Image detail zoom viewer** — fullscreen lightbox: wheel zoom (cursor-anchored), drag pan, double-click fit↔100%, touch pinch/drag, toolbar zoom controls, keyboard shortcuts
 - [x] **SQLite lite mode** — zero-external-dependency single-instance deployment (embedded worker), `PICHOST_DATABASE_MODE=sqlite`
+- [x] **First-run setup wizard** — terminal wizard on initial startup (JWT/public URL/language + first admin), `--setup` force flag, non-TTY skip
 
 ## Project Structure
 
