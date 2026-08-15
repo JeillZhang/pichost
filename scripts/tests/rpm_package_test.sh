@@ -24,4 +24,16 @@ grep -q 'source /usr/share/pichost/install-lib.sh' "$ROOT/packaging/rpm/postinst
   || { echo "FAIL: %post missing lib source"; exit 1; }
 grep -q 'ensure_pkg_jwt' "$ROOT/packaging/rpm/postinstall.sh" \
   || { echo "FAIL: %post missing jwt"; exit 1; }
+
+# ④ preun/postun 断言
+bash -n "$ROOT/packaging/rpm/preuninstall.sh"
+bash -n "$ROOT/packaging/rpm/postuninstall.sh"
+grep -q '"$1" = "0"' "$ROOT/packaging/rpm/preuninstall.sh" \
+  || { echo "FAIL: preun missing uninstall guard"; exit 1; }
+grep -q 'systemctl stop' "$ROOT/packaging/rpm/preuninstall.sh" \
+  || { echo "FAIL: preun missing stop"; exit 1; }
+grep -q '"$1" = "0"' "$ROOT/packaging/rpm/postuninstall.sh" \
+  || { echo "FAIL: postun missing uninstall guard"; exit 1; }
+grep -q 'rm -rf /var/lib/pichost' "$ROOT/packaging/rpm/postuninstall.sh" \
+  || { echo "FAIL: postun missing data wipe"; exit 1; }
 echo "rpm_package_test.sh PASS"
