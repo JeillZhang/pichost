@@ -4,6 +4,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliCommand {
     Run,
+    Setup,
     InstallService,
     UninstallService,
     Service,
@@ -11,13 +12,14 @@ pub enum CliCommand {
 }
 
 pub const USAGE: &str =
-    "Usage: pichost-api [--install-service|--uninstall-service|--service]";
+    "Usage: pichost-api [--setup|--install-service|--uninstall-service|--service]";
 
 /// 解析 CLI 参数;未知/多参数返回 Err(调用方打印 usage 后以退出码 2 终止)
 pub fn parse_cli_args(args: &[String]) -> Result<CliCommand, &'static str> {
     match args {
         [] => Ok(CliCommand::Run),
         [flag] => match flag.as_str() {
+            "--setup" => Ok(CliCommand::Setup),
             "--install-service" => Ok(CliCommand::InstallService),
             "--uninstall-service" => Ok(CliCommand::UninstallService),
             "--service" => Ok(CliCommand::Service),
