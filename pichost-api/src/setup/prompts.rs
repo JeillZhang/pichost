@@ -123,10 +123,16 @@ impl Prompt for MockPrompts {
     fn password(
         &mut self,
         _prompt: &str,
-        _confirm_prompt: Option<&str>,
+        confirm_prompt: Option<&str>,
     ) -> Result<String, Box<dyn Error + Send + Sync>> {
         match self.queue.pop_front() {
-            Some(MockReply::Password(s)) => Ok(s),
+            Some(MockReply::Password(s)) => {
+                if confirm_prompt.is_some() {
+                    // 对齐 DialoguerPrompts 的 with_confirmation:再消费一条确认密码回复
+                    let _ = self.queue.pop_front();
+                }
+                Ok(s)
+            }
             _ => Err("mock prompt queue exhausted".into()),
         }
     }
