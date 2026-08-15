@@ -24,6 +24,38 @@ fn base_config() -> AppConfig {
     cfg
 }
 
+/// 快照/恢复全部 PICHOST_* env,保证 load_config() 不受环境变量干扰(与 PichostEnvGuard 惯例一致)。
+struct EnvGuard {
+    saved: Vec<(String, String)>,
+}
+
+impl EnvGuard {
+    fn capture() -> Self {
+        let saved: Vec<(String, String)> = std::env::vars()
+            .filter(|(k, _)| k.starts_with("PICHOST_"))
+            .collect();
+        for (k, _) in &saved {
+            std::env::remove_var(k);
+        }
+        Self { saved }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        let current: Vec<String> = std::env::vars()
+            .filter(|(k, _)| k.starts_with("PICHOST_"))
+            .map(|(k, _)| k)
+            .collect();
+        for k in current {
+            std::env::remove_var(&k);
+        }
+        for (k, v) in &self.saved {
+            std::env::set_var(k, v);
+        }
+    }
+}
+
 /// 两个 run_wizard 测试均写/删全局 env(PICHOST_ENV_FILE 等),必须串行,
 /// 避免并发互踩(serial_test 为既有 dev-dependency,AGENTS.md 约定)。
 #[test]
@@ -40,6 +72,7 @@ fn gate_pure_functions() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial]
 async fn run_wizard_writes_env_and_creates_admin() {
+    let _env = EnvGuard::capture();
     let pool = sqlite_pool().await;
     let dir = TempDir::new().unwrap();
     let env_path = dir.path().join(".env");
@@ -79,6 +112,7 @@ async fn run_wizard_writes_env_and_creates_admin() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial]
 async fn run_wizard_skips_admin_when_users_exist() {
+    let _env = EnvGuard::capture();
     let pool = sqlite_pool().await;
     let dir = TempDir::new().unwrap();
     let env_path = dir.path().join(".env");
@@ -104,6 +138,7 @@ async fn run_wizard_skips_admin_when_users_exist() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn create_admin_flow_reprompts_on_conflict() {
+    let _env = EnvGuard::capture();
     let pool = sqlite_pool().await;
     let hash = user_ops::hash_password("password123").unwrap();
     user_ops::insert_user(&pool, "taken", &None, &hash, false, None).await.unwrap();
