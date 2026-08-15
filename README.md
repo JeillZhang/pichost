@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v0.22.0** — SQLite-first deployment (single-directory install: DB + storage under <INSTALL_DIR>/data, sqlite default mode)
+**v0.23.0** — Native packages + software repos (deb/rpm/exe, apt/rpm/Homebrew/winget)
 
 ## Stack
 
@@ -43,6 +43,26 @@ open http://localhost
 ```
 
 The stack runs on **port 80** via Nginx, proxying to 2 API replicas, with 2 background workers.
+
+## Quick Start (Native packages)
+
+Install from the official software repositories (built on every `v*` release, plus a Windows installer):
+
+```bash
+# Debian / Ubuntu — add the apt repo, then install
+bash <(curl -sL https://jeillzhang.github.io/pichost-repo/setup-repo.sh) && sudo apt install pichost
+
+# Fedora / RHEL — same setup script (auto-detects dnf)
+bash <(curl -sL https://jeillzhang.github.io/pichost-repo/setup-repo.sh) && sudo dnf install pichost
+
+# macOS — Homebrew tap, then start the service
+brew tap jeillzhang/tap && brew install pichost && brew services start pichost
+
+# Windows — winget (NSIS installer registers a Windows service)
+winget install PicHost.PicHost
+```
+
+Native packages use the FHS layout (`/usr/bin` + `/usr/share/pichost` + `/var/lib/pichost` + `/etc/pichost`) — see [Deployment](#deployment) for the difference from the single-directory `install.sh` layout.
 
 ## Architecture
 
@@ -129,6 +149,7 @@ All config via env vars with `PICHOST_` prefix (figment: defaults → env overri
 | `PICHOST_AUTH_TOKEN_ENCRYPTION_KEY` | Git storage | — | AES-256-GCM key for Git token encryption |
 | `PICHOST_I18N_LANGUAGE` | — | `en` | Default UI language (`en` / `zh-CN`) |
 | `PICHOST_I18N_LOCALES_DIR` | — | — | Optional external locale override directory (per-language subdirs, merge-override) |
+| `PICHOST_STATIC_DIR` | — | `./dist` | Static frontend assets dir served by the API (`web-ui/dist`); unset/missing dir = not mounted |
 | `DATABASE_URL` | Docker only | — | sqlx CLI helper (not consumed by app) |
 
 **Important**: `DATABASE_URL` and `PICHOST_DATABASE_URL` are separate vars. Only `PICHOST_DATABASE_URL` is consumed at runtime. Both are set in docker-compose for convenience.
@@ -223,6 +244,8 @@ All API error responses use `{"error": <localized message>, "code": <error key>}
 - [x] **File rename** — inline rename on ImageDetail, `PATCH /api/v1/images/:id`
 - [x] **Settings UI optimization** — NavBar user dropdown (Settings/Admin/Logout), accordion settings with hash-based section expand
 - [x] **Software packaging** — systemd services, install/uninstall scripts, GitHub Actions release CI (`v*` tags → `.tar.gz`)
+- [x] **Native packaging** — deb/rpm (FHS), macOS Homebrew tap, Windows NSIS installer + winget manifest, API static file serving (`PICHOST_STATIC_DIR`)
+- [x] **Software repositories** — apt/rpm repos (`pichost-repo`), Homebrew tap, winget, published by release CI
 - [x] **System config management** — admin config.toml read/write API, DB/Redis connection tests, backup/restore
 - [x] **Internationalization (i18n)** — English/简体中文 UI switching via i18next + LanguageSwitcher (persisted, ~364 UI strings extracted), typed t() keys
 - [x] **Localized API errors** — all errors return `{"error": localized message, "code": error key}`, Accept-Language negotiation per request
@@ -284,6 +307,21 @@ curl http://localhost/health
 ```
 
 Default compute layout: 2 API replicas (least_conn), 2 worker replicas (independent consumers). Postgres and Redis ports are **not exposed** to the host — internal Docker network only.
+
+### Native packages (deb / rpm / Homebrew / winget)
+
+deb and rpm packages follow the **FHS layout**, split across standard system directories:
+
+| Path | Contents |
+|------|----------|
+| `/usr/bin/pichost-api`, `/usr/bin/pichost-worker` | Binaries |
+| `/usr/share/pichost/` | Static frontend assets (`dist/`), shared install scripts |
+| `/var/lib/pichost/` | Runtime data: DB + `storage-local/` |
+| `/etc/pichost/.env` | Configuration |
+
+`PICHOST_STATIC_DIR` points the API at `/usr/share/pichost/dist`, so no Nginx is required — the API serves the frontend itself. Homebrew uses the same layout under `/usr/local`/`/opt/homebrew`; the winget installer (NSIS) registers a Windows service.
+
+This is intentionally a **fork from `install.sh`'s single-directory layout** (`<INSTALL_DIR>/data/pichost.db` + `storage-local`, default `/opt/pichost`) — both are documented and supported; pick per platform.
 
 ### systemd (bare metal)
 

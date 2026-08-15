@@ -19,4 +19,19 @@ grep -q '0.22.0' "$ROOT/CHANGELOG.md" \
   || { echo "FAIL: CHANGELOG missing 0.22.0"; exit 1; }
 grep -q 'SQLite 优先' "$ROOT/.omo/summary/summary_and_next.md" \
   || { echo "FAIL: summary missing sqlite-first section"; exit 1; }
+# 原生安装包文档断言 (v0.23.0 native packaging)
+grep -q 'apt install pichost' "$ROOT/README.md" \
+  || { echo "FAIL: README missing apt install"; exit 1; }
+grep -q 'brew install pichost' "$ROOT/README.md" \
+  || { echo "FAIL: README missing brew install"; exit 1; }
+grep -q 'winget install PicHost.PicHost' "$ROOT/README.md" \
+  || { echo "FAIL: README missing winget"; exit 1; }
+grep -q 'PICHOST_STATIC_DIR' "$ROOT/README.md" \
+  || { echo "FAIL: README missing static dir config"; exit 1; }
+grep -q '0.23.0' "$ROOT/AGENTS.md" \
+  || { echo "FAIL: AGENTS version not 0.23.0"; exit 1; }
+grep -q 'PICHOST_STATIC_DIR' "$ROOT/AGENTS.md" \
+  || { echo "FAIL: AGENTS missing static dir"; exit 1; }
+grep -q 'packaging/' "$ROOT/AGENTS.md" \
+  || { echo "FAIL: AGENTS missing packaging dir"; exit 1; }
 echo "docs_check_test.sh PASS"

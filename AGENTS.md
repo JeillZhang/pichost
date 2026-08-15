@@ -5,7 +5,7 @@
 - Cargo workspace: `pichost-core`, `pichost-api`, `pichost-worker`.
 - Rust edition 2021, stable toolchain with `rustfmt` + `clippy` (see `rust-toolchain.toml`). No custom fmt/clippy config.
 - Frontend: `web-ui/` — independent npm project (React 19, Vite 8, Tailwind CSS 4, TypeScript 7).
-- Version: `0.22.0` — SQLite-first deployment (single-directory install: DB + storage under `<INSTALL_DIR>/data`, sqlite default mode) + SQLite lite mode (dual DB modes: standard PostgreSQL+Redis / lightweight SQLite with embedded in-process worker, zero external dependencies) + image detail zoom viewer (fullscreen lightbox: wheel/drag/pinch zoom, toolbar + keyboard controls) + responsive layout complete (mobile-first: hamburger nav, category sheet, touch menus, bottom-sheet dialogs, cardified admin tables) + i18n complete (en/zh-CN via i18next + LanguageSwitcher, localized API errors with error codes (`{"error","code"}` envelope + Accept-Language negotiation), deployment language config (`PICHOST_I18N_LANGUAGE` + admin config hot reload).
+- Version: `0.23.0` — Native packaging + software repos (deb/rpm/Homebrew/winget: FHS-layout packages, API static serving via `PICHOST_STATIC_DIR`, apt/rpm repos + Homebrew tap + winget manifest published by release CI) + SQLite-first deployment (single-directory install: DB + storage under `<INSTALL_DIR>/data`, sqlite default mode) + SQLite lite mode (dual DB modes: standard PostgreSQL+Redis / lightweight SQLite with embedded in-process worker, zero external dependencies) + image detail zoom viewer (fullscreen lightbox: wheel/drag/pinch zoom, toolbar + keyboard controls) + responsive layout complete (mobile-first: hamburger nav, category sheet, touch menus, bottom-sheet dialogs, cardified admin tables) + i18n complete (en/zh-CN via i18next + LanguageSwitcher, localized API errors with error codes (`{"error","code"}` envelope + Accept-Language negotiation), deployment language config (`PICHOST_I18N_LANGUAGE` + admin config hot reload).
 
 ## Key Commands
 
@@ -19,6 +19,8 @@
 | Frontend dev | `cd web-ui && npm run dev` | Vite proxies `/api`, `/u` → `localhost:3000` |
 | Frontend build | `cd web-ui && npm run build` | `tsc -b && vite build` |
 | Verify release pkg | `bash scripts/verify-release.sh` | Local simulation of release.yml build→package→install dry-run (2-arg contract, asserts default sqlite mode); run before tagging `v*` |
+| Verify native pkgs | `bash scripts/tests/deb_package_test.sh` + `bash scripts/tests/rpm_package_test.sh` | Assert FHS env generation in `packaging/common/install-lib.sh` (shared by deb postinst / rpm %post) |
+| Verify repo publish | `bash scripts/tests/repo_publish_test.sh` + `bash scripts/tests/release_ci_test.sh` | Syntax checks for `publish-repo.sh`/`setup-repo.sh` + release.yml dual-arch matrix and deb/rpm packaging assertions |
 | Docker stack | `docker compose up --build -d` | Nginx :80, API×2, Worker×2, PG, Redis |
 | Docker stop | `docker compose down` | Add `-v` to wipe volumes |
 
@@ -29,7 +31,7 @@
 - **sqlx queries are runtime-only** (uses `query_as`, `query_scalar` — no `query!` macro). No compile-time DB needed, no `sqlx prepare`.
 - **Migrations auto-apply** at API startup via `sqlx::migrate!()`. Two dirs: `migrations/` (PostgreSQL, 10 files `0001`-`0010`) and `migrations-sqlite/` (SQLite, 11 files `0001`-`0011` — `0011` adds lite state tables `pending_tasks`/`token_blacklist`/`rate_limits`/`invite_codes`). Driver-specific `run_pg_migrations`/`run_sqlite_migrations` pick the right dir.
 - `storage-local/` is gitignored, created at runtime by LocalStorage.
-- **Single-dir install contract** (0.22.0): `install.sh [--yes] [--mode postgres|sqlite] [INSTALL_DIR] [CONFIG_DIR]` (defaults `/opt/pichost` + `/etc/pichost`); **sqlite is the default mode**; DB + storage live under `<INSTALL_DIR>/data/` (`pichost.db` + `storage-local`). `uninstall.sh [--keep-data] [INSTALL_DIR] [CONFIG_DIR]` wipes `data/` by default — use `--keep-data` to preserve.
+- **Single-dir install contract** (0.22.0): `install.sh [--yes] [--mode postgres|sqlite] [INSTALL_DIR] [CONFIG_DIR]` (defaults `/opt/pichost` + `/etc/pichost`); **sqlite is the default mode**; DB + storage live under `<INSTALL_DIR>/data/` (`pichost.db` + `storage-local`). `uninstall.sh [--keep-data] [INSTALL_DIR] [CONFIG_DIR]` wipes `data/` by default — use `--keep-data` to preserve. **Native packages (0.23.0)** diverge to the FHS layout (`/usr/bin` + `/usr/share/pichost` + `/var/lib/pichost` + `/etc/pichost`) — see `packaging/` and the 原生安装包 section.
 - Prerequisites: Rust 1.96+, Node.js 22+. Standard mode: PostgreSQL 18 + Redis 8. Lite mode needs neither.
 
 ## Config System
@@ -48,6 +50,7 @@
   - Rate limit overrides: `PICHOST_RATE_LIMIT_AUTH_MAX`, `PICHOST_RATE_LIMIT_UPLOAD_MAX`, `PICHOST_RATE_LIMIT_GENERAL_MAX`, `PICHOST_RATE_LIMIT_PUBLIC_MAX`
   - `PICHOST_I18N_LANGUAGE` — deployment default UI language (default `"en"`, e.g. `"zh-CN"`)
   - `PICHOST_I18N_LOCALES_DIR` — optional external locale override dir (per-language subdirs, merge-override)
+  - `PICHOST_STATIC_DIR` — static frontend assets dir served by the API (default `./dist`; unset or missing dir → not mounted, e.g. FHS packages point it at `/usr/share/pichost/dist`)
 - **Config separator**: `.env.example` uses `__` double-underscore for nested keys (`PICHOST_AUTH__JWT_SECRET` → `auth.jwt_secret`). Single `_` also works for 2-segment flat keys (`PICHOST_DATABASE_URL` → `database.url`). Docker compose (both `docker-compose.yml` and `docker-compose.prod.yml`) uses single `_`.
 - No `config.toml` in repo — env vars are the intended override mechanism.
 
@@ -143,6 +146,12 @@
 - **Format module**: `web-ui/src/lib/format.ts` + `web-ui/src/hooks/useFormat.ts` — shared locale-aware formatBytes/formatDate/formatNumber (replaced 5 duplicated implementations + hardcoded 'en-US' dates).
 - **API error parsing**: `web-ui/src/api/errors.ts` (getErrorCode/isErrorCode); `client.ts` beforeError hook sets `error.message` from backend localized body + attaches code.
 
+### 原生安装包 (Native packaging)
+- `packaging/` 目录: `common/install-lib.sh` (共享 FHS env 生成, deb postinst / rpm %post 共用), `deb/` (postinst/postrm/prerm), `rpm/` (postinstall/postuninstall/preuninstall), `windows/installer.nsi` (NSIS 安装器, 注册 Windows 服务), `homebrew/pichost.rb.tpl` (tap formula 模板), `winget/manifest.yaml` (winget 清单)。
+- **deb/rpm 采用 FHS 布局**: `/usr/bin/pichost-api|worker` + `/usr/share/pichost` (静态资源 dist + 共享脚本) + `/var/lib/pichost` (运行时 data) + `/etc/pichost/.env`; 与 `install.sh` 单目录布局 (`/opt/pichost/data`) 分叉, 各自文档化。安装时经 `PICHOST_STATIC_DIR=/usr/share/pichost/dist` 由 API 自托管前端 (无 Nginx)。
+- Homebrew formula (从 `pichost.rb.tpl` 渲染) 服务化 via `brew services`; winget 包对应 NSIS 安装器, 由 `.github/workflows/winget.yml` 提交 `winget-pkgs`。
+- 仓库发布: `scripts/setup-repo.sh` (用户侧添加 apt/rpm 源) + `scripts/publish-repo.sh` (CI 侧构建 repo 元数据) → `jeillzhang/pichost-repo` (gh-pages); release.yml `publish-repo` job 同时更新 Homebrew tap。
+
 ### Deployment
 - Nginx :80 → API upstream `least_conn` (2 replicas).
 - Worker: 2 replicas, independent Redis `BRPOP` consumers.
@@ -150,7 +159,7 @@
 - Postgres/Redis ports not exposed to host — internal Docker network only.
 - Two compose files: `docker-compose.yml` (local dev/S3) and `docker-compose.prod.yml` (production S3, `.env`-driven).
 - Bare-metal packaging: `scripts/pichost-api.service` + `scripts/pichost-worker.service` (systemd, `User=pichost`, `EnvironmentFile=/etc/pichost/.env`), install/uninstall via `scripts/install.sh` / `scripts/uninstall.sh`. `install.sh` signature: `install.sh [--yes] [--mode postgres|sqlite] [INSTALL_DIR] [CONFIG_DIR]` (defaults `/opt/pichost` + `/etc/pichost`, **sqlite default mode** — interactive prompt recommends SQLite, `--yes`/non-tty → sqlite). DB + storage are single-directory under the install dir: `<INSTALL_DIR>/data/pichost.db` + `<INSTALL_DIR>/data/storage-local` (`PICHOST_STORAGE_LOCAL_BASE_PATH`); sqlite mode skips the postgresql/redis dependency checks, installs no `pichost-worker.service` — zero external deps. `uninstall.sh [--keep-data] [INSTALL_DIR] [CONFIG_DIR]` wipes `INSTALL_DIR` (incl. `data/`) by default, `--keep-data` preserves data. Pre-tag verification: `scripts/verify-release.sh` (local mirror of release.yml build→package→install dry-run with the 2-arg contract; asserts default sqlite mode).
-- CI: `.github/workflows/smoke-test.yml` — PR to `main` → full API integration suite (`cargo test --workspace -- --include-ignored`, ~675 tests) against PG+Redis+MinIO service containers + clippy gate. `.github/workflows/release.yml` — `v*` tags → build x86_64-unknown-linux-gnu, test + clippy, package `.tar.gz`; `-rc/-beta/-alpha/-pre` tag suffixes or manual dispatch mark the release as draft/pre-release. `.github/workflows/e2e.yml` — Playwright E2E (73 specs), PG+Redis service containers. Release body links `CHANGELOG.md` (Keep a Changelog format, updated per release).
+- CI: `.github/workflows/smoke-test.yml` — PR to `main` → full API integration suite (`cargo test --workspace -- --include-ignored`, ~675 tests) against PG+Redis+MinIO service containers + clippy gate. `.github/workflows/release.yml` — `v*` tags → **dual-arch matrix** (x86_64 + arm64), test + clippy, package `.tar.gz` + `deb` (cargo-deb) + `rpm` (cargo-generate-rpm); `publish-repo` job publishes apt/rpm repos to `jeillzhang/pichost-repo` (gh-pages) via `scripts/publish-repo.sh` and updates the Homebrew tap (`jeillzhang/homebrew-tap`, formula from `packaging/homebrew/pichost.rb.tpl`); `-rc/-beta/-alpha/-pre` tag suffixes or manual dispatch mark the release as draft/pre-release. `.github/workflows/winget.yml` — submits `packaging/winget/manifest.yaml` to the winget-pkgs repo on release. `.github/workflows/e2e.yml` — Playwright E2E (73 specs), PG+Redis service containers. Release body links `CHANGELOG.md` (Keep a Changelog format, updated per release).
 
 ## API Endpoints Summary
 
