@@ -8,6 +8,7 @@ pub mod middleware;
 pub mod routes;
 pub mod service;
 pub mod services;
+pub mod setup;
 
 use pichost_core::config::load_config;
 use pichost_core::i18n::{I18n, Language};
