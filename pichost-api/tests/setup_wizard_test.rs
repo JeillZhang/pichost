@@ -1,6 +1,8 @@
 use pichost_api::setup::admin::create_admin_flow;
 use pichost_api::setup::prompts::{MockPrompts, MockReply};
-use pichost_api::setup::{choose_language, decide_tty, run_wizard, should_run_wizard, TtyDecision};
+use pichost_api::setup::{
+    choose_language, decide_tty, maybe_run, run_wizard, should_run_wizard, TtyDecision,
+};
 use pichost_api::services::user_ops;
 use pichost_core::config::AppConfig;
 use pichost_core::db::{create_sqlite_pool, run_sqlite_migrations};
@@ -124,4 +126,27 @@ async fn create_admin_flow_reprompts_on_conflict() {
         .await
         .unwrap();
     assert_eq!(fresh, 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn maybe_run_non_tty_first_run_skips() {
+    let pool = sqlite_pool().await;
+    let result = maybe_run(&pool, &base_config(), false).await.unwrap();
+    assert!(result.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn maybe_run_forced_non_tty_errors() {
+    let pool = sqlite_pool().await;
+    let err = maybe_run(&pool, &base_config(), true).await.unwrap_err();
+    assert!(err.to_string().contains("interactive terminal"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn maybe_run_existing_users_short_circuits() {
+    let pool = sqlite_pool().await;
+    let hash = user_ops::hash_password("password123").unwrap();
+    user_ops::insert_user(&pool, "someone", &None, &hash, false, None).await.unwrap();
+    let result = maybe_run(&pool, &base_config(), false).await.unwrap();
+    assert!(result.is_none());
 }
