@@ -48,7 +48,7 @@ jobs:
         run: cd web-ui && npm ci && npm run build
       - name: Install Zig
         if: matrix.arch == 'arm64'
-        uses: mlugg/setup-zig@v1
+        uses: mlugg/setup-zig@v2
       - name: Build backend
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
