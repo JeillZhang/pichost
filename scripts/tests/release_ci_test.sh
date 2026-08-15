@@ -32,9 +32,11 @@ grep -q -- '--help' "$FML" || { echo "FAIL: formula test missing"; exit 1; }
 grep -q 'windows-latest' "$WF" || { echo "FAIL: windows runner missing"; exit 1; }
 grep -q 'x86_64-pc-windows-msvc' "$WF" || { echo "FAIL: windows target missing"; exit 1; }
 grep -q 'makensis' "$WF" || { echo "FAIL: makensis missing"; exit 1; }
+grep -q -- '-NOCD' "$WF" || { echo "FAIL: makensis -NOCD missing"; exit 1; }
 grep -q 'PicHost-setup' "$WF" || { echo "FAIL: installer artifact missing"; exit 1; }
 NSI="$ROOT/packaging/windows/installer.nsi"
 grep -q 'PROGRAMFILES64' "$NSI" || { echo "FAIL: nsi install dir missing"; exit 1; }
+grep -q 'ifndef INSTALLER_VERSION' "$NSI" || { echo "FAIL: nsi version define not guarded"; exit 1; }
 grep -q -- '--install-service' "$NSI" || { echo "FAIL: nsi install-service missing"; exit 1; }
 grep -q -- '--uninstall-service' "$NSI" || { echo "FAIL: nsi uninstall-service missing"; exit 1; }
 grep -q 'ProgramData' "$NSI" || { echo "FAIL: nsi data retention missing"; exit 1; }

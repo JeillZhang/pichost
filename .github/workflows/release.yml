@@ -153,8 +153,7 @@ jobs:
           xcopy web-ui\dist staging\dist\ /E /I /Y
           xcopy migrations staging\migrations\ /E /I /Y
           xcopy migrations-sqlite staging\migrations-sqlite\ /E /I /Y
-          makensis /DINSTALLER_VERSION=${{ github.ref_name }} \
-            /DstagingDir=staging packaging\windows\installer.nsi
+          makensis -NOCD /DINSTALLER_VERSION=${{ github.ref_name }} /DstagingDir=staging packaging\windows\installer.nsi
       - uses: actions/upload-artifact@v4
         with:
           name: pichost-windows

@@ -2,7 +2,9 @@
 !include "LogicLib.nsh"
 
 !define APP_NAME "PicHost"
-!define INSTALLER_VERSION "0.0.0" ; CI 以 -DINSTALLER_VERSION=v0.23.0 覆写
+!ifndef INSTALLER_VERSION
+  !define INSTALLER_VERSION "0.0.0" ; CI 以 -DINSTALLER_VERSION=v0.23.0 覆写
+!endif
 !ifndef stagingDir
   !define stagingDir "." ; 未传 -DstagingDir 时以 makensis 工作目录为基准
 !endif
