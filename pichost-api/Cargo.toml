@@ -70,4 +70,4 @@ assets = [
     ["../scripts/pichost-api.service", "lib/systemd/system/", "644"],
     ["../scripts/pichost-worker.service", "lib/systemd/system/", "644"],
 ]
-maintainer-scripts = "packaging/deb"
+maintainer-scripts = "../packaging/deb"

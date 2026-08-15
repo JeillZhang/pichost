@@ -60,7 +60,7 @@ grep -q 'upgrade' "$ROOT/packaging/deb/postrm" \
 # ⑦ cargo-deb 元数据断言
 grep -q '\[package.metadata.deb\]' "$ROOT/pichost-api/Cargo.toml" \
   || { echo "FAIL: deb metadata missing"; exit 1; }
-grep -q 'maintainer-scripts = "packaging/deb"' "$ROOT/pichost-api/Cargo.toml" \
+grep -q 'maintainer-scripts = "../packaging/deb"' "$ROOT/pichost-api/Cargo.toml" \
   || { echo "FAIL: maintainer-scripts missing"; exit 1; }
 grep -q 'web-ui/dist' "$ROOT/pichost-api/Cargo.toml" \
   || { echo "FAIL: web-ui asset missing"; exit 1; }
