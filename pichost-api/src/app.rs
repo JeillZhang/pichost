@@ -617,8 +617,7 @@ where
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
 {
-    let config = state.config.clone();
-    let router = Router::new()
+    Router::new()
         .nest("/api/v1/auth", auth_routes(state.clone()))
         .nest("/api/v1/images", upload_routes(state.clone()))
         .nest("/api/v1/images", image_routes(state.clone()))
@@ -634,9 +633,7 @@ where
         ))
         .layer(CorsLayer::permissive())
         .layer(DefaultBodyLimit::max(52_428_800))
-        .with_state(state);
-    let static_dir = resolve_static_dir(&config);
-    mount_static_fallback(router, &static_dir)
+        .with_state(state)
 }
 
 /// 挂载 SPA 静态服务:目录存在时 ServeDir + index.html fallback;否则原样返回(≤50 行)
@@ -740,7 +737,10 @@ where
     Option<i32>: for<'q> sqlx::Encode<'q, DB> + for<'r> sqlx::Decode<'r, DB> + sqlx::Type<DB>,
     for<'a, 'q> sqlx::types::Json<&'a serde_json::Value>: sqlx::Encode<'q, DB>,
 {
-    setup_security_headers(build_router(state))
+    let router = build_router(state.clone());
+    let router = setup_security_headers(router);
+    let static_dir = resolve_static_dir(&state.config);
+    mount_static_fallback(router, &static_dir)
 }
 
 /// Per-mode application runner. The Postgres branch wires the Redis
