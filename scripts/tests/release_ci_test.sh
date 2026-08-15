@@ -45,6 +45,7 @@ grep -q 'RequestExecutionLevel' "$NSI" || { echo "FAIL: nsi admin missing"; exit
 # publish-repo job 与 tap 更新断言
 grep -q 'publish-repo' "$WF" || { echo "FAIL: publish job missing"; exit 1; }
 grep -q 'APT_GPG_PRIVATE_KEY' "$WF" || { echo "FAIL: gpg secret missing"; exit 1; }
+grep -q 'id: import-gpg' "$WF" || { echo "FAIL: gpg import step id missing"; exit 1; }
 grep -q 'publish-repo.sh' "$WF" || { echo "FAIL: publish script call missing"; exit 1; }
 grep -q 'peaceiris/actions-gh-pages' "$WF" || { echo "FAIL: pages action missing"; exit 1; }
 grep -q 'jeillzhang/pichost-repo' "$WF" || { echo "FAIL: pages repo missing"; exit 1; }

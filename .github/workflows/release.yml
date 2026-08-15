@@ -170,6 +170,7 @@ jobs:
       - name: Install repo tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq dpkg-dev createrepo-c gnupg2
       - name: Import GPG signing key
+        id: import-gpg
         uses: crazy-max/ghaction-import-gpg@v6
         with:
           gpg_private_key: ${{ secrets.APT_GPG_PRIVATE_KEY }}
