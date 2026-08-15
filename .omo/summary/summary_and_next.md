@@ -1,5 +1,14 @@
 # PicHost 项目进度
 
+## 内置 SQLite 优先部署(单目录安装)✅ (本次完成)
+
+- **单目录契约**: install.sh 删除 DATA_DIR 位置参数,DB 与 storage 落入 `$INSTALL_DIR/data/`(`data/pichost.db` + `data/storage-local`),安装/卸载/权限管理单一目录
+- **默认模式反转**: install.sh 无 --mode 时默认 sqlite(交互菜单 SQLite 推荐);`.env.example` 默认 sqlite;应用层 DatabaseMode 默认保持 postgres(Docker/CI 零变化)
+- **卸载策略**: uninstall.sh 默认清除含 data/ 的 INSTALL_DIR(tty 确认),`--keep-data` 保留数据
+- **verify-release.sh**: dry-run 双位置参数 + 默认 sqlite 断言
+- **验证**: install_test/uninstall_test/verify_release_test/version_check_test/docs_check_test 全 PASS;`cargo test --workspace` 零回归(无 Rust 变更)
+- **版本**: 0.21.0 → 0.22.0
+
 ## 图片详情页缩放查看器 ✅ (本次完成)
 - **useImageZoom hook**: 纯 zoom/pan 状态管理 (scale/offset, 锚点缩放数学, 范围/平移钳制), 9 个 TDD 单元测试
 - **ImageViewer 组件**: 全屏灯箱 (useOverlay 遮罩 + Pointer Events 手势 — 滚轮/拖拽/双击/双指缩放 + 玻璃质感工具栏), 9 个测试

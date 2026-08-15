@@ -2,10 +2,9 @@
 # install.sh — PicHost bare-metal installer (interactive)
 #
 # 用法:
-#   install.sh [--yes] [--mode postgres|sqlite] [INSTALL_DIR] [DATA_DIR] [CONFIG_DIR]
-#   --yes                无人值守：跳过所有交互提问（--mode 缺省时自动检测）
-#   --mode postgres|sqlite  强制指定数据库模式（缺省自动检测：有 pg_isready → postgres）
-#   INSTALL_DIR/DATA_DIR/CONFIG_DIR 安装路径（默认 /opt/pichost /var/lib/pichost /etc/pichost）
+#   install.sh [--yes] [--mode postgres|sqlite] [INSTALL_DIR] [CONFIG_DIR]
+#   INSTALL_DIR 软件目录（默认 /opt/pichost）;CONFIG_DIR 配置目录（默认 /etc/pichost）;
+#   DB/storage 位于 $INSTALL_DIR/data/ 下,SQLite 为默认推荐模式
 #
 # 无参数运行时保持原有安装行为，仅新增缺失依赖的交互引导（tty 且未 --yes 时）。
 # SQLite 模式：零外部依赖（内嵌 worker），.env 使用 sqlite://，systemd 单元去掉
@@ -15,16 +14,15 @@ set -euo pipefail
 ASSUME_YES=0
 MODE=""
 INSTALL_DIR="/opt/pichost"
-DATA_DIR="/var/lib/pichost"
 CONFIG_DIR="/etc/pichost"
 
 usage() {
-    echo "Usage: $0 [--yes] [--mode postgres|sqlite] [INSTALL_DIR] [DATA_DIR] [CONFIG_DIR]"
-    echo "  --yes                  unattended install (skip prompts)"
-    echo "  --mode postgres|sqlite force database mode (default: auto-detect)"
+    echo "Usage: $0 [--yes] [--mode postgres|sqlite] [INSTALL_DIR] [CONFIG_DIR]"
+    echo "  --yes                  unattended install (skip prompts; default mode: sqlite)"
+    echo "  --mode postgres|sqlite force database mode (default: sqlite)"
 }
 
-# --- 参数解析（保持原有位置参数契约） ---
+# --- 参数解析（单目录契约：INSTALL_DIR + CONFIG_DIR） ---
 POS=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -42,13 +40,15 @@ while [ $# -gt 0 ]; do
             POS=$((POS + 1))
             case "$POS" in
                 1) INSTALL_DIR="$1" ;;
-                2) DATA_DIR="$1" ;;
-                3) CONFIG_DIR="$1" ;;
+                2) CONFIG_DIR="$1" ;;
                 *) echo "error: too many positional arguments: $1"; usage; exit 1 ;;
             esac ;;
     esac
     shift
 done
+
+# DB/storage 位于软件目录 data/ 子目录（单目录契约）
+DB_DIR="$INSTALL_DIR/data"
 
 PKG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="${PICHOST_VERSION:-$(basename "$PKG_DIR" | sed -nE 's/^pichost-v([0-9]+\.[0-9]+\.[0-9]+)-.*$/\1/p')}"
@@ -69,35 +69,34 @@ apt_install() {
     apt-get install -y "$@"
 }
 
-# 模式解析：--mode 未指定时自动检测；无 PG 时交互引导（非 tty / --yes 默认 SQLite）
+# 模式解析:--mode 未指定时 sqlite 优先;tty 交互菜单(SQLite 推荐 / PostgreSQL 可选)
 resolve_mode() {
     [ -n "$MODE" ] && return
-    if has_pg; then
-        MODE="postgres"
-        return
-    fi
     if [ "$ASSUME_YES" -eq 1 ] || ! is_tty; then
-        echo ">> WARNING: PostgreSQL not detected (pg_isready missing); defaulting to SQLite mode"
-        MODE="sqlite"
-        return
+        MODE="sqlite"; return
     fi
     while true; do
-        echo ">> PostgreSQL 未检测到 (需要 pg_isready)"
-        echo "   [1] 自动安装 PostgreSQL (apt, 仅 Debian/Ubuntu)"
-        echo "   [2] 改用 SQLite 模式 (零依赖, 推荐轻量)"
-        echo "   [3] 手动安装后重跑"
-        if ! read -r -p "请选择 [1/2/3]: " ans; then
+        echo ">> 选择数据库模式:"
+        echo "   [1] SQLite (推荐, 零外部依赖, 内嵌 worker)"
+        echo "   [2] PostgreSQL (标准模式, 需 PG + Redis)"
+        if ! read -r -p "请选择 [1/2]: " ans; then
             echo; echo ">> 输入已结束，退出"; exit 1
         fi
         case "$ans" in
-            1)
-                apt_install postgresql postgresql-client
-                if command -v systemctl >/dev/null 2>&1; then
-                    systemctl enable --now postgresql >/dev/null 2>&1 || true
-                fi
-                MODE="postgres"; break ;;
-            2) MODE="sqlite"; break ;;
-            3) echo ">> 请手动安装 PostgreSQL 后重新运行 install.sh"; exit 1 ;;
+            1) MODE="sqlite"; break ;;
+            2) MODE="postgres"
+               if ! has_pg; then
+                   echo ">> PostgreSQL 未检测到"
+                   echo "   [1] apt 自动安装 [2] 手动安装后重跑"
+                   read -r -p "请选择 [1/2]: " p2 || { echo; exit 1; }
+                   case "$p2" in
+                       1) apt_install postgresql postgresql-client
+                          command -v systemctl >/dev/null 2>&1 && \
+                            systemctl enable --now postgresql >/dev/null 2>&1 || true ;;
+                       *) echo ">> 请手动安装 PostgreSQL 后重新运行"; exit 1 ;;
+                   esac
+               fi
+               break ;;
             *) echo ">> 无效选择: $ans" ;;
         esac
     done
@@ -143,17 +142,25 @@ generate_env() {
             -e '/^PICHOST_DATABASE_URL=/d' \
             -e '/^PICHOST_REDIS_URL=/d' "$env_file"
         {
-            printf '# SQLite 模式: 零外部依赖 (内嵌 worker)\n'
+            printf '# SQLite 模式: 零外部依赖 (内嵌 worker, 默认推荐)\n'
             printf 'PICHOST_DATABASE_MODE=sqlite\n'
-            printf 'PICHOST_DATABASE_URL="sqlite://%s/pichost.db"\n' "$DATA_DIR"
+            printf 'PICHOST_DATABASE_URL="sqlite://%s/pichost.db"\n' "$DB_DIR"
         } >> "$env_file"
-        echo ">> SQLite mode configured: $DATA_DIR/pichost.db"
+        echo ">> SQLite mode configured: $DB_DIR/pichost.db"
     else
-        sed -i '/^PICHOST_DATABASE_MODE=/d' "$env_file"
-        printf 'PICHOST_DATABASE_MODE=postgres\n' >> "$env_file"
+        sed -i -e '/^PICHOST_DATABASE_MODE=/d' \
+            -e '/^PICHOST_DATABASE_URL=/d' \
+            -e '/^PICHOST_REDIS_URL=/d' "$env_file"
+        {
+            printf 'PICHOST_DATABASE_MODE=postgres\n'
+            printf '# PICHOST_DATABASE_URL=postgresql://user:password@localhost:5432/pichost\n'
+        } >> "$env_file"
         echo ">> PostgreSQL mode configured (edit $env_file for credentials)"
     fi
-    # .env holds secrets (JWT secret, DB credentials) — restrict to owner
+    # storage 路径双模式统一(去重后追加;单/双下划线变体都清理)
+    sed -i -e '/^PICHOST_STORAGE_LOCAL_BASE_PATH=/d' \
+        -e '/^PICHOST_STORAGE__LOCAL_BASE_PATH=/d' "$env_file"
+    printf 'PICHOST_STORAGE__LOCAL_BASE_PATH="%s/storage-local"\n' "$DB_DIR" >> "$env_file"
     chmod 600 "$env_file"
 }
 
@@ -171,7 +178,7 @@ ensure_jwt_secret() {
     if command -v openssl >/dev/null 2>&1; then
         new_secret="$(openssl rand -hex 32)"
     else
-        new_secret="$(tr -dc 'a-f0-9' < /dev/urandom | head -c 64)"
+        new_secret="$(tr -dc 'a-f0-9' < /dev/urandom | head -c 64 || true)"
     fi
     if [ -n "$secret" ]; then
         echo ">> WARNING: PICHOST_AUTH_JWT_SECRET ($((${#secret})) chars) is too short (<32); replacing it"
@@ -179,7 +186,7 @@ ensure_jwt_secret() {
         echo ">> PICHOST_AUTH_JWT_SECRET missing; generating a random secret"
     fi
     sed -i -e '/^PICHOST_AUTH_JWT_SECRET=/d' -e '/^PICHOST_AUTH__JWT_SECRET=/d' "$env_file"
-    printf 'PICHOST_AUTH_JWT_SECRET=%s\n' "$new_secret" >> "$env_file"
+    printf 'PICHOST_AUTH__JWT_SECRET=%s\n' "$new_secret" >> "$env_file"
     chmod 600 "$env_file"
     echo ">> Generated PICHOST_AUTH_JWT_SECRET written to $env_file"
 }
@@ -191,8 +198,8 @@ create_user_and_perms() {
         useradd --system --home "$INSTALL_DIR" pichost
         echo ">> Created system user 'pichost'"
     fi
-    chown -R pichost:pichost "$INSTALL_DIR" "$DATA_DIR" "$CONFIG_DIR"
-    echo ">> Ownership set: pichost:pichost on $INSTALL_DIR $DATA_DIR $CONFIG_DIR"
+    chown -R pichost:pichost "$INSTALL_DIR" "$CONFIG_DIR"
+    echo ">> Ownership set: pichost:pichost on $INSTALL_DIR $CONFIG_DIR"
 }
 
 # --- systemd 单元生成（模板 sed 条件化；SQLite 去掉 postgresql/redis 依赖、不装 worker） ---
@@ -236,8 +243,8 @@ echo "PicHost v${VERSION} installing..."
 resolve_mode
 check_redis
 
-# 1. Create directory structure
-mkdir -p "$INSTALL_DIR" "$DATA_DIR" "$CONFIG_DIR"
+# 1. Create directory structure (data/ under INSTALL_DIR)
+mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$DB_DIR"
 
 # 2. Copy binaries
 cp pichost-api pichost-worker "$INSTALL_DIR/"
