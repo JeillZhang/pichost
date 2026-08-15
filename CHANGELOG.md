@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Versions before 0.7.0 are not documented here.
 
+## [0.23.0] - 2026-08-15
+
+### Added
+
+- Native packages: .deb (amd64/arm64), .rpm (x86_64/aarch64), Windows NSIS installer, macOS universal2 tarball
+- Self-hosted apt + rpm repositories at jeillzhang.github.io/pichost-repo (gpg-signed, one-line setup script)
+- Homebrew tap formula (brew install pichost + brew services) and winget submission workflow
+- In-API SPA static serving (PICHOST_STATIC_DIR, default ./dist) — packages work without Nginx
+- Windows native service (windows-service crate, --install-service / --service)
+
+### Changed
+
+- release.yml build matrix: linux amd64/arm64 (zigbuild), macOS universal2 (lipo), Windows x86_64; publish-repo job assembles/signs repos and updates the tap
+- deb/rpm packages use FHS layout (/usr/bin, /usr/share/pichost, /var/lib/pichost, /etc/pichost)
+
 ## [0.22.0] - 2026-08-14
 
 ### Added

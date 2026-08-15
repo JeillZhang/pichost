@@ -34,4 +34,9 @@ grep -q 'PICHOST_STATIC_DIR' "$ROOT/AGENTS.md" \
   || { echo "FAIL: AGENTS missing static dir"; exit 1; }
 grep -q 'packaging/' "$ROOT/AGENTS.md" \
   || { echo "FAIL: AGENTS missing packaging dir"; exit 1; }
+# 0.23.0 收尾断言: CHANGELOG 条目 + summary 本次完成小节
+grep -q '0.23.0' "$ROOT/CHANGELOG.md" \
+  || { echo "FAIL: CHANGELOG missing 0.23.0"; exit 1; }
+grep -q '原生安装包' "$ROOT/.omo/summary/summary_and_next.md" \
+  || { echo "FAIL: summary missing phase section"; exit 1; }
 echo "docs_check_test.sh PASS"

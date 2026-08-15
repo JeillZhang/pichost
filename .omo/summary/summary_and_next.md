@@ -1,5 +1,14 @@
 # PicHost 项目进度
 
+## 原生安装包与软件仓库分发 ✅ (本次完成)
+
+- **安装包**: deb (amd64+arm64) / rpm (x86_64+aarch64) / NSIS exe / Homebrew universal2 tarball,release.yml 双架构矩阵 (linux zigbuild、macOS lipo、Windows x86_64)
+- **仓库**: pichost-repo Pages (apt+rpm, gpg 签名,一键 setup-repo.sh) + 个人 Homebrew tap + winget 自动 PR 提交 winget-pkgs
+- **API 静态服务**: `PICHOST_STATIC_DIR` (默认 ./dist) — 安装包自托管前端,无需 Nginx;deb/rpm 走 FHS 布局 (/usr/bin + /usr/share/pichost + /var/lib/pichost + /etc/pichost)
+- **Windows 原生服务**: windows-service crate,`--install-service` / `--service` 注册/运行服务
+- **验证**: cargo test / clippy / npm build / scripts/tests (docs_check/version_check/release_ci/repo_publish/deb_package/rpm_package/verify-release) 全量 PASS
+- **版本**: 0.22.0 → 0.23.0 (Cargo.toml workspace + web-ui/package.json + Cargo.lock 对齐)
+
 ## 内置 SQLite 优先部署(单目录安装)✅ (本次完成)
 
 - **单目录契约**: install.sh 删除 DATA_DIR 位置参数,DB 与 storage 落入 `$INSTALL_DIR/data/`(`data/pichost.db` + `data/storage-local`),安装/卸载/权限管理单一目录
@@ -496,4 +505,4 @@
 | 触屏增强 | CategoryTree 长按手势（当前 ⋯ 按钮已覆盖触屏，长按列为后续增强） | 响应式已落地 |
 | 测试基建 | ~~`config_test::database_mode_parses_sqlite_from_env` env 隔离修复~~ — 已完成 (0433326): `PichostEnvGuard` 全量快照/恢复 `PICHOST_*`，678 pass / 0 fail | 轻量模式已落地 |
 
-当前计划内阶段（P0–P4-I）+ i18n + 响应式布局 + 轻量模式 (SQLite lite mode) 已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划）。
+当前计划内阶段（P0–P4-I）+ i18n + 响应式布局 + 轻量模式 (SQLite lite mode) + 原生安装包与软件仓库分发 (0.23.0) 已全部完成。下一步待定（可根据用户新需求或 README/AGENTS 中记录的已知限制制定新计划，例如首版 `v0.23.0` 发布后验证 apt/rpm/brew/winget 安装链路）。
