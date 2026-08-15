@@ -128,9 +128,40 @@ jobs:
         with:
           name: pichost-darwin-universal
           path: dist/*.tar.gz
+  windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web-ui/package-lock.json
+      - run: cd web-ui && npm ci && npm run build
+      - run: cargo build --release --target x86_64-pc-windows-msvc -p pichost-api -p pichost-worker
+      - name: Install NSIS
+        run: choco install nsis -y
+      - name: Build installer
+        run: |
+          mkdir staging
+          copy target\x86_64-pc-windows-msvc\release\pichost-api.exe staging\
+          copy target\x86_64-pc-windows-msvc\release\pichost-worker.exe staging\
+          xcopy web-ui\dist staging\dist\ /E /I /Y
+          xcopy migrations staging\migrations\ /E /I /Y
+          xcopy migrations-sqlite staging\migrations-sqlite\ /E /I /Y
+          makensis /DINSTALLER_VERSION=${{ github.ref_name }} \
+            /DstagingDir=staging packaging\windows\installer.nsi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pichost-windows
+          path: PicHost-setup-*.exe
   release:
     name: Create Release
-    needs: [build, macos]
+    needs: [build, macos, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -154,11 +185,13 @@ jobs:
             | x86_64 (amd64) | `pichost-${{ github.ref_name }}-amd64.tar.gz` / `.deb` / `.rpm` |
             | aarch64 (arm64) | `pichost-${{ github.ref_name }}-arm64.tar.gz` / `.deb` / `.rpm` |
             | macOS (universal2) | `pichost-${{ github.ref_name }}-darwin-universal.tar.gz` |
+            | Windows (x86_64) | `PicHost-setup-${{ github.ref_name }}.exe` |
             ### Changes
             See [CHANGELOG](https://github.com/JeillZhang/pichost/blob/main/CHANGELOG.md)
           files: |
             pichost-*/dist/*
             pichost-darwin-universal/dist/*.tar.gz
+            pichost-windows/PicHost-setup-*.exe
           # Inputs win when manually dispatched; otherwise derive from the tag name
           draft: ${{ inputs.draft == 'true' || contains(github.ref_name, '-draft') }}
           prerelease: ${{ inputs.prerelease == 'true' || contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-pre') }}
