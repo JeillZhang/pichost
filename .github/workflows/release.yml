@@ -160,6 +160,7 @@ jobs:
         run: choco install nsis -y
       - name: Build installer
         run: |
+          $env:Path += ";C:\Program Files (x86)\NSIS"
           mkdir staging
           copy target\x86_64-pc-windows-msvc\release\pichost-api.exe staging\
           copy target\x86_64-pc-windows-msvc\release\pichost-worker.exe staging\
