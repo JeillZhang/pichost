@@ -260,8 +260,9 @@ jobs:
             ### Changes
             See [CHANGELOG](https://github.com/JeillZhang/pichost/blob/main/CHANGELOG.md)
           files: |
-            pichost-*/dist/*
-            pichost-darwin-universal/dist/*.tar.gz
+            pichost-amd64/*
+            pichost-arm64/*
+            pichost-darwin-universal/*.tar.gz
             pichost-windows/PicHost-setup-*.exe
           # Inputs win when manually dispatched; otherwise derive from the tag name
           draft: ${{ inputs.draft == 'true' || contains(github.ref_name, '-draft') }}
