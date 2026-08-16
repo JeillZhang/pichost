@@ -93,7 +93,7 @@ jobs:
           cd dist && tar czf "${PKG_NAME}.tar.gz" "$PKG_NAME"
           # 原生包(已 build release 二进制;--no-build 复用,不重复编译)
           cd .. && (cd pichost-api && cargo deb --target ${{ matrix.target }} --no-build --output ../dist/pichost.deb)
-          (cd pichost-api && cargo generate-rpm --target ${{ matrix.target }} -o ../dist/pichost.rpm)
+          (cd pichost-api && cargo generate-rpm --target-dir ../target --target ${{ matrix.target }} -o ../dist/pichost.rpm)
           cd dist && mv pichost.deb "pichost-${VERSION}-${{ matrix.arch }}.deb"
           mv pichost.rpm "pichost-${VERSION}-${{ matrix.arch }}.rpm"
           test -f "pichost-${VERSION}-${{ matrix.arch }}.rpm"

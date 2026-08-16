@@ -31,7 +31,6 @@ Function DataRetentionPage
     Pop $0
     ${NSD_CreateCheckBox} 0 0 100% 20u "Keep data in %ProgramData%\PicHost on uninstall"
     Pop $KeepData
-    SetBrandingImage /IMGID=$KeepData
     nsDialogs::Show
 FunctionEnd
 
