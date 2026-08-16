@@ -63,9 +63,10 @@ depends = "$auto"
 assets = [
     ["target/release/pichost-api", "usr/bin/", "755"],
     ["target/release/pichost-worker", "usr/bin/", "755"],
-    ["../web-ui/dist/", "usr/share/pichost/web-ui/"],
-    ["../migrations/", "usr/share/pichost/migrations/"],
-    ["../migrations-sqlite/", "usr/share/pichost/migrations-sqlite/"],
+    ["../web-ui/dist/*", "usr/share/pichost/web-ui/", "644"],
+    ["../web-ui/dist/assets/*", "usr/share/pichost/web-ui/assets/", "644"],
+    ["../migrations/*", "usr/share/pichost/migrations/", "644"],
+    ["../migrations-sqlite/*", "usr/share/pichost/migrations-sqlite/", "644"],
     ["../packaging/common/install-lib.sh", "usr/share/pichost/", "644"],
     ["../scripts/pichost-api.service", "lib/systemd/system/", "644"],
     ["../scripts/pichost-worker.service", "lib/systemd/system/", "644"],
@@ -78,15 +79,16 @@ summary = "Self-hosted image hosting server (SQLite-first)"
 license = "MIT"
 url = "https://github.com/JeillZhang/pichost"
 assets = [
-    ["target/release/pichost-api", "usr/bin/", "755"],
-    ["target/release/pichost-worker", "usr/bin/", "755"],
-    ["../web-ui/dist/", "usr/share/pichost/web-ui/"],
-    ["../migrations/", "usr/share/pichost/migrations/"],
-    ["../migrations-sqlite/", "usr/share/pichost/migrations-sqlite/"],
-    ["../packaging/common/install-lib.sh", "usr/share/pichost/", "644"],
-    ["../scripts/pichost-api.service", "usr/lib/systemd/system/", "644"],
-    ["../scripts/pichost-worker.service", "usr/lib/systemd/system/", "644"],
+    { source = "target/release/pichost-api", dest = "/usr/bin/", mode = "755" },
+    { source = "target/release/pichost-worker", dest = "/usr/bin/", mode = "755" },
+    { source = "../web-ui/dist/*", dest = "/usr/share/pichost/web-ui/", mode = "644" },
+    { source = "../web-ui/dist/assets/*", dest = "/usr/share/pichost/web-ui/assets/", mode = "644" },
+    { source = "../migrations/*", dest = "/usr/share/pichost/migrations/", mode = "644" },
+    { source = "../migrations-sqlite/*", dest = "/usr/share/pichost/migrations-sqlite/", mode = "644" },
+    { source = "../packaging/common/install-lib.sh", dest = "/usr/share/pichost/", mode = "644" },
+    { source = "../scripts/pichost-api.service", dest = "/usr/lib/systemd/system/", mode = "644" },
+    { source = "../scripts/pichost-worker.service", dest = "/usr/lib/systemd/system/", mode = "644" },
 ]
-postinstall_script = "packaging/rpm/postinstall.sh"
-preuninstall_script = "packaging/rpm/preuninstall.sh"
-postuninstall_script = "packaging/rpm/postuninstall.sh"
+post_install_script = "../packaging/rpm/postinstall.sh"
+pre_uninstall_script = "../packaging/rpm/preuninstall.sh"
+post_uninstall_script = "../packaging/rpm/postuninstall.sh"
