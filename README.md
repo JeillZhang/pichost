@@ -2,7 +2,7 @@
 
 Self-hosted image hosting service — multi-user, JWT auth, OAuth login, local/S3 storage, thumbnails, CDN-ready, Prometheus metrics.
 
-**v1.0.0** — First-run setup wizard + native packages & software repos (deb/rpm/exe, apt/rpm/Homebrew/winget)
+**v1.0.0** — First-run setup wizard + native packages (deb/rpm/exe published to GitHub Releases, winget manifest)
 
 ## Stack
 
@@ -46,17 +46,21 @@ The stack runs on **port 80** via Nginx, proxying to 2 API replicas, with 2 back
 
 ## Quick Start (Native packages)
 
-Install from the official software repositories (built on every `v*` release, plus a Windows installer):
+Download the installer for your platform from the latest [GitHub Release](https://github.com/JeillZhang/pichost/releases) (built on every `v*` release):
 
 ```bash
-# Debian / Ubuntu — add the apt repo, then install
-bash <(curl -sL https://jeillzhang.github.io/pichost-repo/setup-repo.sh) && sudo apt install pichost
+# Linux x86_64 / arm64 — release tarball, then run the installer
+tar xzf pichost-<version>-amd64.tar.gz && cd pichost-<version>-amd64
+sudo bash scripts/install.sh [--yes] [--mode postgres|sqlite]
 
-# Fedora / RHEL — same setup script (auto-detects dnf)
-bash <(curl -sL https://jeillzhang.github.io/pichost-repo/setup-repo.sh) && sudo dnf install pichost
+# Debian / Ubuntu — .deb package
+sudo dpkg -i pichost-<version>-amd64.deb
 
-# macOS — Homebrew tap, then start the service
-brew tap jeillzhang/tap && brew install pichost && brew services start pichost
+# Fedora / RHEL — .rpm package
+sudo rpm -i pichost-<version>-x86_64.rpm
+
+# macOS — universal2 tarball (unpack and run ./pichost-api, or see the release notes)
+tar xzf pichost-<version>-darwin-universal.tar.gz
 
 # Windows — winget (NSIS installer registers a Windows service)
 winget install PicHost.PicHost
@@ -293,8 +297,8 @@ All API error responses use `{"error": <localized message>, "code": <error key>}
 - [x] **File rename** — inline rename on ImageDetail, `PATCH /api/v1/images/:id`
 - [x] **Settings UI optimization** — NavBar user dropdown (Settings/Admin/Logout), accordion settings with hash-based section expand
 - [x] **Software packaging** — systemd services, install/uninstall scripts, GitHub Actions release CI (`v*` tags → `.tar.gz`)
-- [x] **Native packaging** — deb/rpm (FHS), macOS Homebrew tap, Windows NSIS installer + winget manifest, API static file serving (`PICHOST_STATIC_DIR`)
-- [x] **Software repositories** — apt/rpm repos (`pichost-repo`), Homebrew tap, winget, published by release CI
+- [x] **Native packaging** — deb/rpm (FHS), macOS universal2 tarball, Windows NSIS installer + winget manifest, API static file serving (`PICHOST_STATIC_DIR`)
+- [x] **Release publishing** — all installers (tar.gz / deb / rpm / exe) attached to GitHub Releases by CI; winget manifest submitted via workflow
 - [x] **System config management** — admin config.toml read/write API, DB/Redis connection tests, backup/restore
 - [x] **Internationalization (i18n)** — English/简体中文 UI switching via i18next + LanguageSwitcher (persisted, ~364 UI strings extracted), typed t() keys
 - [x] **Localized API errors** — all errors return `{"error": localized message, "code": error key}`, Accept-Language negotiation per request
