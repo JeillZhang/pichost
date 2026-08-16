@@ -1,11 +1,7 @@
-use pichost_api::{app, cache, db, run_lite_from_env_forced};
+use pichost_api::{app, cache, cli, db, run_lite_from_env_forced};
 use pichost_core::config::{load_config, DatabaseMode};
 use pichost_core::i18n::{I18n, Language};
 use std::io::IsTerminal;
-
-mod cli;
-#[cfg(windows)]
-mod service;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         other => {
             #[cfg(windows)]
             {
-                crate::service::dispatch_cli(other).await;
+                pichost_api::service::dispatch_cli(other).await;
                 Ok(())
             }
             #[cfg(not(windows))]
